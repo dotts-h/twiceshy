@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>twiceshy — how it works</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1d212b; --fg: #d7dce3;
+    --dim: #8b93a1; --accent: #6ea8fe; --good: #4cc38a; --warn: #e5c07b;
+    --bad: #e06c75; --line: #2a2f3a; --mono: ui-monospace, "JetBrains Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #fafbfc; --panel: #ffffff; --panel2: #f1f4f8; --fg: #23272e;
+      --dim: #5b6066; --accent: #1f6feb; --good: #1a7f4e; --warn: #9a6700;
+      --bad: #c1352e; --line: #d8dee6;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 880px; margin: 0 auto; padding: 3rem 1.5rem 5rem; }
+  h1 { font-size: 2rem; margin: 0 0 .25rem; }
+  h1 .tag { color: var(--dim); font-weight: 400; font-size: 1.1rem; display: block; }
+  h2 { font-size: 1.3rem; margin: 3rem 0 .75rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+  h3 { font-size: 1.05rem; margin: 1.5rem 0 .5rem; }
+  p, li { color: var(--fg); }
+  .dim { color: var(--dim); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, pre { font-family: var(--mono); font-size: .86em; }
+  code { background: var(--panel2); padding: .12em .35em; border-radius: 4px; }
+  pre {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  .pipeline { display: flex; flex-direction: column; gap: .4rem; margin: 1.25rem 0; }
+  .stage {
+    background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent);
+    border-radius: 8px; padding: .7rem 1rem;
+  }
+  .stage b { display: block; }
+  .stage small { color: var(--dim); }
+  .arrow { text-align: center; color: var(--dim); font-size: .9rem; line-height: 1; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .75rem; margin: 1rem 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: .8rem 1rem; }
+  .card h4 { margin: 0 0 .35rem; font-size: .95rem; }
+  .card p { margin: 0; font-size: .9rem; color: var(--dim); }
+  .badge {
+    display: inline-block; font-family: var(--mono); font-size: .72rem; border-radius: 999px;
+    padding: .1rem .55rem; border: 1px solid var(--line); margin-left: .4rem; vertical-align: middle;
+  }
+  .badge.now { color: var(--good); border-color: var(--good); }
+  .badge.later { color: var(--warn); border-color: var(--warn); }
+  .state { font-family: var(--mono); font-size: .85rem; padding: .15rem .6rem; border-radius: 6px; border: 1px solid; }
+  .q { color: var(--warn); border-color: var(--warn); }
+  .v { color: var(--good); border-color: var(--good); }
+  .s { color: var(--dim); border-color: var(--dim); }
+  .lifecycle { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: 1rem 0; }
+  .lifecycle .sep { color: var(--dim); font-size: .85rem; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .92rem; }
+  th, td { text-align: left; padding: .5rem .7rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 600; }
+  .invariant { border-left: 4px solid var(--bad); background: var(--panel); border-radius: 0 8px 8px 0; padding: .7rem 1rem; margin: .6rem 0; }
+  .invariant b { color: var(--bad); }
+  footer { margin-top: 4rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--dim); font-size: .85rem; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>twiceshy<span class="tag">once bitten, twice shy — how it works</span></h1>
+<p class="dim">A self-hosted service that feeds hard-won engineering experience — traps,
+dead-ends, root causes, validated fixes — to LLM coding agents <em>at decision time</em>,
+so they stop repeating known mistakes on autopilot. A private, curated, validated
+StackOverflow that injects itself at the right moment.</p>
+
+<h2>1 · The big picture</h2>
+<p>Everything reduces to one loop: humans (and later, agents) write down what bit them;
+twiceshy indexes it; the next agent that walks toward the same hole gets the lesson
+pushed into its context <em>before</em> it falls in. The whole system state is
+<b>one git repo + one SQLite file</b>.</p>
+
+<div class="pipeline">
+  <div class="stage"><b>Experience records <span class="badge now">source of truth</span></b>
+    <small>Markdown files in git: <code>experience/YYYY/NNNN-slug.md</code> — YAML frontmatter
+    (machine-readable) + narrative body (where the learning lives). Diffable, reviewable, blame-able.</small></div>
+  <div class="arrow">▼ &nbsp;parse + validate (<code>internal/record</code>)</div>
+  <div class="stage"><b>Derived SQLite index <span class="badge now">rebuildable, never authoritative</span></b>
+    <small>One file: a <code>records</code> table (full markdown for retrieval), a
+    <code>fingerprints</code> table (exact-match surface), an <code>applies_to</code> table
+    (stack filter), and an FTS5 full-text table (BM25). Delete it any time;
+    <code>twiceshy index</code> rebuilds it from the records.</small></div>
+  <div class="arrow">▼ &nbsp;retrieval (<code>internal/index</code>)</div>
+  <div class="stage"><b>Search pipeline <span class="badge now">embedding-free hot path</span></b>
+    <small>Fingerprint-exact first, BM25 lexical second; hard cap k≤3; relevance floor
+    below which <em>nothing</em> is returned.</small></div>
+  <div class="arrow">▼ &nbsp;serving (<code>internal/server</code>, <code>cmd/twiceshy</code>)</div>
+  <div class="stage"><b>MCP server over streamable HTTP <span class="badge now">pull channel</span></b>
+    <small>Tools <code>search_experience</code> / <code>get_experience</code>, bearer-token auth.
+    Claude Code connects with <code>claude mcp add --transport http …</code>.</small></div>
+  <div class="arrow">▼ &nbsp;(Phase 2+)</div>
+  <div class="stage" style="border-left-color: var(--warn)"><b>Push channel — trap cards <span class="badge later">Phase 2</span></b>
+    <small>A Claude Code <code>UserPromptSubmit</code>/<code>PreToolUse</code> hook calls a plain
+    HTTP endpoint and injects 1–3 short trap cards via <code>additionalContext</code> — only on
+    high-confidence matches. Deterministic: never "hope the agent asks".</small></div>
+</div>
+
+<h2>2 · The experience record</h2>
+<p>One file = one lesson. The frontmatter is the retrieval surface; the body is the story.
+Format is normative in <code>docs/SCHEMA.md</code> + <code>schema/experience-record.v1.schema.json</code>.</p>
+
+<pre><code>---
+schema_version: 1
+id: exp-0001
+kind: trap            # trap | fix | dead-end | convention | workflow
+status: validated     # quarantined | validated | stale | superseded
+title: "SQLite FTS5 MATCH treats user input as query syntax — …"
+
+symptom:              # what an agent would observe
+  summary: &gt;
+    Passing a raw query string to `… WHERE t MATCH ?` throws
+    fts5: syntax error as soon as the string contains punctuation…
+  error_signatures:   # exact-match surface → fingerprints derived from these
+    - 'fts5: syntax error near "."'
+
+applies_to:           # OSV-style "stack fingerprint": where this is true
+  - ecosystem: "Go"
+    package: "modernc.org/sqlite"
+
+resolution:
+  root_cause: "MATCH's right-hand side is a query language, not a needle…"
+  fix: "tokenize, double embedded quotes, wrap each token in double quotes"
+  dead_ends:          # the part StackOverflow never captures
+    - tried: "escaping with backslashes"
+      why_it_failed: "FTS5 has no backslash escape"
+
+guard:                # executable proof
+  repro: "experience/repro/0001-fts5-raw-match.sh"   # fails pre-fix, passes post-fix
+  guarding_test: "TestSearchQuoteEscapesFTS5Input"   # keeps the fix fixed
+
+provenance:           # trust + bi-temporal validity
+  source: { author: "horia", session: null, pr: null }
+  recorded_at: 2026-06-12
+  valid: { from: 2026-06-12, until: null }
+  superseded_by: null  # supersede, never delete
+---
+
+## The trap
+…narrative: why it happens, the escape, the scope…</code></pre>
+
+<h3>Lifecycle: supersede, never delete</h3>
+<div class="lifecycle">
+  <span class="state q">quarantined</span>
+  <span class="sep">— sandbox fail-to-pass + human PR review →</span>
+  <span class="state v">validated</span>
+  <span class="sep">→</span>
+  <span class="state s">stale</span>
+  <span class="sep">or</span>
+  <span class="state s">superseded</span>
+</div>
+<p class="dim">Agent-proposed records are born quarantined and <b>never enter the push channel</b>
+(memory-poisoning defense: &lt;0.1% poisoned store ⇒ ≥80% attack success in the literature).
+Promotion is a pull request — git is the trust boundary. A record never disappears: its
+validity interval is closed and <code>superseded_by</code> links the replacement.</p>
+
+<h2>3 · Retrieval: precedence, cap, floor</h2>
+<p>When a query arrives (an error message, a symptom description), the pipeline runs in
+strict precedence order:</p>
+
+<table>
+  <tr><th></th><th>stage</th><th>how</th><th>why first/second</th></tr>
+  <tr><td>1</td><td><b>Fingerprint-exact</b></td>
+      <td>The query text is normalized (lowercased; UUIDs/addresses/hex/paths/standalone
+      numbers replaced by placeholders) and hashed: <code>sha256("generic\n" + normalized)</code>.
+      Hash equality against fingerprints derived from every record's
+      <code>error_signatures</code> at index time.</td>
+      <td>Deterministic, free, zero false positives — covers "agent looping on a known bug".
+      Two scopes per signature: <b>app</b> (repo-specific) and <b>generic</b> (cross-repo).</td></tr>
+  <tr><td>2</td><td><b>Lexical (BM25/FTS5)</b></td>
+      <td>The query is tokenized and each token is double-quoted before reaching
+      <code>MATCH</code> (untrusted input is FTS5 syntax otherwise — that's literally record
+      <code>exp-0001</code>), joined with OR, ranked by <code>bm25()</code>.</td>
+      <td>Error corpora are identifier-heavy; dense embeddings fail silently on exact
+      identifiers. Note: SQLite's <code>bm25()</code> is <em>negative, lower-is-better</em> —
+      the sign is flipped exactly once at the API boundary (record <code>exp-0002</code>).</td></tr>
+  <tr><td>3</td><td><b>Dense <span class="badge later">later</span></b></td>
+      <td>sqlite-vec + RRF(k=60) fusion, pull-channel only, behind an embedding cache.</td>
+      <td>Deliberately absent from the hot path — see invariants.</td></tr>
+</table>
+
+<p>Both stages are filtered by status (<code>validated</code> only, unless a pull-channel
+caller explicitly asks for labeled quarantined records) and optionally by the
+<b>stack fingerprint</b> (<code>ecosystem</code>/<code>package</code> against <code>applies_to</code>).</p>
+
+<div class="invariant"><b>Invariant — k ≤ 3.</b> Never more than three results, ranked. Context
+is a scarce, fragile resource; more retrieval measurably hurts.</div>
+<div class="invariant"><b>Invariant — relevance floor.</b> Below the floor, <em>nothing</em> is
+returned for injection. Near-miss injection (related-but-wrong record) is the #1 failure mode:
+one plausible-but-wrong document hurts agents more than random noise. Returning nothing is a feature.</div>
+<div class="invariant"><b>Invariant — embedding-free hot path.</b> The hook-lookup path is
+fingerprint + lexical only, structurally (separate code paths), so ~1000 agents can poll it
+continuously on a NAS.</div>
+
+<h2>4 · Serving: the three channels</h2>
+<div class="cols">
+  <div class="card"><h4>Pull — MCP tools <span class="badge now">built</span></h4>
+    <p><code>search_experience</code> (query + optional ecosystem/package filter → ≤3 hits with
+    ids, scores, match kind) and <code>get_experience</code> (id → full record markdown).
+    Streamable HTTP — the deprecated HTTP+SSE transport is itself record <code>exp-0003</code>.
+    Constant-time bearer auth; no unauthenticated mode.</p></div>
+  <div class="card"><h4>Push — hooks <span class="badge later">Phase 2</span></h4>
+    <p>Claude Code hooks call a plain HTTP endpoint per turn; high-confidence matches come back
+    as 1–3 trap cards injected via <code>additionalContext</code>. This is what interrupts
+    autopilot at the moment it matters — the evidence says models don't call memory tools
+    unprompted.</p></div>
+  <div class="card"><h4>Index — ambient awareness <span class="badge later">Phase 2+</span></h4>
+    <p>Generated skill / AGENTS.md one-liners so the model knows the store exists and what
+    categories it holds.</p></div>
+</div>
+
+<h3>Running it</h3>
+<pre><code># rebuild the derived index from the records
+twiceshy index -corpus . -db twiceshy.db
+
+# serve the MCP pull channel (rebuilds the index on start)
+TWICESHY_TOKEN=… twiceshy serve -corpus . -db twiceshy.db -addr :8722
+
+# connect Claude Code
+claude mcp add --transport http twiceshy https://nas.tailnet.ts.net/ \
+  --header "Authorization: Bearer …"</code></pre>
+
+<h2>5 · Keeping it honest: doctors &amp; evals <span class="badge later">Phases 4–5</span></h2>
+<table>
+  <tr><th>doctor</th><th>job</th></tr>
+  <tr><td><b>D1 dedup/reconcile</b></td><td>new candidate vs top-k similar → LLM arbitrates ADD / UPDATE / SUPERSEDE / NOOP. Delta-updates only — never whole-store rewrites.</td></tr>
+  <tr><td><b>D2 staleness</b></td><td>cross-check <code>applies_to</code> against live versions/docs. A stale store is worse than none — it becomes the outdated-context prompt.</td></tr>
+  <tr><td><b>D3 revalidation ⭐</b></td><td><em>CI for memories</em> — re-execute every record's repro script in a sandbox on a schedule and on dependency bumps (fail-to-pass discipline). No published system does this.</td></tr>
+  <tr><td><b>D4 lifecycle</b></td><td>reinforce helpful records, decay never-hit ones — archive, never delete (a trap hit once a year may matter most).</td></tr>
+  <tr><td><b>D5 abstraction</b></td><td>induce convention cards from clusters of related episodes.</td></tr>
+</table>
+<p>Phase 5 adds the <b>trap-avoidance eval</b>: for each recorded trap, a task that walks an
+agent toward it, run memory-on vs memory-off, scoring avoidance + steps/tokens. Nobody has
+published such a suite.</p>
+
+<h2>6 · Where everything lives</h2>
+<pre><code>experience/           the corpus (source of truth) + repro/ scripts
+schema/               versioned JSON Schema for the frontmatter
+docs/CONTEXT.md       the ubiquitous language — use these words
+docs/SCHEMA.md        the record format, normative
+docs/CONVENTIONS.md   TDD, dependency budget, security rules
+docs/adr/             ADR-0001 (locked architecture), ADR-0002 (licensing)
+docs/research/        the research deep-dive everything is grounded in
+internal/fingerprint  normalization + sha256 fingerprints
+internal/record       parser + validator
+internal/index        SQLite FTS5 index + search pipeline
+internal/server       MCP streamable-HTTP server, bearer auth
+cmd/twiceshy          the binary: index | serve</code></pre>
+<p class="dim">Quality gates: <code>make ci</code> = golangci-lint + <code>go test -race</code> +
+80% coverage floor. We dogfood: every regression in twiceshy itself ships with a guarding test
+<em>and</em> an experience record — the three records in the corpus today are real traps this
+very codebase has to dodge, and their guarding tests run in this repo's suite.</p>
+
+<footer>twiceshy · AGPL-3.0-only · generated 2026-06-12 ·
+grounded in <code>docs/research/EXPERIENCE_SERVICE_RESEARCH.md</code> and
+<code>docs/adr/ADR-0001-architecture.md</code></footer>
+
+</main>
+</body>
+</html>
