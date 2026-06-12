@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>twiceshy — Platform &amp; Adoption Research</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2d333b;
+    --fg:#e6edf3; --dim:#9da7b3; --accent:#58a6ff; --green:#3fb950;
+    --amber:#d29922; --red:#f85149; --purple:#bc8cff; --pink:#ff7b72;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  .layout{display:flex;max-width:1280px;margin:0 auto}
+  nav{position:sticky;top:0;align-self:flex-start;width:230px;min-width:230px;height:100vh;overflow-y:auto;padding:28px 14px;border-right:1px solid var(--line)}
+  nav h3{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--dim);margin:0 8px 10px}
+  nav a{display:block;padding:5px 8px;border-radius:6px;color:var(--dim);font-size:13.5px}
+  nav a:hover{background:var(--panel);color:var(--fg);text-decoration:none}
+  main{flex:1;padding:40px 48px 90px;min-width:0}
+  h1{font-size:30px;line-height:1.25;margin-bottom:8px}
+  h2{font-size:22px;margin:54px 0 14px;padding-top:14px;border-top:1px solid var(--line)}
+  h2 .n{color:var(--accent);font-family:var(--mono);font-size:15px;margin-right:8px}
+  h3{font-size:16.5px;margin:26px 0 8px}
+  p{margin:10px 0;color:#c9d4de}
+  ul,ol{margin:10px 0 10px 22px;color:#c9d4de} li{margin:5px 0}
+  .sub{color:var(--dim);font-size:14px}
+  code{font-family:var(--mono);font-size:.86em;background:var(--panel2);padding:1.5px 5px;border-radius:5px}
+  .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:99px;margin-right:6px;vertical-align:2px}
+  .pv{background:#12351f;color:var(--green)} .pm{background:#3a2d12;color:var(--amber)} .pn{background:#2a1f3d;color:var(--purple)} .pr{background:#3d1418;color:var(--pink)}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:14px;margin:18px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+  .card .big{font-size:26px;font-weight:700;line-height:1.15}
+  .card .lbl{font-size:13px;color:var(--dim);margin-top:6px}
+  .card.g .big{color:var(--green)} .card.a .big{color:var(--amber)} .card.r .big{color:var(--red)} .card.b .big{color:var(--accent)} .card.p .big{color:var(--purple)}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+  th{text-align:left;color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.06em;padding:9px 12px;border-bottom:2px solid var(--line)}
+  td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top;color:#c9d4de}
+  tr:hover td{background:#13181f}
+  .ok{color:var(--green);font-weight:600} .no{color:var(--red);font-weight:600} .meh{color:var(--amber);font-weight:600}
+  .callout{border-left:4px solid var(--accent);background:var(--panel);border-radius:0 10px 10px 0;padding:14px 18px;margin:18px 0}
+  .callout.warn{border-color:var(--amber)} .callout.bad{border-color:var(--red)} .callout.good{border-color:var(--green)} .callout.nov{border-color:var(--purple)}
+  .callout b.t{display:block;margin-bottom:4px}
+  .flow{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch;margin:18px 0}
+  .step{flex:1;min-width:150px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;position:relative}
+  .step .k{font-family:var(--mono);font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:.08em}
+  .step .t{font-weight:600;font-size:14.5px;margin:3px 0}
+  .step .d{font-size:12.5px;color:var(--dim)}
+  .arrow{align-self:center;color:var(--dim);font-size:20px}
+  .timeline{margin:20px 0}
+  .ph{display:flex;gap:16px;margin:0;padding:0 0 22px 0;position:relative}
+  .ph::before{content:"";position:absolute;left:17px;top:38px;bottom:0;width:2px;background:var(--line)}
+  .ph:last-child::before{display:none}
+  .dot{width:36px;height:36px;min-width:36px;border-radius:50%;background:var(--panel2);border:2px solid var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-family:var(--mono);font-size:13px;color:var(--accent);z-index:1}
+  .ph.nv .dot{border-color:var(--purple);color:var(--purple)}
+  .ph.gn .dot{border-color:var(--green);color:var(--green)}
+  .ph.am .dot{border-color:var(--amber);color:var(--amber)}
+  .ph .pt{font-weight:600} .ph .pd{font-size:13.5px;color:var(--dim)}
+  .schema{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;font-family:var(--mono);font-size:13px;line-height:1.7;overflow-x:auto;margin:16px 0}
+  .schema .f{color:var(--accent)} .schema .c{color:var(--dim)} .schema .s{color:#a5d6ff} .schema .hl{color:var(--green)}
+  footer{margin-top:70px;padding-top:18px;border-top:1px solid var(--line);color:var(--dim);font-size:13px}
+  @media(max-width:900px){nav{display:none}main{padding:28px 20px}}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav>
+  <h3>Contents</h3>
+  <a href="#tldr">§0 · Headline answers</a>
+  <a href="#lit">§1 · Literature delta</a>
+  <a href="#sandbox">§2 · D3 sandbox design</a>
+  <a href="#scale">§3 · Scaling shape</a>
+  <a href="#api">§4 · API surface / RPC</a>
+  <a href="#access">§5 · Access &amp; rate limits</a>
+  <a href="#money">§6 · Monetization</a>
+  <a href="#cookbook">§7 · Cookbook topology</a>
+  <a href="#deltas">§8 · Roadmap deltas</a>
+  <a href="#batches">§9 · Decision batches</a>
+  <a href="#verify">Verification</a>
+</nav>
+<main>
+
+<h1>Platform &amp; Adoption</h1>
+<p class="sub">Hosting · sandboxed revalidation · scaling · access · monetization · the mid-2026 literature delta · 2026-06-12 ·
+5 research angles (~200 sources) + 2 adversarial verifiers over 22 load-bearing claims (20 confirmed, 2 corrected).
+Full cited report: <code>docs/research/PLATFORM_RESEARCH.md</code> · companion to <code>EXPERIENCE_SERVICE_RESEARCH.md</code></p>
+
+<h2 id="tldr"><span class="n">§0</span>Headline answers</h2>
+<div class="callout good">
+<b class="t">Nothing here breaks a locked decision.</b>
+Every finding either confirms ADR-0001/0002 or extends them. The two big course-corrections are conceptual, not architectural:
+"service per language" applies to <b>runners</b>, not the query path — and the MCP spec is about to make statelessness mandatory, so build it stateless <i>now</i>.
+</div>
+<div class="cards">
+  <div class="card g"><div class="big">confirmed</div><div class="lbl">Hosting: one binary + one SQLite file on the NAS; cloud escape = the same image on a €4/mo VM</div></div>
+  <div class="card b"><div class="big">1 index<br>N runners</div><div class="lbl">Scaling: ecosystem is a WHERE clause on the query path, an image on the runner path</div></div>
+  <div class="card p"><div class="big">gVisor</div><div class="lbl">D3 sandbox: one daemon.json line, no-egress, per-ecosystem images, SQLite job queue</div></div>
+  <div class="card a"><div class="big">no gRPC</div><div class="lbl">MCP streamable HTTP + plain HTTP hook is sufficient — but the server must be stateless</div></div>
+  <div class="card b"><div class="big">API keys</div><div class="lbl">First-class in Claude Code / Cursor / VS Code; OAuth only ever for claude.ai-web users</div></div>
+  <div class="card g"><div class="big">$0 → $5/mo</div><div class="lbl">Sponsors now (0% fee, no VAT event) → Polar MoR + license-key API when the paid tier ships</div></div>
+</div>
+
+<h2 id="lit"><span class="n">§1</span>Literature delta (Q4 2025 → June 2026)</h2>
+<p>The locked invariants got independent confirmation; the novelty window is still open but two adjacent papers landed in Q1 2026.</p>
+<table>
+  <tr><th>Finding</th><th>Source</th><th>Effect on twiceshy</th></tr>
+  <tr><td><b>Near-miss injection measurably hurts on real coding tasks</b> — well-selected experience helps, unfiltered context yields "limited or negative benefits" (1,100+376 tasks, 51 repos, 9 langs)</td><td><a href="https://arxiv.org/abs/2602.08316">SWE Context Bench</a> · Feb 2026</td><td><span class="pill pv">validates</span> k≤3 + relevance floor; adopt its related-task pairing for the eval suite</td></tr>
+  <tr><td><b>Poisoned experience stores demonstrated against coding agents</b>; benign-looking artifacts → self-built poisoned store; paper offers no defense</td><td><a href="https://arxiv.org/abs/2512.16962">MemoryGraft</a> · Dec 2025</td><td><span class="pill pv">validates</span> quarantine + repro gate; cite in ADR trail. Also now OWASP <a href="https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/">ASI06</a></td></tr>
+  <tr><td><b>Staleness named the #1 production gap by the market leader</b> — whose own report contains zero discussion of validation or quarantine</td><td><a href="https://mem0.ai/blog/state-of-ai-agent-memory-2026">Mem0 State of 2026</a></td><td><span class="pill pv">validates</span> doctors; the incumbent's silence on validation is the competitive opening</td></tr>
+  <tr><td><b>Itemized incremental records beat LLM-rewritten stores</b> ("context collapse", "brevity bias")</td><td><a href="https://arxiv.org/abs/2510.04618">ACE</a> · ICLR 2026</td><td><span class="pill pv">validates</span> discrete records, supersede-never-delete, delta-only doctors</td></tr>
+  <tr><td><b>"Experiential memory" canonized</b> as a first-class category (47-author survey)</td><td><a href="https://arxiv.org/abs/2512.13564">Memory in the Age of AI Agents</a> · Dec 2025</td><td><span class="pill pm">extends</span> adopt the term in CONTEXT.md as the literature-facing synonym</td></tr>
+  <tr><td><b>Nearest neighbors to "CI for memories": probe-based (GLOVE) and conceptual-only (SSGM)</b> — nobody re-executes repro scripts on a schedule</td><td><a href="https://arxiv.org/abs/2601.19249">GLOVE</a> · <a href="https://arxiv.org/abs/2603.11768">SSGM</a> · Q1 2026</td><td><span class="pill pn">novel — still</span> publish the name + methodology before the window closes</td></tr>
+  <tr><td><b>Every host agent now ships unvalidated auto-memory</b>: Claude Code auto memory (v2.1.59+, official) with community-reported delete-on-contradiction consolidation; Codex Memories (off by default, no EEA)</td><td><a href="https://code.claude.com/docs/en/memory">Claude Code docs</a> · <a href="https://developers.openai.com/codex/memories">Codex</a></td><td><span class="pill pm">repositions</span> the pitch: <b>validated, team-shared, execution-proven</b> vs the agent's private unverified notes</td></tr>
+  <tr><td><b>Letta pivoted to coding</b>: git-backed Context Repositories + memory-first coding agent — no execution-gated validation</td><td><a href="https://www.letta.com/blog/context-repositories/">Letta</a> · Feb 2026</td><td><span class="pill pr">watch</span> closest commercial neighbor; the repro gate is the moat</td></tr>
+  <tr><td><b>Memory pays in cost/turns (−22–32% cost, −28–40% turns on complex tasks), not quality — and hurts on trivial tasks</b> (vendor-run, one system)</td><td><a href="https://medium.com/@mrsandelin/the-first-controlled-benchmark-of-ai-memory-in-coding-agents-8e0bb776d39e">Mar 2026</a></td><td><span class="pill pm">extends</span> sell trap-avoidance + overhead; "inject nothing" on simple tasks is a feature</td></tr>
+</table>
+
+<h2 id="sandbox"><span class="n">§2</span>D3 sandboxed revalidation — the concrete design</h2>
+<p>VT-x confirmed on the Pentium Gold 8505 (<a href="https://www.intel.com/content/www/us/en/products/sku/226262/intel-pentium-gold-processor-8505-8m-cache-up-to-4-40-ghz/specifications.html">Intel ARK</a>) — nothing is ruled out. The constraint is <b>5 weak cores, not 40&nbsp;GB RAM</b>: practical concurrency is 3–4 runs under any tech. Pick on security and ops, not density.</p>
+<table>
+  <tr><th>Technology</th><th>Isolation</th><th>Ops on a NAS</th><th>Verdict</th></tr>
+  <tr><td>runc (plain Docker)</td><td>namespaces + seccomp</td><td>zero</td><td><span class="meh">insufficient alone</span> — Judge0-class judges have public escape CVEs</td></tr>
+  <tr><td><b>gVisor runsc (Systrap)</b></td><td>userspace kernel, no KVM needed</td><td>one <code>daemon.json</code> line</td><td><span class="ok">the pick</span> — 1.3–2× slowdown is irrelevant overnight</td></tr>
+  <tr><td>Firecracker</td><td>microVM (≤125 ms boot, ~5 MiB VMM @ 1 vCPU/128 MiB ref)</td><td>high — no OCI images; rootfs/kernel pipeline</td><td><span class="meh">upgrade path</span>, not the start</td></tr>
+  <tr><td>Kata + Cloud Hypervisor</td><td>microVM, OCI-compatible</td><td>medium-high</td><td><span class="meh">documented fallback</span></td></tr>
+  <tr><td>nsjail / bubblewrap / isolate</td><td>hand-rolled policy</td><td>you own the policy</td><td><span class="no">wrong altitude</span></td></tr>
+  <tr><td>WASI</td><td>—</td><td>—</td><td><span class="no">excluded</span> — toolchains need fork/exec, dynlink, JIT</td></tr>
+</table>
+<div class="callout nov">
+<b class="t">Both agent vendors converged on the same egress pattern.</b>
+Anthropic's <a href="https://github.com/anthropic-experimental/sandbox-runtime">sandbox-runtime</a> (bubblewrap, network namespace removed, egress only via host-side proxy) and
+<a href="https://developers.openai.com/codex/concepts/sandboxing">OpenAI Codex</a> (Landlock + seccomp, sockets blocked).
+They run namespace-class isolation for <i>assistive</i> code; promotion-gating runs on semi-trusted records justify the gVisor step up.
+</div>
+<div class="flow">
+  <div class="step"><div class="k">trigger</div><div class="t">Schedule + dep bumps</div><div class="d">weekly sweep · Renovate-style signals on <code>applies_to</code></div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="k">queue</div><div class="t">SQLite job table</div><div class="d">goqite-style leases · zero new deps · 4 orders of magnitude headroom</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="k">run</div><div class="t">gVisor container</div><div class="d">per-ecosystem image · no egress · proxies only · F2P contract</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="k">verdict</div><div class="t">validated / stale / unverified</div><div class="d">never silent promotion · logs = untrusted input</div></div>
+</div>
+<h3>The checklist (every run)</h3>
+<div class="schema">
+<span class="f">runtime</span>      --runtime=runsc, one ephemeral container per run, never reused
+<span class="f">images</span>       repro-go · repro-node · repro-python · repro-rust · repro-jvm <span class="c">— digest-pinned, weekly rebuilds</span>
+<span class="f">network</span>      --network none <span class="c">(internal proxy net only during fetch: Athens / Verdaccio / devpi)</span>
+<span class="f">limits</span>       --memory 3g --cpus 2 --pids-limit 256 · 10-min wall clock, SIGKILL
+<span class="f">privileges</span>   --cap-drop ALL · no-new-privileges · non-root UID · read-only root + tmpfs workdir · userns-remap
+<span class="f">modes</span>        <span class="hl">pinned</span> (lockfile hash → validated evidence) · <span class="hl">latest</span> (deps floated → staleness probe)
+<span class="f">verdict</span>      requires fail-without-fix <span class="s">AND</span> pass-with-fix <span class="c">(exit 75 = environment skip)</span>
+</div>
+<p><b>Cloud escape hatch (verified pricing):</b> <a href="https://fly.io/docs/about/pricing/">Fly Machines</a> first — same OCI images, ~$0.003–0.03/run;
+<a href="https://modal.com/pricing">Modal</a>'s <b>recurring $30/mo free credit</b> ≈ 10,000 typical runs/month free (confirmed current);
+<a href="https://github.com/e2b-dev/infra">E2B infra</a> (Apache-2.0, self-hostable Firecracker) if microVM snapshots on owned metal ever matter.</p>
+
+<h2 id="scale"><span class="n">§3</span>Scaling shape: one index, many runners</h2>
+<div class="callout">
+<b class="t">The owner's instinct, split in two.</b>
+<b>Query path: one service, one index, forever.</b> Ecosystem is a <code>WHERE</code> clause; splitting per language breaks cross-ecosystem retrieval (a Postgres trap fires in Go <i>and</i> Python repos — the generic fingerprint exists for exactly this) and multiplies ops for a corpus that fits in page cache. Zoekt shards by <i>size</i> (~100 MiB), never language; twiceshy's whole corpus is below one shard.
+<b>Runner path: per-ecosystem workers pulling from a queue</b> — the <a href="https://buildkite.com/docs/agent/v3">Buildkite model</a>: outbound-only polling, no inbound holes, scaled with <code>compose --scale runner-python=3</code>.
+</div>
+<div class="cards">
+  <div class="card b"><div class="big">∞ readers<br>1 writer</div><div class="lbl"><a href="https://www.sqlite.org/wal.html">WAL mode</a>: readers and writer never block each other. One trap: perpetual readers starve checkpoints — keep reads short</div></div>
+  <div class="card g"><div class="big">400–500K<br>req/day</div><div class="lbl">sqlite.org itself, on a sliver of one shared VM — 100–1000 qps of FTS5 point queries is comfortably inside the envelope</div></div>
+  <div class="card a"><div class="big">~2×</div><div class="lbl">zombiezen vs modernc on concurrent reads (<a href="https://github.com/cvilsmeier/go-sqlite-bench">2026 bench</a>) — a driver factor, not an architecture factor. Stay on modernc</div></div>
+  <div class="card p"><div class="big">git pull &amp;&amp;<br>rebuild</div><div class="lbl">A "read replica" is a rebuild from git — no replication infra; Litestream v0.5+ if it's ever needed for real</div></div>
+</div>
+<p><b>Orchestration verdict:</b> plain Docker Compose + Caddy. k3s idles at ~1.6 GB RAM and a slice of a core (<a href="https://docs.k3s.io/reference/resource-profiling">k3s's own profiling</a>) to orchestrate one binary and one file — negative value at one node. Scale GOMAXPROCS-internally before container-count-externally.</p>
+<p><b>Cloud path (post-Hetzner-increase, verified):</b> Hetzner CX23 (2 vCPU/4 GB) <b>€3.99/mo</b> · CAX11 ARM €4.49 · Fly shared-cpu-1x ≈ <b>$2/mo</b> · Cloudflare Containers (GA Apr 2026) only interesting for scale-to-zero <i>runners</i>. Architecture change to migrate: <b>zero</b>.</p>
+<div class="callout warn">
+<b class="t">Conflicting FTS5 anecdotes → measure ours.</b>
+One 2026 paper claims ~1.2 s FTS latency at 5K records (likely their whole pipeline); a PHP-stack benchmark did 840 req/s on 7K docs.
+Resolution: a <b>latency-budget benchmark in <code>make ci</code></b> (FTS5 MATCH + fingerprint p99 on a 1K-record corpus) instead of trusting either.
+</div>
+
+<h2 id="api"><span class="n">§4</span>API surface: no new RPCs — but be stateless <i>now</i></h2>
+<p>No gRPC. MCP streamable HTTP (pull) + plain HTTP (hook push) covers everything; the runner protocol is "poll a queue"; the queue is a SQLite table. The dependency budget survives intact.</p>
+<div class="callout bad">
+<b class="t">Time-sensitive: the MCP 2026-07-28 release candidate removes sessions entirely.</b>
+Stable today is rev 2025-11-25; the <a href="https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/">RC (2026-05-21)</a> removes <code>Mcp-Session-Id</code> and the protocol session (SEP-2567) <b>and</b> the <code>initialize</code> handshake (SEP-2575).
+Sessions are already optional in 2025-11-25 — so: never issue a session ID, return plain JSON, 405 the GET/SSE leg, validate <code>Origin</code> (403 — DNS-rebinding defense), bind the tailnet interface, tokens only in <code>Authorization</code> headers. Any session-shaped work done now is throwaway by spec decree.
+</div>
+
+<h2 id="access"><span class="n">§5</span>Access control &amp; rate limiting</h2>
+<h3>Client auth reality (verified 2026-06-12)</h3>
+<table>
+  <tr><th>Client</th><th>Static API key</th><th>OAuth</th></tr>
+  <tr><td>Claude Code</td><td><span class="ok">✅ first-class</span> — <code>claude mcp add --transport http … --header "Authorization: Bearer …"</code>, <code>${VAR}</code> expansion in <code>.mcp.json</code></td><td>✅</td></tr>
+  <tr><td>Cursor · VS Code/Copilot</td><td><span class="ok">✅ headers supported</span></td><td>✅</td></tr>
+  <tr><td>OpenAI API (Responses MCP tool)</td><td><span class="ok">✅ <code>authorization</code> param</span></td><td>—</td></tr>
+  <tr><td>claude.ai web connectors</td><td><span class="no">❌ OAuth only</span> (<a href="https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp">no header field</a>)</td><td>✅</td></tr>
+</table>
+<p>MCP auth is <b>OPTIONAL</b> in the spec — static bearer over HTTPS is legal. The OAuth trigger is claude.ai-web users and nothing else; when it comes: RFC 9728 metadata + 401 <code>WWW-Authenticate</code>, delegate to a hosted AS, support CIMD, <b>skip Dynamic Client Registration</b> (deprecated in 2026-07-28). Keep API keys forever alongside.</p>
+<h3>Exposure phases</h3>
+<div class="timeline">
+  <div class="ph gn"><div class="dot">1</div><div><div class="pt">Personal (now) — Tailscale only, no Funnel</div><div class="pd">Bind the tailnet interface · one static key anyway (defense in depth) · Origin validation. Funnel is wrong for public: 443/8443/10000 only, *.ts.net names, non-configurable bandwidth caps.</div></div></div>
+  <div class="ph am"><div class="dot">2</div><div><div class="pt">Friends — Cloudflare Tunnel + Access service tokens</div><div class="pd">Outbound-only, home IP never published · cloudflared in its own container, twiceshy on an internal Docker network (nothing else reachable) · Access free ≤50 users · service tokens per friend <i>in front of</i> twiceshy's keys.</div></div></div>
+  <div class="ph"><div class="dot">3</div><div><div class="pt">Public — drop the Access wall, self-serve API keys</div><div class="pd">Same topology · accepted caveat: Cloudflare terminates TLS (records aren't secrets) · VPS+WireGuard is the documented alternative if that changes.</div></div></div>
+</div>
+<h3>Keys &amp; limits</h3>
+<div class="schema">
+<span class="f">format</span>     tsy_live_&lt;base62-178bit&gt;_&lt;crc32&gt; <span class="c">— greppable prefix, offline checksum (GitHub's rationale)</span>
+<span class="f">at rest</span>    SHA-256, <span class="s">not bcrypt</span> <span class="c">— ≥128-bit random keys don't need a slow KDF; constant-time compare</span>
+<span class="f">columns</span>    scopes (pull | push | record) · created_at · expires_at · last_used_at · revoked_at <span class="c">— revoke = supersede</span>
+<span class="f">limits</span>     x/time/rate token bucket per key in-process <span class="c">(Cloudflare free tier: 1 rule, IP-only — edge is a DDoS backstop)</span>
+           + SQLite daily quota <span class="c">(durable across restarts)</span> · start: pull 2 rps/burst 10 · push 1 rps/burst 5 · ≤4 concurrent
+<span class="f">fail mode</span>  hook fails <span class="hl">open</span> (1–2 s timeout → inject nothing, agent never blocks) · server fails <span class="s">closed</span> (401/429 enforced)
+</div>
+
+<h2 id="money"><span class="n">§6</span>Monetization: Sponsors → Polar, $0 infra until traction</h2>
+<table>
+  <tr><th>Rail</th><th>Fee on a $5/mo sub</th><th>Notes</th></tr>
+  <tr><td><b>GitHub Sponsors</b></td><td><span class="ok">$0</span></td><td>100% to maintainer from personal accounts · donation, not sale → no VAT event · Romania supported since 2021</td></tr>
+  <tr><td><b>Polar.sh Starter (MoR)</b></td><td>$0.75 + intl surcharge ≈ <b>$0.83 (16.5%)</b></td><td>handles all VAT · $15/dispute · <b>built-in license-key API</b> (activate/validate + per-key quotas)</td></tr>
+  <tr><td>Paddle (MoR)</td><td>$0.75 (15%)</td><td>sub-$10 products need sales approval — friction</td></tr>
+  <tr><td>Stripe Managed Payments (MoR, preview)</td><td><span class="meh">3.5% + standard Stripe fees</span> ≈ $0.62</td><td><b>corrected in verification</b> — not fee-parity; preview-stage</td></tr>
+  <tr><td>Stripe direct (not MoR)</td><td><span class="ok">≈ $0.35 (7%)</span></td><td>cheapest, but VAT paperwork is yours (tractable: &lt;€10K cross-border B2C → Romanian VAT; RON 395K domestic threshold)</td></tr>
+  <tr><td>Lemon Squeezy</td><td>—</td><td><span class="no">avoid</span> — acquired by Stripe, brand winding down toward Managed Payments</td></tr>
+</table>
+<div class="timeline">
+  <div class="ph gn"><div class="dot">1</div><div><div class="pt">Now ($0 revenue) — GitHub Sponsors, "Supporter $5/mo" framing</div><div class="pd">Comparables prove the band: Healthchecks.io $5/mo · Miniflux $15/yr · Plausible from $9/mo · Vikunja €40/yr (all verified current). Covers electricity + a domain.</div></div></div>
+  <div class="ph am"><div class="dot">2</div><div><div class="pt">Paid API tier (when public) — free + $5/mo individual + $15–25 team, via Polar</div><div class="pd">Mem0 $19 / Zep $25 entry tiers leave the indie price point wide open. AGPL is no obstacle (Plausible is the canonical case); ADR-0002 §3's separate-process rule already shapes it: the paid surface talks to the AGPL core over its public API.</div></div></div>
+  <div class="ph"><div class="dot">3</div><div><div class="pt">Experience packs — upsell, not pillar</div><div class="pd">Verified: no third-party marketplace for agent rules/packs exists in 2026. If packs sell, sell one-time Polar products with license keys through your own checkout (ADR-0002 §4 already licenses for this).</div></div></div>
+</div>
+<p><b>Landing page MVP, near-zero ops:</b> Cloudflare Pages (free) · "Sign in with GitHub" (no email deliverability surface) · Worker + D1/KV for account state — all inside free tiers (100K req/day, D1 5M reads/day).
+<b>Key issuance: outsource to Polar's license-key benefit</b> — twiceshy validates with one cached HTTP call, replacing an entire auth backend. Self-minted <code>tsy_</code> keys remain for the free/friends tiers.</p>
+
+<h2 id="cookbook"><span class="n">§7</span>Cookbook: separate repo — the plugin marketplace <i>is</i> the loose link</h2>
+<p><code>dotts-h/Cookbook</code> is a <b>Claude Code plugin-marketplace repo</b> (per the owner's settings: <code>extraKnownMarketplaces.cookbook-dev → github:dotts-h/cookbook</code>). That settles the topology question:</p>
+<ul>
+  <li><b>Keep it separate.</b> The discriminators are access control and licensing: Cookbook is private, the engine is public AGPL, and ADR-0002 §4 already puts non-engine content outside the AGPL boundary. Submodules disqualified (a private submodule breaks every public clone, plus the <a href="https://blog.timhutt.co.uk/against-submodules/">documented pain</a>); subtree/merge would bake private ops history into public AGPL history irreversibly.</li>
+  <li><b>Graceful degradation comes free:</b> the marketplace mechanism loads the plugin when reachable and enabled; when absent, nothing breaks. No vendoring, no discovery code, no CI coupling.</li>
+  <li><b>Distribution insight (extends issue #2):</b> ship the Phase 2 client as a <b><code>twiceshy</code> Claude Code plugin</b> — hook config + MCP server entry (+ later a skill). Onboarding becomes: add marketplace → enable plugin → paste API key. This is also the natural index-channel vehicle (ADR-0001 §5).</li>
+  <li><b>Content flow rule:</b> engine-generic lessons migrate individually into <code>experience/</code> as records; private infra runbooks stay in Cookbook; deploy-time snapshots, if ever needed, ship as release tarballs or <a href="https://oras.land/docs/">ORAS</a> OCI artifacts — never vendored.</li>
+</ul>
+
+<h2 id="deltas"><span class="n">§8</span>Roadmap deltas (priority order)</h2>
+<table>
+  <tr><th>#</th><th>Delta</th><th>Touches</th></tr>
+  <tr><td>1</td><td><b>Stateless MCP server, by test</b> — never issue <code>Mcp-Session-Id</code>, plain JSON, 405 the SSE leg, Origin validation; track the go-sdk's 2026-07-28 migration</td><td>ADR-0001 §5 confirmed · new issue · before Phase 2</td></tr>
+  <tr><td>2</td><td><b>Phase 2 hook hardening</b> — hook fail-open / server fail-closed; per-key token bucket + SQLite quotas; <code>tsy_</code> keys, SHA-256, scopes, revoke=supersede</td><td>ADR-0001 §5–6 · extends #2 · budget ask: <code>x/time/rate</code></td></tr>
+  <tr><td>3</td><td><b>Ship the Phase 2 client as a Claude Code plugin</b> via the marketplace; degrade gracefully when twiceshy is unreachable</td><td>ADR-0001 §5 index channel · extends #2</td></tr>
+  <tr><td>4</td><td><b>Latency budget benchmark in <code>make ci</code></b> — FTS5 + fingerprint p99 on a 1K-record corpus; settles the conflicting benchmark anecdotes with our own number</td><td>ADR-0001 §3–4 · extends #2</td></tr>
+  <tr><td>5</td><td><b>ADR-0003: sandbox &amp; runner architecture</b> — gVisor + per-ecosystem images + no-egress proxies + SQLite queue + concurrency 3 + pinned/latest + F2P result schema</td><td>extends ADR-0001 §7, §9 · extends #4 (D3)</td></tr>
+  <tr><td>6</td><td><b>Exposure phases</b> — Tunnel + Access service tokens for friends; public keys later; never Funnel; cloudflared isolated on an internal network</td><td>ADR-0001 §9 confirmed · new issue, pre-public</td></tr>
+  <tr><td>7</td><td><b>Eval substrate upgrade</b> — SWE Context Bench-style related-task pairs; score avoidance + steps/tokens; <b>publish "CI for memories" before the window closes</b></td><td>ADR-0001 §8 · extends #5</td></tr>
+  <tr><td>8</td><td><b>Monetization prep</b> — Sponsors profile; reserve domain; CLA.md before first external PR; Polar + landing page only when strangers can use the service</td><td>ADR-0002 §3–4 confirmed · new issue</td></tr>
+  <tr><td>9</td><td><b>Docs deltas</b> — "experiential memory" in CONTEXT.md; MemoryGraft + OWASP ASI06 + SWE Context Bench in the ADR citation trail; Letta watch note</td><td>docs only</td></tr>
+  <tr><td>10</td><td><b>Explicitly rejected</b> — per-language query services · gRPC · k3s/Swarm/Nomad · session-stateful MCP · bcrypt for keys · Lemon Squeezy · pack marketplace as pillar · Funnel for public · WASI</td><td>negative results, recorded</td></tr>
+</table>
+
+<h2 id="batches"><span class="n">§9</span>Decision batches for the owner</h2>
+<table>
+  <tr><th>Batch</th><th>Decisions</th><th>Recommendation</th></tr>
+  <tr><td><b>1 — unblocks Phase 2</b><br><span class="sub">decide first</span></td><td>a. <code>golang.org/x/time/rate</code> into the dependency budget<br>b. Self-minted <code>tsy_</code> keys now, Polar license keys for the paid tier only<br>c. Hook timeout: 1 s or 2 s</td><td>a. yes — x-repo, no transitive deps<br>b. yes<br>c. 1 s — injection is a bonus, never a tax</td></tr>
+  <tr><td><b>2 — D3 / ADR-0003</b><br><span class="sub">when Phase 4 nears</span></td><td>a. gVisor vs Kata for promotion-gating runs<br>b. Registry-proxy set<br>c. Staleness trigger source</td><td>a. gVisor; Kata as upgrade path<br>b. Athens + Verdaccio + devpi only — match the corpus<br>c. weekly sweep first; bump triggers when D2 lands</td></tr>
+  <tr><td><b>3 — exposure</b><br><span class="sub">before first external user</span></td><td>a. Buy the domain<br>b. Access service tokens in front of API keys<br>c. Accept Cloudflare TLS termination</td><td>a. yes, now — cheap, unblocks Tunnel + email<br>b. yes, both layers<br>c. yes — records aren't secrets; revisit if private corpora onboard</td></tr>
+  <tr><td><b>4 — money</b><br><span class="sub">whenever</span></td><td>a. Sponsors profile now<br>b. MoR: Polar vs direct Stripe<br>c. Price points<br>d. Accountant (PFA/SRL)</td><td>a. yes — zero cost, zero VAT<br>b. Polar — the fee premium buys all bookkeeping + the key backend<br>c. anchor $5; team tier after first ten users<br>d. before the first paid invoice</td></tr>
+  <tr><td><b>5 — positioning</b><br><span class="sub">time-sensitive</span></td><td>a. Publish "CI for memories" name + methodology<br>b. Adopt "experiential memory" vocabulary</td><td>a. with the eval baseline — GLOVE/SSGM adjacency says don't sit on it<br>b. yes, as a synonym, keeping the house terms</td></tr>
+</table>
+
+<h2 id="verify"><span class="n">§</span>Verification</h2>
+<p>Two adversarial verifier agents re-checked the 22 load-bearing claims against primary sources (2026-06-12): <b>20 confirmed exactly</b> — Polar fees to the cent; Modal's $30/mo credit confirmed <i>recurring</i>; Fly/E2B pricing exact; all four arXiv IDs, task counts and finding directions; OWASP ASI06; Cloudflare free-tier rate-limit table; Tailscale Funnel constraints; Claude Code <code>--header</code> syntax verbatim; WAL semantics incl. checkpoint starvation.</p>
+<ul>
+  <li><span class="pill pr">corrected</span> <b>Stripe Managed Payments</b>: 3.5% <i>on top of</i> standard Stripe fees (≈6.4% + $0.30 effective) — not the researched "5% + $0.50"; it is <i>not</i> fee-parity with Polar/Paddle.</li>
+  <li><span class="pill pr">corrected</span> <b>Hetzner</b>: increase up to ~37% (not 30–35%); cheapest 2 vCPU/4 GB is CX23 €3.99 (x86) / CAX11 €4.49 (ARM); second dedicated-server adjustment 2026-06-15.</li>
+  <li><span class="pill pm">precision</span> initialize-handshake removal is SEP-2575 (sessions = SEP-2567) · Firecracker's ≤5 MiB is the 1 vCPU/128 MiB reference config · Tunnel capped at 1,000/account · static bearers legal because MCP auth is <i>optional</i> · "Auto Dream" details are community-reported, not official docs.</li>
+  <li><span class="pill pm">soft spots</span> the memory-on/off coding benchmark is vendor-run on one system · the contradicting FTS5 latency paper was not reproduced (mitigated by roadmap delta #4) · Lemon Squeezy signup status unverifiable (moot) · Cookbook contents not inspected (repo outside session scope; topology rests on its plugin-marketplace role, established by the owner's settings).</li>
+</ul>
+
+<footer>
+twiceshy · Platform &amp; Adoption research · 2026-06-12 · full cited report: <code>docs/research/PLATFORM_RESEARCH.md</code> · architecture: <code>docs/adr/ADR-0001-architecture.md</code> · licensing: <code>docs/adr/ADR-0002-licensing-strategy.md</code>
+</footer>
+</main>
+</div>
+</body>
+</html>
