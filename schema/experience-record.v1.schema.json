@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/dotts-h/twiceshy/main/schema/experience-record.v1.schema.json",
+  "title": "twiceshy experience record frontmatter (schema_version 1)",
+  "description": "Machine-checkable half of docs/SCHEMA.md. Applied to the parsed YAML frontmatter of an experience record. Cross-field rules (filename/id match, body non-empty, date ordering, reference existence) are enforced by the validator in internal/record.",
+  "type": "object",
+  "required": ["schema_version", "id", "kind", "status", "title", "provenance"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^exp-[0-9]{4,}$" },
+    "kind": { "enum": ["trap", "fix", "dead-end", "convention", "workflow"] },
+    "status": { "enum": ["quarantined", "validated", "stale", "superseded"] },
+    "title": { "type": "string", "minLength": 8, "maxLength": 120 },
+    "symptom": { "$ref": "#/$defs/symptom" },
+    "applies_to": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/appliesTo" }
+    },
+    "resolution": { "$ref": "#/$defs/resolution" },
+    "guard": { "$ref": "#/$defs/guard" },
+    "provenance": { "$ref": "#/$defs/provenance" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["kind"],
+        "properties": { "kind": { "enum": ["trap", "fix", "dead-end"] } }
+      },
+      "then": { "required": ["symptom", "resolution"] }
+    },
+    {
+      "if": {
+        "required": ["kind"],
+        "properties": { "kind": { "enum": ["trap", "fix"] } }
+      },
+      "then": {
+        "properties": {
+          "resolution": { "required": ["root_cause", "fix"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["kind"],
+        "properties": { "kind": { "const": "dead-end" } }
+      },
+      "then": {
+        "properties": {
+          "resolution": { "required": ["dead_ends"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["status"],
+        "properties": { "status": { "const": "validated" } }
+      },
+      "then": {
+        "properties": {
+          "provenance": {
+            "required": ["validated_at"],
+            "properties": { "validated_at": { "$ref": "#/$defs/date" } }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["kind", "status"],
+        "properties": {
+          "kind": { "enum": ["trap", "fix"] },
+          "status": { "const": "validated" }
+        }
+      },
+      "then": {
+        "required": ["guard"],
+        "properties": {
+          "guard": {
+            "required": ["guarding_test"],
+            "properties": { "guarding_test": { "type": "string", "minLength": 1 } }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["status"],
+        "properties": { "status": { "const": "superseded" } }
+      },
+      "then": {
+        "properties": {
+          "provenance": {
+            "required": ["superseded_by"],
+            "properties": {
+              "superseded_by": { "type": "string", "pattern": "^exp-[0-9]{4,}$" },
+              "valid": {
+                "required": ["from", "until"],
+                "properties": { "until": { "$ref": "#/$defs/date" } }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "nullableDate": {
+      "oneOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }]
+    },
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "symptom": {
+      "type": "object",
+      "required": ["summary"],
+      "additionalProperties": false,
+      "properties": {
+        "summary": { "type": "string", "minLength": 1 },
+        "error_signatures": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "fingerprints": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "app": { "type": "array", "items": { "$ref": "#/$defs/sha256" } },
+            "generic": { "type": "array", "items": { "$ref": "#/$defs/sha256" } }
+          }
+        }
+      }
+    },
+    "appliesTo": {
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [
+        { "required": ["ecosystem"] },
+        { "required": ["package"] },
+        { "required": ["runtime"] }
+      ],
+      "properties": {
+        "ecosystem": { "type": "string", "minLength": 1 },
+        "package": { "type": "string", "minLength": 1 },
+        "versions": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "introduced": { "type": ["string", "null"] },
+            "fixed": { "type": ["string", "null"] }
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "root_cause": { "type": "string", "minLength": 1 },
+        "fix": { "type": "string", "minLength": 1 },
+        "dead_ends": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["tried", "why_it_failed"],
+            "additionalProperties": false,
+            "properties": {
+              "tried": { "type": "string", "minLength": 1 },
+              "why_it_failed": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "guard": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repro": { "type": ["string", "null"] },
+        "guarding_test": { "type": ["string", "null"] }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["source", "recorded_at", "valid"],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "object",
+          "required": ["author"],
+          "additionalProperties": false,
+          "properties": {
+            "author": { "type": "string", "minLength": 1 },
+            "session": { "type": ["string", "null"] },
+            "pr": { "type": ["string", "null"] }
+          }
+        },
+        "recorded_at": { "$ref": "#/$defs/date" },
+        "validated_at": { "$ref": "#/$defs/nullableDate" },
+        "valid": {
+          "type": "object",
+          "required": ["from"],
+          "additionalProperties": false,
+          "properties": {
+            "from": { "$ref": "#/$defs/date" },
+            "until": { "$ref": "#/$defs/nullableDate" }
+          }
+        },
+        "superseded_by": {
+          "oneOf": [
+            { "type": "string", "pattern": "^exp-[0-9]{4,}$" },
+            { "type": "null" }
+          ]
+        },
+        "usage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "retrieved": { "type": "integer", "minimum": 0 },
+            "confirmed_helpful": { "type": "integer", "minimum": 0 },
+            "last_hit": { "$ref": "#/$defs/nullableDate" }
+          }
+        }
+      }
+    }
+  }
+}
