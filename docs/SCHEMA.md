@@ -130,7 +130,9 @@ domain-separated normalized signature:
 5. replace filesystem paths — tokens starting with `/`, `~/`, `./` or `../`
    at the start of the string or after whitespace — with `<path>`
    (identifiers like `modernc.org/sqlite` are deliberately **not** paths);
-6. replace digit runs (`[0-9]+`) with `<num>`;
+6. replace standalone digit runs (`\b[0-9]+\b`) with `<num>` — digits
+   embedded in identifiers (`fts5`, `utf8`, `sha256`) are discriminative and
+   stay;
 7. collapse whitespace runs to a single space and trim.
 
 The same algorithm runs at index time (over each `error_signatures` entry)
