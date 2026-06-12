@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Experience-as-a-Service — Deep Dive</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2d333b;
+    --fg:#e6edf3; --dim:#9da7b3; --accent:#58a6ff; --green:#3fb950;
+    --amber:#d29922; --red:#f85149; --purple:#bc8cff; --pink:#ff7b72;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  .layout{display:flex;max-width:1280px;margin:0 auto}
+  nav{position:sticky;top:0;align-self:flex-start;width:230px;min-width:230px;height:100vh;overflow-y:auto;padding:28px 14px;border-right:1px solid var(--line)}
+  nav h3{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--dim);margin:0 8px 10px}
+  nav a{display:block;padding:5px 8px;border-radius:6px;color:var(--dim);font-size:13.5px}
+  nav a:hover{background:var(--panel);color:var(--fg);text-decoration:none}
+  main{flex:1;padding:40px 48px 90px;min-width:0}
+  h1{font-size:30px;line-height:1.25;margin-bottom:8px}
+  h2{font-size:22px;margin:54px 0 14px;padding-top:14px;border-top:1px solid var(--line)}
+  h2 .n{color:var(--accent);font-family:var(--mono);font-size:15px;margin-right:8px}
+  h3{font-size:16.5px;margin:26px 0 8px}
+  p{margin:10px 0;color:#c9d4de}
+  .sub{color:var(--dim);font-size:14px}
+  code{font-family:var(--mono);font-size:.86em;background:var(--panel2);padding:1.5px 5px;border-radius:5px}
+  .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:99px;margin-right:6px;vertical-align:2px}
+  .pv{background:#12351f;color:var(--green)} .pm{background:#3a2d12;color:var(--amber)} .pn{background:#2a1f3d;color:var(--purple)} .pr{background:#3d1418;color:var(--pink)}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:14px;margin:18px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+  .card .big{font-size:30px;font-weight:700;line-height:1.1}
+  .card .lbl{font-size:13px;color:var(--dim);margin-top:6px}
+  .card.g .big{color:var(--green)} .card.a .big{color:var(--amber)} .card.r .big{color:var(--red)} .card.b .big{color:var(--accent)} .card.p .big{color:var(--purple)}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+  th{text-align:left;color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.06em;padding:9px 12px;border-bottom:2px solid var(--line)}
+  td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top;color:#c9d4de}
+  tr:hover td{background:#13181f}
+  .callout{border-left:4px solid var(--accent);background:var(--panel);border-radius:0 10px 10px 0;padding:14px 18px;margin:18px 0}
+  .callout.warn{border-color:var(--amber)} .callout.bad{border-color:var(--red)} .callout.good{border-color:var(--green)} .callout.nov{border-color:var(--purple)}
+  .callout b.t{display:block;margin-bottom:4px}
+  .ladder{margin:20px 0}
+  .rung{display:flex;align-items:center;gap:14px;margin:7px 0}
+  .rung .bar{height:34px;border-radius:7px;display:flex;align-items:center;padding:0 14px;font-size:13.5px;font-weight:600;white-space:nowrap}
+  .rung .why{font-size:13px;color:var(--dim)}
+  .flow{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch;margin:18px 0}
+  .step{flex:1;min-width:150px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;position:relative}
+  .step .k{font-family:var(--mono);font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:.08em}
+  .step .t{font-weight:600;font-size:14.5px;margin:3px 0}
+  .step .d{font-size:12.5px;color:var(--dim)}
+  .arrow{align-self:center;color:var(--dim);font-size:20px}
+  .schema{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;font-family:var(--mono);font-size:13px;line-height:1.7;overflow-x:auto;margin:16px 0}
+  .schema .f{color:var(--accent)} .schema .c{color:var(--dim)} .schema .s{color:#a5d6ff} .schema .hl{color:var(--green)}
+  .arch{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px;margin:18px 0}
+  .archrow{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0}
+  .box{border:1px solid var(--line);border-radius:9px;padding:10px 14px;background:var(--panel2);flex:1;min-width:160px}
+  .box .bt{font-weight:600;font-size:14px} .box .bd{font-size:12px;color:var(--dim)}
+  .box.hot{border-color:var(--accent)} .box.doc{border-color:var(--amber)} .box.git{border-color:var(--green)} .box.nov{border-color:var(--purple)}
+  .lane{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--dim);margin:14px 0 4px}
+  .timeline{margin:20px 0}
+  .ph{display:flex;gap:16px;margin:0;padding:0 0 22px 0;position:relative}
+  .ph::before{content:"";position:absolute;left:17px;top:38px;bottom:0;width:2px;background:var(--line)}
+  .ph:last-child::before{display:none}
+  .dot{width:36px;height:36px;min-width:36px;border-radius:50%;background:var(--panel2);border:2px solid var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-family:var(--mono);font-size:13px;color:var(--accent);z-index:1}
+  .ph.nv .dot{border-color:var(--purple);color:var(--purple)}
+  .ph .pt{font-weight:600} .ph .pd{font-size:13.5px;color:var(--dim)}
+  .vbar{display:flex;height:26px;border-radius:6px;overflow:hidden;margin:14px 0 6px;font-size:12px;font-weight:600}
+  .vbar div{display:flex;align-items:center;justify-content:center}
+  footer{margin-top:70px;padding-top:18px;border-top:1px solid var(--line);color:var(--dim);font-size:13px}
+  @media(max-width:900px){nav{display:none}main{padding:28px 20px}}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav>
+  <h3>Contents</h3>
+  <a href="#thesis">The thesis</a>
+  <a href="#problem">1 · The measured problem</a>
+  <a href="#landscape">2 · What works (research)</a>
+  <a href="#channel">3 · The injection channel</a>
+  <a href="#schema">4 · The Experience Record</a>
+  <a href="#retrieval">5 · Retrieval pipeline</a>
+  <a href="#security">6 · Poisoning &amp; security</a>
+  <a href="#doctors">7 · The doctors</a>
+  <a href="#evals">8 · Evals</a>
+  <a href="#nas">9 · NAS deployment</a>
+  <a href="#buy">10 · Build vs buy</a>
+  <a href="#roadmap">11 · Roadmap</a>
+  <a href="#verify">Verification</a>
+</nav>
+<main>
+
+<h1>Experience-as-a-Service</h1>
+<p class="sub">Feeding hard-won engineering experience to LLM coding agents — research deep dive · 2026-06-12 ·
+5 research angles, ~60 sources fetched, 18 load-bearing claims adversarially verified (16 confirmed, 2 corrected).
+Full cited report: <code>docs/EXPERIENCE_SERVICE_RESEARCH.md</code></p>
+
+<h2 id="thesis"><span class="n">§0</span>The thesis</h2>
+<div class="callout good">
+<b class="t">LLMs have answers; they don't have experience.</b>
+Experience is project-, version- and time-shaped: <i>"we tried X here, it broke Y, and here's the test that proves the fix."</i>
+Serving such records back to agents measurably improves coding outcomes — <b>if</b> retrieval is precise,
+records are validated &amp; fresh, and injection is deterministic rather than "hope the agent asks."
+This repo's <code>REGRESSIONS.md</code> (symptom → root cause → fix → guarding test) is already the right artifact — it just isn't <i>delivered at decision time</i>.
+</div>
+<div class="flow">
+  <div class="step git"><div class="k">truth</div><div class="t">Git-backed markdown records</div><div class="d">human-auditable, PR-gated</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="k">index</div><div class="t">Derived hybrid index</div><div class="d">FTS5 + sqlite-vec, rebuildable</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="k">serve</div><div class="t">MCP server on NAS</div><div class="d">streamable HTTP + Tailscale</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="k">inject</div><div class="t">Hooks push + tool pull</div><div class="d">trap cards at decision time</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="k">curate</div><div class="t">Doctor services</div><div class="d">dedup · staleness · <b>sandbox CI</b></div></div>
+</div>
+
+<h2 id="problem"><span class="n">§1</span>The problem is real and measured</h2>
+<div class="cards">
+  <div class="card r"><div class="big">25–38%</div><div class="lbl">deprecated-API usage rate across 7 code LLMs on evolving Python libraries (ICSE 2025)</div></div>
+  <div class="card r"><div class="big">70–90%</div><div class="lbl">…when the prompt continues <b>outdated</b> code (vs 9–18% on current code). Models amplify the context they're given.</div></div>
+  <div class="card a"><div class="big">~43%</div><div class="lbl">of LLM code executable under real API evolution without current docs — rises to ~66% when docs are injected</div></div>
+  <div class="card g"><div class="big">&gt;85%</div><div class="lbl">of deprecated-API cases fixed by a simple deprecated→replacement <b>mapping table</b> — i.e. exactly an experience-DB query</div></div>
+</div>
+<div class="callout">
+<b class="t">This repo is a live specimen.</b> Regression entries are literally pre-recorded counters to the plausible-but-wrong autopilot fix:
+<i>"don't 'fix' a zeroed-after-restart row by pointing it back at <code>s.meter.Totals()</code>"</i>. Today that knowledge only helps if the file happens to be in context. The gap isn't knowledge creation — it's <b>delivery</b>.
+</div>
+
+<h2 id="landscape"><span class="n">§2</span>What the research says works</h2>
+<p><b>Strategy-level memory distilled from successes <i>and failures</i> moves coding benchmarks.</b> Conversational fact-memory products mostly don't (their benchmarks are vendor-contested; a full-context baseline beat Mem0 on its own benchmark).</p>
+<table>
+<tr><th>System</th><th>Stores</th><th>Verified result</th></tr>
+<tr><td><b>ReasoningBank</b> (ICLR '26)</td><td>strategy items from successes + failures ("counterfactual pitfalls")</td><td><b>+8.3pp WebArena · +4.6pp SWE-bench-V · ~3 fewer steps/task</b> (Gemini-2.5-flash config; +4.6–8.3 across models)</td></tr>
+<tr><td>SWE-Exp '25</td><td>cross-issue repair experience bank</td><td>73.0% pass@1 SWE-bench-V (Claude 4 Sonnet)</td></tr>
+<tr><td>MemGovern '26</td><td>GitHub issues/PRs → "experience cards"</td><td>+4.65% SWE-bench-V</td></tr>
+<tr><td>AWM '24 / ExpeL '24</td><td>induced workflows / episodes + abstracted insights</td><td>+24.6–51.1% relative (web agents); both layers beat either alone</td></tr>
+<tr><td>Voyager '23</td><td>skills committed <b>only after execution-verified success</b></td><td>15.3× faster milestones — the validation-by-execution pattern</td></tr>
+<tr><td>Memp '25</td><td>procedural memory, Build/Retrieve/Update</td><td>strong-model memory <b>transfers to weaker models</b></td></tr>
+</table>
+<div class="callout warn">
+<b class="t">Two caveats to hold.</b>
+(1) SWE-bench-Verified is likely contaminated (Claude locates gold files ~3× better there than on clean equivalents) — read deltas as directional.
+(2) <b>Retrieval quality is the binding constraint</b>: SWE Context Bench finds curated retrieval helps most on hard tasks, while indiscriminate retrieval <i>can hurt</i>. Bad memory &lt; no memory.
+</div>
+<p><b>Frontier-lab convergence:</b> Anthropic (memory tool, CLAUDE.md/auto-memory) and OpenAI (Codex <code>~/.codex/memories/</code> over AGENTS.md) both ship <b>plain auditable files</b>, not vector DBs — validating the markdown-first design.</p>
+
+<h2 id="channel"><span class="n">§3</span>The most important decision: the injection channel</h2>
+<p>Where most "memory MCP server" projects quietly fail. The evidence stack: even Anthropic's reference memory server ships a prompt <i>forcing</i> retrieval each chat; the When2Tool benchmark shows agents call tools indiscriminately and prompt steering miscalibrates both ways; CLAUDE.md rules are violated even when read; Cody/Greptile — products that must be reliable — inject retrieval-side, never waiting for the model to ask.</p>
+<div class="ladder">
+  <div class="rung"><div class="bar" style="width:88%;background:#1e4d2b;color:#7ee2a8">1 · Per-turn deterministic injection (hooks / middleware)</div><div class="why">guaranteed presence, survives compaction</div></div>
+  <div class="rung"><div class="bar" style="width:72%;background:#1f4257;color:#8fd0ff">2 · Session-start injection</div><div class="why">decays as context fills</div></div>
+  <div class="rung"><div class="bar" style="width:56%;background:#3a3a20;color:#e3d27a">3 · Static memory file (CLAUDE.md / AGENTS.md)</div><div class="why">~advisory; framed "may or may not be relevant"</div></div>
+  <div class="rung"><div class="bar" style="width:42%;background:#41301c;color:#eebd7e">4 · Model-judged index (Skills / agent-requested rules)</div><div class="why">efficient middle ground for nice-to-have</div></div>
+  <div class="rung"><div class="bar" style="width:28%;background:#46201f;color:#ff9d97">5 · Hoping the agent calls a tool</div><div class="why">least reliable channel</div></div>
+</div>
+<h3>Recommended hybrid: trap-driven push + index-driven pull</h3>
+<table>
+<tr><th>Channel</th><th>Mechanism</th><th>Carries</th></tr>
+<tr><td><b>Push</b> (deterministic)</td><td>Claude Code <code>UserPromptSubmit</code> / <code>PreToolUse</code> hook → service → <code>additionalContext</code></td><td>≤ 1–3 short <b>trap cards</b>, only on fingerprint / near-exact symptom match</td></tr>
+<tr><td><b>Pull</b> (on-demand)</td><td>MCP tools <code>search_experience</code> · <code>get_experience</code> · <code>record_experience</code></td><td>broad debugging research; tool <i>description</i> text is make-or-break</td></tr>
+<tr><td><b>Index</b> (ambient)</td><td>generated skill / AGENTS.md one-liners</td><td>awareness the store exists (Skills-style progressive disclosure)</td></tr>
+<tr><td><b>Write</b></td><td><code>Stop</code>/<code>PostToolUse</code> hook proposes candidates</td><td>→ <b>quarantine</b>, never straight to trusted store</td></tr>
+</table>
+<div class="callout">
+<b class="t">On SSE:</b> the standalone HTTP+SSE MCP transport is deprecated — current spec = stdio + <b>Streamable HTTP</b> (SSE survives only as internal framing). And push-into-a-live-conversation isn't a working pattern in today's clients: "live" should mean event-triggered doctor runs + per-turn hook queries.
+</div>
+
+<h2 id="schema"><span class="n">§4</span>The Experience Record</h2>
+<p>Grounded in postmortem schemas (Google SRE / Atlassian), <b>Sentry's grouping architecture</b>, the <b>OSV vulnerability schema</b>, Graphiti's bi-temporal model, and Mem0's write pipeline.</p>
+<div class="schema">
+<span class="c"># experience/2026/0142-… .md  (YAML frontmatter + narrative body)</span><br>
+<span class="f">kind:</span> trap | fix | dead-end | convention | workflow<br>
+<span class="f">status:</span> <span class="hl">quarantined → validated</span> | stale | superseded<br>
+<span class="f">symptom:</span> summary <span class="c">(embedded)</span> · error_signatures <span class="c">(exact-match)</span> · <span class="hl">fingerprints: app + generic</span> <span class="c">← Sentry dual-hash → cross-repo firing</span><br>
+<span class="f">applies_to:</span> {ecosystem, package, versions{introduced, fixed}} <span class="c">← OSV-style stack fingerprint</span><br>
+<span class="f">resolution:</span> root_cause <span class="c">(2–5 factors)</span> · fix · <span class="hl">dead_ends[tried, why_it_failed]</span> <span class="c">← what StackOverflow never captures</span><br>
+<span class="f">guard:</span> <span class="hl">repro script (fail-to-pass)</span> · guarding_test <span class="c">← executable knowledge, re-run by Doctor 3</span><br>
+<span class="f">provenance:</span> source PR/session/author · valid{from,until} · superseded_by <span class="c">← supersede, never delete</span> · usage{retrieved, helpful}
+</div>
+<div class="cards">
+  <div class="card b"><div class="big">5–6%</div><div class="lbl">answer-text overlap between StackOverflow duplicate questions (vs 20–25% question text, 40% tags) — <b>dedup on symptoms, never on fixes</b></div></div>
+  <div class="card p"><div class="big">2 hashes</div><div class="lbl">per record (app-specific + stack-generic), Sentry's verified design — what lets repo A's lesson fire in repo B</div></div>
+  <div class="card g"><div class="big">ver × time</div><div class="lbl">OSV version-ranges × Graphiti temporal validity on experience records — <b>no published system has both</b></div></div>
+</div>
+
+<h2 id="retrieval"><span class="n">§5</span>Retrieval: fingerprint-first, hybrid second, tiny top-k always</h2>
+<div class="flow">
+  <div class="step hot"><div class="k">1 · exact</div><div class="t">Fingerprint / signature hash</div><div class="d">deterministic, zero false positives — covers "looping on a known bug"</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="k">2 · lexical</div><div class="t">BM25 / FTS5</div><div class="d">dense fails <i>silently</i> on exact identifiers &amp; error strings</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="k">3 · dense</div><div class="t">Small local embedding</div><div class="d">CodeRAG-Bench: dense often <i>beats</i> BM25 on code → both, fused (RRF k=60)</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="k">4 · gate</div><div class="t">Fingerprint boost + relevance floor</div><div class="d">inject 1–3 records or <b>nothing</b></div></div>
+</div>
+<div class="callout bad">
+<b class="t">The #1 failure mode of this very system: near-miss injection.</b>
+A single semantically-related-but-wrong retrieved doc cut accuracy by up to ~25pp (SIGIR 2024 — random noise was harmless; <i>related</i> distractors hurt). Context-rot: all 18 tested models degrade with length, even one distractor hurts; mid-context placement is worst. An experience DB is near-miss-dense <i>by construction</i> → stack-fingerprint filters, relevance floor, applicability conditions inside each trap card.
+</div>
+
+<h2 id="security"><span class="n">§6</span>An experience store is an attack surface</h2>
+<div class="cards">
+  <div class="card r"><div class="big">&lt;0.1%</div><div class="lbl">of a memory store poisoned ⇒ <b>≥80% attack success</b>, ≤1% benign impact (AgentPoison, NeurIPS 2024)</div></div>
+  <div class="card r"><div class="big">98.2%</div><div class="lbl">injection success with <b>query-only access</b> — the agent is talked into writing the poison itself (MINJA, NeurIPS 2025)</div></div>
+  <div class="card a"><div class="big">ASI06</div><div class="lbl">memory poisoning is now OWASP-classified (Agentic Top 10); a shared store is a cross-session injection amplifier</div></div>
+</div>
+<div class="vbar">
+  <div style="flex:3;background:#3d1418;color:#ff9d97">quarantine (agent-proposed)</div>
+  <div style="flex:2;background:#3a2d12;color:#e3c27a">sandbox validation</div>
+  <div style="flex:2;background:#1f4257;color:#8fd0ff">human PR review</div>
+  <div style="flex:3;background:#12351f;color:#7ee2a8">validated (push-eligible)</div>
+</div>
+<p class="sub">Promotion pipeline — git gives it for free: <b>a new experience record is a pull request</b> (diffable, signed, revertable). Provenance on every record; quarantined records never enter the push channel. "Only my agent writes" is <i>not</i> a defense (MINJA) — the PR gate is the real boundary.</p>
+
+<h2 id="doctors"><span class="n">§7</span>The doctors — curation, freshness, CI-for-memories</h2>
+<table>
+<tr><th>Doctor</th><th>Trigger</th><th>What it does</th><th>Evidence base</th></tr>
+<tr><td><b>1 · Dedup / Reconcile</b></td><td>write path</td><td>top-k similar → LLM arbitrates <code>ADD/UPDATE/SUPERSEDE/NOOP</code>; supersede = close validity interval, never delete; <b>delta updates only</b></td><td>Mem0 pipeline; Graphiti invalidation; ACE "context collapse" — a curator that rewrites the whole store destroys it</td></tr>
+<tr><td><b>2 · Staleness</b></td><td>scheduled</td><td>re-check <code>applies_to</code> vs live world: version bumps, API cross-check via Context7-style live-docs fetch; drift → <code>stale</code> + issue</td><td>§1: stale context in → 70–90% deprecated code out. A stale store is <i>worse than none</i></td></tr>
+<tr><td><b>3 · Revalidation</b> <span class="pill pn">NOVEL</span></td><td>schedule + dep-bump events</td><td><b>re-execute repro scripts in a sandbox</b>, SWE-bench fail-to-pass discipline; repro stops reproducing → stale; fix stops working → reopen</td><td>components exist (Voyager exec-verified skills, SWT-Bench/Otter repro-gen) — <b>nobody has wired them into memory revalidation</b></td></tr>
+<tr><td><b>4 · Lifecycle</b></td><td>usage signals</td><td>reinforce confirmed-helpful; decay accessibility of never-hit (archive, don't delete)</td><td>MemoryBank Ebbinghaus; beware the <b>"allergy problem"</b> — pure LRU evicts rare-but-critical traps</td></tr>
+<tr><td><b>5 · Abstraction</b></td><td>periodic</td><td>induce convention/workflow cards from clusters of episodes, evidence-linked</td><td>ExpeL/AWM: episodes + abstractions beat either alone</td></tr>
+</table>
+
+<h2 id="evals"><span class="n">§8</span>Evals: how you'll know it works</h2>
+<p><b>Template (ReasoningBank):</b> same task suite, memory on/off, measure success <i>and</i> steps/tokens — experience should make agents faster even when success ties.</p>
+<div class="callout nov">
+<b class="t">The eval to pioneer (verified gap): trap-avoidance regression evals.</b>
+For each recorded trap, a small task that walks an agent toward it; score whether injection prevented the documented failure.
+<code>REGRESSIONS.md</code> is a ready-made seed set ("render <code>my_var_name</code> in agent prose", "make the budget row survive restart").
+No published suite measures "did the agent avoid a previously recorded trap."
+</div>
+<p>Instrument the live path: log every injection, mark <code>confirmed_helpful</code> → feeds Doctor 4. Treat vendor memory benchmarks (LoCoMo/DMR) as marketing until independently replicated — the Mem0↔Zep numbers swing 58–84% depending on whose methodology you accept.</p>
+
+<h2 id="nas"><span class="n">§9</span>Running it on the NAS</h2>
+<div class="arch">
+  <div class="lane">Desktop / CI (heavy work)</div>
+  <div class="archrow">
+    <div class="box"><div class="bt">Bulk embedding at index build</div><div class="bd">query-time embedding stays on NAS (MiniLM/nomic, 256–512d, CPU-fine for one string)</div></div>
+    <div class="box nov"><div class="bt">Doctor 3 sandbox (heavy repros)</div><div class="bd">cheap repros run on-NAS in a container</div></div>
+  </div>
+  <div class="lane">NAS — total RAM envelope ≈ 1–1.5 GB (fits a 2 GB Synology "+")</div>
+  <div class="archrow">
+    <div class="box git"><div class="bt">Git repo of markdown records</div><div class="bd">source of truth · mirrored off-NAS = backup</div></div>
+    <div class="box hot"><div class="bt">MCP server (Go, streamable HTTP)</div><div class="bd">search / get / record + hook endpoint · 100–300 MB</div></div>
+    <div class="box"><div class="bt">SQLite: FTS5 + sqlite-vec</div><div class="bd">one file, derived &amp; rebuildable; backup = copy a file</div></div>
+    <div class="box doc"><div class="bt">Doctor cron jobs</div><div class="bd">dedup · staleness (Context7) · lifecycle</div></div>
+    <div class="box"><div class="bt">Tailscale Serve</div><div class="bd">TLS on tailnet name, zero port-forwarding · ~30 MB</div></div>
+  </div>
+  <div class="lane">Clients</div>
+  <div class="archrow">
+    <div class="box"><div class="bt">Claude Code</div><div class="bd"><code>claude mcp add --transport http … --header "Authorization: Bearer …"</code> (verified) + UserPromptSubmit hook</div></div>
+    <div class="box"><div class="bt">Other agents</div><div class="bd">mcp-remote bridges stdio-only clients; claude.ai web connectors need OAuth → CLI is the practical client</div></div>
+  </div>
+</div>
+<table>
+<tr><th>Choice</th><th>Verdict</th></tr>
+<tr><td><b>sqlite-vec + FTS5</b></td><td><span class="pill pv">PICK</span> pure C, ARM-safe, metadata cols, brute-force fine at 10³–10⁵ records (alpha ANN since v0.1.10); sqlite-vss is deprecated</td></tr>
+<tr><td>Meilisearch</td><td><span class="pill pm">ALT</span> if you want a search UI: LMDB memory-mapped, ~100 MB, native hybrid (vs Typesense: whole index in RAM)</td></tr>
+<tr><td>Qdrant</td><td><span class="pill pm">CAUTION</span> works (135 MB–1.2 GB modes) but no NFS-backed storage, wants local SSD, ARM64 page-size crash history on NAS</td></tr>
+<tr><td>DuckDB VSS</td><td><span class="pill pr">NO</span> index persistence explicitly not production-safe</td></tr>
+<tr><td>Hardware traps</td><td>Synology Docker = "+"/Intel models only · J-series Celerons lack AVX (some images SIGILL — test on the exact CPU) · QNAP ARM ≈ 4 GB ceiling · Watchtower archived → Diun/WUD notify-only</td></tr>
+</table>
+
+<h2 id="buy"><span class="n">§10</span>Build vs buy</h2>
+<table>
+<tr><th>Project</th><th>Covers</th><th>Verdict</th></tr>
+<tr><td><b>Basic Memory</b> (AGPL, active)</td><td>markdown SoT + SQLite index + hybrid FTS/FastEmbed over MCP</td><td><b>Closest prior art</b> — covers storage+serving; lacks experience schema, fingerprints, doctors, hooks push, evals. Build on / crib from.</td></tr>
+<tr><td>mem0 / OpenMemory</td><td>LLM-arbitrated memory ops</td><td>Heavy (Postgres+Neo4j), chat-fact-shaped, benchmark-contested. Steal the write pipeline, not the product.</td></tr>
+<tr><td>Zep / Graphiti</td><td>bi-temporal KG</td><td>Steal the invalidation model; full KG overkill for few stable entity types.</td></tr>
+<tr><td>Context7</td><td>live version-specific docs via MCP</td><td>Don't rebuild — it <i>is</i> Doctor 2's cross-check primitive.</td></tr>
+<tr><td>Sentry</td><td>grouping / fingerprinting</td><td>The reference design for §4–5; self-hosting Sentry itself is overkill.</td></tr>
+<tr><td>Lab memory (Anthropic / Codex)</td><td>per-user file memory</td><td>Complementary personal prefs — not a shared, validated, cross-repo store.</td></tr>
+</table>
+<div class="callout nov">
+<b class="t">The genuinely unclaimed territory (verified absent from the literature):</b>
+(a) sandbox <b>revalidation CI for memory records</b> · (b) <b>trap-avoidance regression evals</b> · (c) <b>version-range × time-range validity</b> on engineering experience. Those three <i>are</i> the project.
+</div>
+
+<h2 id="roadmap"><span class="n">§11</span>Roadmap</h2>
+<div class="timeline">
+  <div class="ph"><div class="dot">0</div><div><div class="pt">Corpus (a weekend)</div><div class="pd">Convert REGRESSIONS.md + ADRs + retros into ~50 experience records in the §4 schema, new git repo. Immediately useful as docs.</div></div></div>
+  <div class="ph"><div class="dot">1</div><div><div class="pt">Read path</div><div class="pd">SQLite FTS5+sqlite-vec index · Go streamable-HTTP MCP server (search/get) · Tailscale · connect Claude Code.</div></div></div>
+  <div class="ph"><div class="dot">2</div><div><div class="pt">Push path</div><div class="pd">UserPromptSubmit/PreToolUse hook → trap cards (k≤3, relevance floor, fingerprint-gated). <b>Autopilot bug prevention starts here.</b></div></div></div>
+  <div class="ph"><div class="dot">3</div><div><div class="pt">Write path + quarantine</div><div class="pd">record_experience + end-of-session proposals → quarantine branch → PR review gate.</div></div></div>
+  <div class="ph nv"><div class="dot">4</div><div><div class="pt">Doctors</div><div class="pd">Dedup (delta-only) · staleness (Context7 cross-check) · <b>revalidation sandbox (the novel one)</b> · lifecycle decay.</div></div></div>
+  <div class="ph nv"><div class="dot">5</div><div><div class="pt">Evals</div><div class="pd">Trap-avoidance regression suite · memory-on/off A/B on success + steps · publish the methodology — nobody has.</div></div></div>
+</div>
+
+<h2 id="verify">Verification notes</h2>
+<p class="sub">Two adversarial verifier agents re-checked 18 load-bearing claims against primary sources: 16 confirmed, 2 corrected and folded in —
+(i) CodeRAG-Bench favors <i>dense</i> over BM25 for code (→ hybrid framing); (ii) Mem0-scored-Zep is ~66% (the ~58% belongs to a different leg of the dispute);
+plus precision fixes: ReasoningBank deltas are the Gemini-2.5-flash config; "Power of Noise" harm comes from <i>related</i> distractors; the 25–38% deprecated rate splits 70–90% vs 9–18% by prompt freshness;
+Qdrant's NFS ban lives in the installation guide; sqlite-vec gained alpha ANN in v0.1.10.
+Known soft spots: no Celeron embedding benchmarks exist; vendor-internal evals (Anthropic +39%) unreplicated.</p>
+
+<footer>
+Full cited report with all source links: <code>docs/EXPERIENCE_SERVICE_RESEARCH.md</code> · branch <code>claude/recipe-system-deep-dive-ffo50t</code> · generated 2026-06-12.
+</footer>
+</main>
+</div>
+</body>
+</html>
