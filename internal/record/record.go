@@ -42,7 +42,11 @@ type Record struct {
 	Guard         *Guard      `yaml:"guard"`
 	Provenance    Provenance  `yaml:"provenance"`
 
+	// Body is the markdown narrative below the frontmatter; Raw is the
+	// complete source file (what get_experience serves); Path is the
+	// corpus-relative file path.
 	Body string `yaml:"-"`
+	Raw  []byte `yaml:"-"`
 	Path string `yaml:"-"`
 }
 
@@ -136,6 +140,7 @@ func Parse(path string, src []byte) (*Record, error) {
 		return nil, fmt.Errorf("%s: frontmatter: %w", path, err)
 	}
 	rec.Body = strings.TrimSpace(body)
+	rec.Raw = src
 	rec.Path = filepath.ToSlash(path)
 
 	if err := rec.validate(); err != nil {
