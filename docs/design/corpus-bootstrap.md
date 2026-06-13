@@ -1,7 +1,9 @@
 # Design: bootstrapping the experience corpus from public version-knowledge
 
-- **Status:** Proposed — **one open decision** (source scope, §2). Graduates to
-  an ADR once that decision is made.
+- **Status:** Decided (2026-06-13) — source scope resolved as **option A**
+  (license-clean only), seeded with the option-C subset first; graduated to
+  [ADR-0003](../adr/ADR-0003-corpus-bootstrap-source-scope.md). This doc is
+  retained as the rationale of record.
 - **Date:** 2026-06-13
 - **Deciders:** horia
 - **Grounding:** two verified research fan-outs (2026-06-13), companion to
@@ -86,10 +88,17 @@ string-match datasets) actively misleads
 
 ---
 
-## 2. Source scope — risks & benefits (THE open decision)
+## 2. Source scope — risks & benefits (DECIDED — option A, seeded with C)
 
-This is the only choice that is hard to reverse once corpus content exists, so
-it is yours to make. Three options, with the trade-offs spelled out:
+> **Decision (2026-06-13, → [ADR-0003](../adr/ADR-0003-corpus-bootstrap-source-scope.md)):**
+> **option A (license-clean only)**, seeded with the option-C subset first.
+> Stack Overflow (option B) is deferred — admitted later only if a concrete
+> coverage gap appears, and only behind the mechanically-enforced facts-only
+> rule (§4). The trade-off analysis below is retained as the rationale of
+> record.
+
+This was the only choice that is hard to reverse once corpus content exists.
+Three options, with the trade-offs spelled out:
 
 | | **A. License-clean only** *(recommended)* | **B. Clean + Stack Overflow facts-only** | **C. Highest-precision only** |
 |---|---|---|---|
@@ -256,10 +265,11 @@ not yet-blessed corpus, and do not run through the validator/indexer.
 
 ## 8. Decision & recommendation
 
-- **Open decision (yours):** source scope — §2. **Recommendation: option A
-  (license-clean only), seeded with the option-C subset first.** Add Stack
-  Overflow (option B) only later, narrowly, and only behind the mechanically
-  enforced facts-only rule.
+- **Decided (2026-06-13):** source scope — §2 → **option A (license-clean
+  only), seeded with the option-C subset first**
+  ([ADR-0003](../adr/ADR-0003-corpus-bootstrap-source-scope.md)). Stack
+  Overflow (option B) is deferred — added only later, narrowly, and only behind
+  the mechanically enforced facts-only rule.
 - **Recommended now (low-risk, proceed unless you object):** adopt the §4
   licensing rule + the two additive provenance fields; build the importer for
   the codemod/GitChameleon/GHSA tiers; keep everything `quarantined` until D3.
