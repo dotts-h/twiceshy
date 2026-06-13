@@ -1,0 +1,11 @@
+{
+  "extraKnownMarketplaces": {
+    "ori": {
+      "source": { "source": "github", "repo": "dotts-h/claude-skills" }
+    }
+  },
+  "enabledPlugins": {
+    "skills@ori": true,
+    "cookbook@ori": true
+  }
+}
