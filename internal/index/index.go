@@ -23,6 +23,20 @@ import (
 // not a tunable.
 const MaxK = 3
 
+// DefaultFloor is the relevance floor applied to every novelty classification
+// by default (ADR-0004). Like MaxK it is a locked invariant made concrete, not
+// a tunable. The literal is a coarse, corpus-sensitive threshold whose only job
+// this phase is to demote a single weak token while a genuine multi-term match
+// survives; it is owned by a guarding test and revisited when dense/RRF banding
+// lands (ADR-0006). It is not a runtime tunable or server flag.
+const DefaultFloor = 2.0e-06
+
+// FloorOff is the explicit floor-off opt-out: a caller wanting raw recall
+// (tests, diagnostic/pull callers) sets Query.Floor = FloorOff so the intent
+// reads as a choice, never an accidental zero. Any Floor <= 0 disables the
+// floor at the Search mechanism; FloorOff names that.
+const FloorOff = -1.0
+
 // How a hit was matched, in precedence order.
 const (
 	MatchedFingerprint = "fingerprint"
