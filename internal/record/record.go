@@ -236,6 +236,12 @@ func splitFrontmatter(src []byte) (front []byte, body string, err error) {
 	return front, body, nil
 }
 
+// Validate runs the full record validation on a programmatically-constructed
+// Record — the same checks Parse applies after decoding frontmatter. The write
+// path (ingest) builds a Record in memory and validates it before persisting.
+// Path, Body, and the frontmatter fields must already be set.
+func Validate(r *Record) error { return r.validate() }
+
 func (r *Record) validate() error {
 	var errs []error
 	fail := func(format string, args ...any) {
@@ -256,6 +262,9 @@ func (r *Record) validate() error {
 	}
 	if n := len([]rune(r.Title)); n < 8 || n > 120 {
 		fail("title length %d is outside 8..120", n)
+	}
+	if strings.TrimSpace(r.Body) == "" {
+		fail("narrative body must be non-empty")
 	}
 
 	r.validatePath(fail)
