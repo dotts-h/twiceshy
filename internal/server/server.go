@@ -1,7 +1,8 @@
-// Package server exposes the pull channel (ADR-0001 §5): MCP tools
-// search_experience and get_experience over streamable HTTP behind bearer
-// auth. The write path (record_experience) is Phase 3; the push channel is
-// Phase 2 — neither belongs here yet.
+// Package server exposes the MCP tools over streamable HTTP behind bearer
+// auth: the pull channel (ADR-0001 §5) search_experience and get_experience,
+// and the write path (Phase 3) record_experience — which dedups an
+// agent-proposed draft and returns a quarantined record to PR, never a direct
+// write. The push channel (Phase 2) still lives elsewhere.
 package server
 
 import (
@@ -67,6 +68,7 @@ func New(cfg Config) (http.Handler, error) {
 	}, nil)
 	mcp.AddTool(srv, &mcp.Tool{Name: "search_experience", Description: searchDescription}, h.search)
 	mcp.AddTool(srv, &mcp.Tool{Name: "get_experience", Description: getDescription}, h.get)
+	mcp.AddTool(srv, &mcp.Tool{Name: "record_experience", Description: recordDescription}, h.record)
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return srv }, nil)
