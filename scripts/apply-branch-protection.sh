@@ -40,6 +40,11 @@ if [ -z "$server" ]; then
   server="$(printf '%s' "$origin" | sed -E 's#^(https?://)([^@/]*@)?([^/]+)/.*#\1\3#')"
 fi
 
+# The protected branch name, for the apply messages and the Forgejo PATCH URL.
+# (Derived in bash too — it was previously only bound inside the python heredoc,
+# so a real apply tripped `set -u` with "branch: unbound variable".)
+branch="$(CFG="$cfg" python3 -c 'import json,os;print(json.load(open(os.environ["CFG"]))["branch"])')"
+
 # Build the host payload from the neutral config (python3 stdlib).
 payload="$(CFG="$cfg" FLAVOR="$flavor" python3 - <<'PY'
 import json, os
@@ -94,10 +99,12 @@ if [ "$flavor" = "github" ]; then
 else
   [ -n "$token" ] || { echo "no token (set \$FORGEJO_TOKEN/\$GITEA_TOKEN or pass --token)" >&2; exit 2; }
   api="$server/api/v1/repos/$repo/branch_protections"
-  # Create, or update if a protection for this branch already exists.
+  # Create, or update if a protection for this branch already exists. Forgejo
+  # returns 403 ("Branch protection already exist") for a duplicate, Gitea 409/422
+  # — fall back to PATCH on all three (a genuine auth 403 then fails the PATCH too).
   code=$(printf '%s' "$payload" | curl -s -o /tmp/bp.out -w '%{http_code}' -X POST "$api" \
            -H "Authorization: token $token" -H "Content-Type: application/json" -d @-)
-  if [ "$code" = "409" ] || [ "$code" = "422" ]; then
+  if [ "$code" = "403" ] || [ "$code" = "409" ] || [ "$code" = "422" ]; then
     code=$(printf '%s' "$payload" | curl -s -o /tmp/bp.out -w '%{http_code}' -X PATCH "$api/$branch" \
              -H "Authorization: token $token" -H "Content-Type: application/json" -d @-)
   fi
