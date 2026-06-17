@@ -34,8 +34,9 @@ live in `docs/RELEASING.md`; the workflow itself is the recipe's installed
 
 ## Publishing
 
-- **Preferred (tag push):** `git push origin <tag>`. The `push: tags: ["v*"]` trigger runs the
-  release workflow; the ref name is the tag, so the version is correct.
+- **Preferred (tag push):** `git push forgejo <tag>` (the canonical remote — `origin` is the
+  read-only GitHub mirror). The `push: tags: ["v*"]` trigger runs the release workflow; the ref
+  name is the tag, so the version is correct.
 - **Sandbox fallback (tag push blocked / HTTP 403):** trigger the workflow's `workflow_dispatch` with
   the tag as input (the forge's "run workflow" API/MCP, on the default branch,
   `inputs: {tag: "<tag>"}`). The workflow's own `contents: write` token creates the tag + release

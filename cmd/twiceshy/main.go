@@ -27,13 +27,35 @@ import (
 	"github.com/dotts-h/twiceshy/internal/server"
 )
 
+// errUsage marks a flag parse error whose specifics the flag package already
+// printed to stderr; main maps it to exit code 2 without re-printing (no double
+// message), distinct from `-h` (flag.ErrHelp → exit 0, not an error).
+var errUsage = errors.New("invalid flags")
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, os.Args[1:], os.Stdout, os.Getenv); err != nil {
+	switch err := run(ctx, os.Args[1:], os.Stdout, os.Getenv); {
+	case err == nil, errors.Is(err, flag.ErrHelp): // -h: usage already on stderr; success
+	case errors.Is(err, errUsage):
+		os.Exit(2) // flag already printed the details
+	default:
 		fmt.Fprintln(os.Stderr, "twiceshy:", err)
 		os.Exit(1)
 	}
+}
+
+// parseFlags parses args, leaving usage/errors on stderr (flag's default — never
+// stdout). It returns flag.ErrHelp for `-h` and errUsage for a real flag error,
+// so main can exit 0 vs 2 without re-printing what flag already showed.
+func parseFlags(fs *flag.FlagSet, args []string) error {
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return flag.ErrHelp
+		}
+		return errUsage
+	}
+	return nil
 }
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
@@ -85,9 +107,8 @@ func buildIndex(ctx context.Context, c *commonFlags) (*index.Index, int, error) 
 
 func runIndex(ctx context.Context, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("index", flag.ContinueOnError)
-	fs.SetOutput(out)
 	c := addCommonFlags(fs)
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	ix, n, err := buildIndex(ctx, c)
@@ -101,10 +122,9 @@ func runIndex(ctx context.Context, args []string, out io.Writer) error {
 
 func runServe(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	fs.SetOutput(out)
 	c := addCommonFlags(fs)
 	addr := fs.String("addr", ":8722", "listen address")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	token := getenv("TWICESHY_TOKEN")

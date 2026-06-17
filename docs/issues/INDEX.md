@@ -1,7 +1,7 @@
 # Issues index — twiceshy
 
 Source of truth for tracked work. Markdown files here are canonical; mirror to
-GitHub via `scripts/sync-github.sh` (requires `gh`). File new issues with
+Forgejo/Gitea Issues via `scripts/sync-forgejo.sh` (REST API, token-auth). File new issues with
 `scripts/new-issue.sh "<title>" [--epic] [--group <id>] [--severity <s>] [--depends id,id]`
 — it appends the row here. Format reference: [TEMPLATE.md](TEMPLATE.md).
 
