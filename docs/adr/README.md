@@ -8,4 +8,9 @@ accepted ADR's decision — supersede it (`Status: superseded-by-NNNN`).
 
 | id | title | status |
 |----|-------|--------|
-| — | *(no decisions recorded yet)* | — |
+| [0001](ADR-0001-architecture.md) | twiceshy architecture — git-backed records, derived SQLite index, hybrid injection | Accepted |
+| [0002](ADR-0002-licensing-strategy.md) | Licensing strategy — AGPL core, CLA-gated contributions, separate experience packs | Accepted |
+| [0003](ADR-0003-corpus-bootstrap-source-scope.md) | Corpus bootstrap source scope — license-clean only, seeded precision-first | Accepted |
+| [0004](ADR-0004-relevance-floor-is-index-policy.md) | The relevance floor is index policy, not a per-call argument | Accepted |
+| [0005](ADR-0005-stable-seams.md) | Register the stable seams in CONTRACTS.md | Accepted |
+| [0006](ADR-0006-defer-score-banding.md) | Keep three-state novelty; defer score-banding to the dense phase | Accepted |
