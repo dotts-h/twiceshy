@@ -201,6 +201,122 @@ func TestGetExperienceUnknownIDIsToolError(t *testing.T) {
 	}
 }
 
+// record_experience (Phase 3 write path) must be exposed alongside the pull tools.
+func TestRecordExperienceListed(t *testing.T) {
+	ts := newTestServer(t)
+	session := connect(t, ts)
+	tools, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	found := false
+	for _, tool := range tools.Tools {
+		if tool.Name == "record_experience" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("record_experience tool must be registered")
+	}
+}
+
+// A new (non-duplicate) lesson is accepted as a QUARANTINED draft with an
+// allocated id — never written validated; git/PR is the trust boundary.
+// (It may classify novel OR similar depending on incidental lexical overlap;
+// either way it must be quarantined, not validated.)
+func TestRecordExperienceQuarantinesNewDraft(t *testing.T) {
+	ts := newTestServer(t)
+	session := connect(t, ts)
+	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "record_experience",
+		Arguments: map[string]any{
+			"kind":             "trap",
+			"title":            "Connection pool dries up under a novel burst pattern",
+			"summary":          "the pool runs dry under a previously-unseen condition",
+			"error_signatures": []string{"snowflake-novel-signature-zzz-9182"},
+			"ecosystem":        "Go",
+			"package":          "example.com/db",
+			"root_cause":       "leaked connections on a retry path",
+			"fix":              "defer rows.Close on the retry branch",
+			"guarding_test":    "TestPoolRetryGuard",
+			"body":             "How the pool runs dry on retries and how to guard it.",
+			"author":           "claude",
+			"session":          "sess-test",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tool error: %s", toolText(res))
+	}
+	out, err := json.Marshal(res.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if !strings.Contains(s, `"record_id":"exp-`) {
+		t.Errorf("a recorded draft must get an allocated id: %s", s)
+	}
+	if !strings.Contains(s, "status: quarantined") {
+		t.Errorf("the draft must be quarantined: %s", s)
+	}
+	if strings.Contains(s, "status: validated") || strings.Contains(s, "validated_at: 2") {
+		t.Errorf("a recorded draft must never be born validated: %s", s)
+	}
+}
+
+// An exact duplicate (matching an existing record's signature) is NOT recorded.
+func TestRecordExperienceKnownNotDuplicated(t *testing.T) {
+	ts := newTestServer(t)
+	session := connect(t, ts)
+	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "record_experience",
+		Arguments: map[string]any{
+			"kind":             "trap",
+			"title":            "Re-reporting the FTS5 punctuation syntax trap",
+			"summary":          "fts5 match errors on punctuation",
+			"error_signatures": []string{`FTS5: Syntax Error near "."`},
+			"ecosystem":        "MCP",
+			"root_cause":       "raw user text reached MATCH",
+			"fix":              "quote tokens",
+			"guarding_test":    "TestX",
+			"body":             "duplicate of an existing trap.",
+			"author":           "claude",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tool error: %s", toolText(res))
+	}
+	s, _ := json.Marshal(res.StructuredContent)
+	if !strings.Contains(string(s), "known") || !strings.Contains(string(s), "exp-0001") {
+		t.Errorf("exact duplicate must be reported known with the existing id: %s", s)
+	}
+}
+
+// A malformed draft (trap without a resolution) is a tool error, not a silent quarantine.
+func TestRecordExperienceInvalidIsError(t *testing.T) {
+	ts := newTestServer(t)
+	session := connect(t, ts)
+	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "record_experience",
+		Arguments: map[string]any{
+			"kind":             "trap",
+			"title":            "Incomplete trap missing its resolution block",
+			"summary":          "something broke",
+			"error_signatures": []string{"another-unique-sig-7766"},
+			"body":             "no resolution provided.",
+			"author":           "claude",
+		},
+	})
+	if err == nil && !res.IsError {
+		t.Error("invalid draft must be a tool error, not a silent quarantined record")
+	}
+}
+
 func toolText(res *mcp.CallToolResult) string {
 	var sb strings.Builder
 	for _, c := range res.Content {

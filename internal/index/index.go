@@ -345,6 +345,19 @@ func appendStackFilter(sb *strings.Builder, args []any, q Query) []any {
 	return args
 }
 
+// NextID returns the next sequential record id ("exp-NNNN"): one past the
+// highest currently indexed. The write path uses it to allocate an id for a
+// new quarantined record. An empty corpus yields "exp-0001".
+func (ix *Index) NextID(ctx context.Context) (string, error) {
+	var max sql.NullInt64
+	err := ix.db.QueryRowContext(ctx,
+		`SELECT MAX(CAST(substr(id, 5) AS INTEGER)) FROM records WHERE id LIKE 'exp-%'`).Scan(&max)
+	if err != nil {
+		return "", fmt.Errorf("next id: %w", err)
+	}
+	return fmt.Sprintf("exp-%04d", max.Int64+1), nil
+}
+
 // Get returns one record by id, any status — pull-channel callers asked
 // for it explicitly.
 func (ix *Index) Get(ctx context.Context, id string) (*Stored, error) {
