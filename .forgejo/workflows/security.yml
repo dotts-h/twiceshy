@@ -5,23 +5,19 @@ name: security
 # main on merge — a feature branch is NEVER under `push` (that
 # double-runs). scripts/check-workflows.sh (quality recipe) guards this.
 #
-# `paths-ignore` skips docs/agent-config-only changes (they can't introduce a
-# vulnerable dependency, an insecure code pattern, or a leaked secret in code).
-# If `security` is a *required* check in branch protection, confirm your ruleset
-# treats a skipped required check as passing (see the pr-gating recipe), or a
-# docs-only PR hangs unmergeable.
+# No `paths-ignore`: these jobs are REQUIRED status checks in branch protection,
+# and a path-filtered workflow that doesn't run posts no status — leaving the
+# required context pending and hanging a docs-only PR unmergeable. The scans are
+# cheap, so run them on every change.
 #
 # Host-neutral: the same file runs on GitHub Actions and on a Forgejo/Gitea
-# Actions runner. The actions used (checkout, gitleaks) resolve from the host's
-# configured action source; on a self-hosted runner mirror them if your host
-# can't reach github.com.
+# Actions runner. gitleaks is installed as a binary (its action isn't mirrored
+# on this runner's source); setup-go + govulncheck resolve normally.
 on:
   push:
     branches: [main]
-    paths-ignore: ["docs/**", "**/*.md", ".claude/**"]
   pull_request:
     branches: [main]
-    paths-ignore: ["docs/**", "**/*.md", ".claude/**"]
   workflow_dispatch:
 
 permissions:
