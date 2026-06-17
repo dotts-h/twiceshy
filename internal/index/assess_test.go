@@ -150,6 +150,44 @@ func TestAssessAppliesDefaultFloorByPolicy(t *testing.T) {
 	}
 }
 
+// ADR-0007: Retrieve is the injection-path search — the pull/push channels reach
+// the corpus through it, so it applies the same DefaultFloor policy Assess does.
+// A weak single-token overlap is floored to nothing ("empty is an answer"); only
+// an explicit FloorOff brings raw recall back; a genuine multi-term match clears
+// the floor. Search itself (ADR-0004) stays the floor-free mechanism.
+func TestRetrieveAppliesFloorByPolicy(t *testing.T) {
+	ix := openIndex(t, similarCorpus(t))
+
+	// Default policy: the weak single token is floored out entirely.
+	got, err := ix.Retrieve(context.Background(), index.Query{Text: "index"})
+	if err != nil {
+		t.Fatalf("Retrieve: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("default floor: weak overlap must return nothing, got %+v", got)
+	}
+
+	// Explicit opt-out yields the raw lead — the same hit Search returns floor-off.
+	got, err = ix.Retrieve(context.Background(), index.Query{Text: "index", Floor: index.FloorOff})
+	if err != nil {
+		t.Fatalf("Retrieve: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("FloorOff override: weak overlap must return the raw hit")
+	}
+
+	// A genuine multi-term match clears the default floor.
+	got, err = ix.Retrieve(context.Background(), index.Query{
+		Text: "hnsw index build slow maintenance_work_mem vector",
+	})
+	if err != nil {
+		t.Fatalf("Retrieve: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("default floor: multi-term match must survive")
+	}
+}
+
 // Empty/whitespace query has nothing to match: Novel, never an error.
 func TestAssessNovelOnEmptyText(t *testing.T) {
 	ix := openIndex(t, similarCorpus(t))

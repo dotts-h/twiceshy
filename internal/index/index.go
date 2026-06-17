@@ -222,6 +222,27 @@ func insertRecord(ctx context.Context, tx *sql.Tx, r *record.Record, repo string
 	return err
 }
 
+// floorPolicy applies the default relevance floor when the caller left Floor
+// unset (ADR-0004, ADR-0007). An explicit Floor — a positive threshold or the
+// FloorOff sentinel — is the caller's deliberate override and passes through.
+// This is the single home of "the floor is on by default", shared by every
+// injection path (Retrieve, and Assess through it).
+func floorPolicy(q Query) Query {
+	if q.Floor == 0 {
+		q.Floor = DefaultFloor
+	}
+	return q
+}
+
+// Retrieve is the injection-path search: the pull channel (search_experience)
+// and, later, the push channel reach the corpus through it, so the relevance
+// floor (ADR-0001 §3) is applied as policy and can never be a per-caller
+// accident (ADR-0007). For raw, floor-free recall (tests, diagnostics) call
+// Search with Floor: FloorOff.
+func (ix *Index) Retrieve(ctx context.Context, q Query) ([]Hit, error) {
+	return ix.Search(ctx, floorPolicy(q))
+}
+
 // Search runs the embedding-free retrieval pipeline: fingerprint-exact
 // hits first, then lexical BM25 hits, deduplicated, capped at MaxK.
 func (ix *Index) Search(ctx context.Context, q Query) ([]Hit, error) {

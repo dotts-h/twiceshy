@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -314,6 +315,98 @@ func TestRecordExperienceInvalidIsError(t *testing.T) {
 	})
 	if err == nil && !res.IsError {
 		t.Error("invalid draft must be a tool error, not a silent quarantined record")
+	}
+}
+
+// newTestServerWith builds a server over a caller-supplied synthetic corpus,
+// for tests that need to control retrieval scores deterministically.
+func newTestServerWith(t *testing.T, recs ...*record.Record) *httptest.Server {
+	t.Helper()
+	ix, err := index.Open(filepath.Join(t.TempDir(), "ix.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = ix.Close() })
+	if err := ix.Rebuild(context.Background(), recs, "github.com/dotts-h/twiceshy"); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	h, err := server.New(server.Config{Index: ix, Token: token})
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	ts := httptest.NewServer(h)
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func mkServerRecord(t *testing.T, num int, title, summary string) *record.Record {
+	t.Helper()
+	src := fmt.Sprintf(`---
+schema_version: 1
+id: exp-%04d
+kind: trap
+status: validated
+title: %q
+symptom:
+  summary: %q
+applies_to:
+  - ecosystem: PyPI
+    package: pgvector
+resolution: { root_cause: "a cause", fix: "a fix" }
+guard: { repro: null, guarding_test: "TestThing" }
+provenance:
+  source: { author: "horia", session: null, pr: null }
+  recorded_at: 2026-06-12
+  validated_at: 2026-06-12
+  valid: { from: 2026-06-12, until: null }
+  superseded_by: null
+---
+
+Narrative.
+`, num, title, summary)
+	rec, err := record.Parse(fmt.Sprintf("experience/2026/%04d-rec.md", num), []byte(src))
+	if err != nil {
+		t.Fatalf("fixture invalid: %v", err)
+	}
+	return rec
+}
+
+// ADR-0007: the pull channel (search_experience) applies the relevance floor.
+// A query whose only match falls below DefaultFloor returns nothing — "empty is
+// an answer", never a near-miss — while a genuine multi-term match still comes
+// back. Before the fix the handler called the floor-free Search and leaked the
+// weak near-miss.
+func TestSearchExperienceFloorsNearMiss(t *testing.T) {
+	ts := newTestServerWith(t, mkServerRecord(t, 10,
+		"Postgres HNSW index build is slow under tiny maintenance_work_mem",
+		"building an hnsw vector index takes hours when maintenance_work_mem is small"))
+	session := connect(t, ts)
+
+	weak, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "search_experience",
+		Arguments: map[string]any{"query": "index"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if weak.IsError {
+		t.Fatalf("tool error: %s", toolText(weak))
+	}
+	wb, _ := json.Marshal(weak.StructuredContent)
+	if strings.Contains(string(wb), "exp-0010") {
+		t.Errorf("weak single-token near-miss must be floored, got %s", wb)
+	}
+
+	strong, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "search_experience",
+		Arguments: map[string]any{"query": "hnsw index build slow maintenance_work_mem vector"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	sb, _ := json.Marshal(strong.StructuredContent)
+	if !strings.Contains(string(sb), "exp-0010") {
+		t.Errorf("a genuine multi-term match must still return, got %s", sb)
 	}
 }
 
