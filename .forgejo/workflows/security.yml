@@ -37,13 +37,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # TODO(backfill): install this repo's toolchain + the scanners your
-      # commands need here (setup-go + `go install golang.org/x/vuln/cmd/govulncheck@latest`,
-      # `pip install semgrep bandit pip-audit`, `npm ci`, trivy …). The
-      # adopt-recipes inventory lists the languages it detected.
-      - name: SAST (static analysis)
-        run: go vet ./... ; govulncheck ./...
-      - name: Dependency / vulnerability audit
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: install govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: SAST (go vet)
+        run: go vet ./...
+      - name: Dependency / vulnerability audit (govulncheck)
         run: govulncheck ./...
 
   secret-scan:

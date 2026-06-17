@@ -36,10 +36,10 @@ type Record struct {
 	Kind          string      `yaml:"kind"`
 	Status        string      `yaml:"status"`
 	Title         string      `yaml:"title"`
-	Symptom       *Symptom    `yaml:"symptom"`
-	AppliesTo     []AppliesTo `yaml:"applies_to"`
-	Resolution    *Resolution `yaml:"resolution"`
-	Guard         *Guard      `yaml:"guard"`
+	Symptom       *Symptom    `yaml:"symptom,omitempty"`
+	AppliesTo     []AppliesTo `yaml:"applies_to,omitempty"`
+	Resolution    *Resolution `yaml:"resolution,omitempty"`
+	Guard         *Guard      `yaml:"guard,omitempty"`
 	Provenance    Provenance  `yaml:"provenance"`
 
 	// Body is the markdown narrative below the frontmatter; Raw is the
@@ -52,8 +52,8 @@ type Record struct {
 
 type Symptom struct {
 	Summary         string        `yaml:"summary"`
-	ErrorSignatures []string      `yaml:"error_signatures"`
-	Fingerprints    *Fingerprints `yaml:"fingerprints"`
+	ErrorSignatures []string      `yaml:"error_signatures,omitempty"`
+	Fingerprints    *Fingerprints `yaml:"fingerprints,omitempty"`
 }
 
 // Fingerprints are *additive*, externally sourced fingerprints (e.g. from
@@ -64,10 +64,10 @@ type Fingerprints struct {
 }
 
 type AppliesTo struct {
-	Ecosystem string            `yaml:"ecosystem"`
-	Package   string            `yaml:"package"`
-	Versions  *VersionRange     `yaml:"versions"`
-	Runtime   map[string]string `yaml:"runtime"`
+	Ecosystem string            `yaml:"ecosystem,omitempty"`
+	Package   string            `yaml:"package,omitempty"`
+	Versions  *VersionRange     `yaml:"versions,omitempty"`
+	Runtime   map[string]string `yaml:"runtime,omitempty"`
 }
 
 type VersionRange struct {
@@ -76,9 +76,9 @@ type VersionRange struct {
 }
 
 type Resolution struct {
-	RootCause string    `yaml:"root_cause"`
-	Fix       string    `yaml:"fix"`
-	DeadEnds  []DeadEnd `yaml:"dead_ends"`
+	RootCause string    `yaml:"root_cause,omitempty"`
+	Fix       string    `yaml:"fix,omitempty"`
+	DeadEnds  []DeadEnd `yaml:"dead_ends,omitempty"`
 }
 
 type DeadEnd struct {
@@ -97,7 +97,7 @@ type Provenance struct {
 	ValidatedAt  *string  `yaml:"validated_at"`
 	Valid        Validity `yaml:"valid"`
 	SupersededBy *string  `yaml:"superseded_by"`
-	Usage        *Usage   `yaml:"usage"`
+	Usage        *Usage   `yaml:"usage,omitempty"`
 }
 
 type Source struct {

@@ -3,6 +3,7 @@ module github.com/dotts-h/twiceshy
 go 1.25.0
 
 require (
+	github.com/google/jsonschema-go v0.4.3
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.52.0
@@ -10,7 +11,6 @@ require (
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect

@@ -35,29 +35,20 @@ jobs:
   gates:
     name: Lint, guard & test
     runs-on: ubuntu-latest
-    env:
-      COVERAGE_FLOOR: "80"
     steps:
       - uses: actions/checkout@v4
-      # TODO(backfill): install this repo's toolchain here (setup-go / setup-python /
-      # apt deps ...). The adopt-recipes inventory lists what it detected.
-      - name: Lint
-        run: make lint
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh \
+            | sh -s -- -b "$(go env GOPATH)/bin" v2.5.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: Workflow invariants (no CI double-runs; release version resolution)
         run: bash scripts/check-workflows.sh
-      - name: Test
-        run: make test
-      # Enforce the coverage floor: CI FAILS below 80% instead of
-      # merely reporting it. The floor compare + failure are wired here; only the
-      # measurement is language-specific.
-      # TODO(backfill): set COVERAGE to this language's measured % (e.g. parse
-      # `go tool cover -func`, coverage.py, nyc). Until then it reads 0 and the
-      # gate fails closed — wire the measurement, don't delete the gate.
-      - name: Coverage floor
-        run: |
-          COVERAGE="${COVERAGE:-0}"
-          if [ "${COVERAGE%.*}" -lt "${COVERAGE_FLOOR}" ]; then
-            echo "::error::coverage ${COVERAGE}% is below the ${COVERAGE_FLOOR}% floor"
-            exit 1
-          fi
-          echo "coverage ${COVERAGE}% meets the ${COVERAGE_FLOOR}% floor"
+      # `make ci` = golangci-lint + `go test -race` + cover-check (the awk float
+      # comparison enforces the 80% floor and FAILS below it). This is the same
+      # gate `make ci` runs locally, so green-here == green-there.
+      - name: Lint, race tests & coverage floor
+        run: make ci
