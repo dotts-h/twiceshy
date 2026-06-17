@@ -33,13 +33,20 @@ concurrency:
 
 jobs:
   gates:
-    name: Lint, guard & test
+    # No comma in this name: the status context (`CI / Lint guard & test
+    # (pull_request)`) is copied verbatim into branch-protection.json's
+    # comma-separated required_checks, so a comma here would split the name.
+    name: Lint guard & test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          # This Forgejo runner has no GH-Actions cache service; setup-go's
+          # default cache=true hangs ~5min then fails (connect ETIMEDOUT). The
+          # Go module/build cache persists on the runner volume regardless.
+          cache: false
       - name: install golangci-lint
         run: |
           curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh \

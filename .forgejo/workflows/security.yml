@@ -40,6 +40,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          # No GH-Actions cache service on this Forgejo runner; cache=true hangs
+          # ~5min then fails (connect ETIMEDOUT). See .forgejo/workflows/ci.yml.
+          cache: false
       - name: install govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
