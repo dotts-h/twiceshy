@@ -42,7 +42,12 @@ _Last generated: 2026-06-17 (UTC)._
 
 ## internal/index
 
-### index.go (389 LOC)
+### assess.go (59 LOC)
+- L6: `type Novelty string`
+- L18: `type Assessment struct`
+- L26: `func (ix *Index) Assess(ctx context.Context, q Query) (Assessment, error)`
+
+### index.go (402 LOC)
 - L44: `type Index struct`
 - L49: `type Query struct`
 - L72: `type Hit struct`
@@ -56,13 +61,28 @@ _Last generated: 2026-06-17 (UTC)._
 - L277: `func (ix *Index) lexicalHits(ctx context.Context, q Query, k int) ([]Hit, error)`
 - L321: `func appendStatusFilter(sb *strings.Builder, args []any, q Query) []any`
 - L330: `func appendStackFilter(sb *strings.Builder, args []any, q Query) []any`
-- L350: `func (ix *Index) Get(ctx context.Context, id string) (*Stored, error)`
-- L368: `func ftsQuery(text string) string`
-- L382: `func hasAlnum(s string) bool`
+- L351: `func (ix *Index) NextID(ctx context.Context) (string, error)`
+- L363: `func (ix *Index) Get(ctx context.Context, id string) (*Stored, error)`
+- L381: `func ftsQuery(text string) string`
+- L395: `func hasAlnum(s string) bool`
+
+## internal/ingest
+
+### prepare.go (168 LOC)
+- L14: `type Draft struct`
+- L25: `type Meta struct`
+- L33: `type Outcome struct`
+- L52: `func Prepare(ctx context.Context, ix *index.Index, repo string, d Draft, m Meta) (Outcome, error)`
+- L112: `func probes(d Draft) []string`
+- L135: `func buildPath(now, id, title string) string`
+- L150: `func slugify(title string) string`
 
 ## internal/record
 
-### record.go (420 LOC)
+### marshal.go (27 LOC)
+- L13: `func Marshal(r *Record) ([]byte, error)`
+
+### record.go (429 LOC)
 - L33: `type Record struct`
 - L53: `type Symptom struct`
 - L61: `type Fingerprints struct`
@@ -79,28 +99,59 @@ _Last generated: 2026-06-17 (UTC)._
 - L153: `func ParseFile(root, rel string) (*Record, error)`
 - L164: `func LoadCorpus(root string) ([]*Record, error)`
 - L221: `func splitFrontmatter(src []byte) (front []byte, body string, err error)`
-- L239: `func (r *Record) validate() error`
-- L271: `func (r *Record) validatePath(fail func(string, ...any))`
-- L285: `func (r *Record) validateSymptom(fail func(string, ...any))`
-- L310: `func (r *Record) validateAppliesTo(fail func(string, ...any))`
-- L318: `func (r *Record) validateResolution(fail func(string, ...any))`
-- L344: `func (r *Record) validateGuard(fail func(string, ...any))`
-- L354: `func (r *Record) validateProvenance(fail func(string, ...any))`
-- L400: `func checkDate(fail func(string, ...any), field, v string) time.Time`
-- L413: `func contains(xs []string, x string) bool`
+- L243: `func Validate(r *Record) error { return r.validate() }`
+- L245: `func (r *Record) validate() error`
+- L280: `func (r *Record) validatePath(fail func(string, ...any))`
+- L294: `func (r *Record) validateSymptom(fail func(string, ...any))`
+- L319: `func (r *Record) validateAppliesTo(fail func(string, ...any))`
+- L327: `func (r *Record) validateResolution(fail func(string, ...any))`
+- L353: `func (r *Record) validateGuard(fail func(string, ...any))`
+- L363: `func (r *Record) validateProvenance(fail func(string, ...any))`
+- L409: `func checkDate(fail func(string, ...any), field, v string) time.Time`
+- L422: `func contains(xs []string, x string) bool`
 
 ## internal/server
 
-### server.go (181 LOC)
-- L24: `type Config struct`
-- L54: `func New(cfg Config) (http.Handler, error)`
-- L76: `type handlers struct`
-- L82: `type SearchArgs struct`
-- L91: `type SearchHit struct`
-- L102: `type SearchResult struct`
-- L106: `func (h *handlers) search(ctx context.Context, _ *mcp.CallToolRequest, args SearchArgs) (*mcp.CallToolResult, SearchResult, error)`
-- L137: `type GetArgs struct`
-- L142: `type GetResult struct`
-- L151: `func (h *handlers) get(ctx context.Context, _ *mcp.CallToolRequest, args GetArgs) (*mcp.CallToolResult, GetResult, error)`
-- L168: `func bearerAuth(token string, next http.Handler) http.Handler`
+### record.go (149 LOC)
+- L27: `type RecordArgs struct`
+- L43: `type RecordResult struct`
+- L54: `func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args RecordArgs) (*mcp.CallToolResult, RecordResult, error)`
+
+### server.go (183 LOC)
+- L25: `type Config struct`
+- L55: `func New(cfg Config) (http.Handler, error)`
+- L78: `type handlers struct`
+- L84: `type SearchArgs struct`
+- L93: `type SearchHit struct`
+- L104: `type SearchResult struct`
+- L108: `func (h *handlers) search(ctx context.Context, _ *mcp.CallToolRequest, args SearchArgs) (*mcp.CallToolResult, SearchResult, error)`
+- L139: `type GetArgs struct`
+- L144: `type GetResult struct`
+- L153: `func (h *handlers) get(ctx context.Context, _ *mcp.CallToolRequest, args GetArgs) (*mcp.CallToolResult, GetResult, error)`
+- L170: `func bearerAuth(token string, next http.Handler) http.Handler`
+
+## scripts
+
+### apply-branch-protection.sh (106 LOC)
+- _(no top-level declarations matched)_
+
+### check-workflows.sh (141 LOC)
+- _(no top-level declarations matched)_
+
+### codemap.sh (72 LOC)
+- L14: `decl_pattern()`
+- L28: `list_files()`
+
+### new-issue.sh (79 LOC)
+- _(no top-level declarations matched)_
+
+### next-issue.sh (163 LOC)
+- _(no top-level declarations matched)_
+
+### start-fresh.sh (87 LOC)
+- L26: `note() { printf '  %s\n' "$*"; }`
+- L27: `fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }`
+
+### sync-forgejo.sh (165 LOC)
+- _(no top-level declarations matched)_
 

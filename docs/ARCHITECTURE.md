@@ -1,35 +1,127 @@
 # twiceshy — Architecture
 
-> The engineering deep dive: how Git-backed experience service that feeds engineering lessons to LLM agents via MCP is put together and *why*.
+> The engineering deep dive: how a Git-backed experience service that feeds
+> engineering lessons to LLM agents via MCP is put together and *why*.
 > Keep it honest — when the code and this doc disagree, the code wins, so update this
 > when a boundary moves. Decisions that shaped it link to ADRs (docs/adr/).
 
 ## Design goals
 
-> The two or three load-bearing principles every module choice is justified against
-> (e.g. *pure core / thin edges*, *testable without a network*, *cost is first-class*).
+The load-bearing principles every module choice is justified against. They come
+from [ADR-0001](adr/ADR-0001-architecture.md) and the research behind it
+([EXPERIENCE_SERVICE_RESEARCH.md](research/EXPERIENCE_SERVICE_RESEARCH.md)).
+
+- **Pure core / thin edges.** Domain logic (parsing, fingerprinting, novelty
+  classification, dedup-at-ingest, marshalling) is pure and synchronous; it
+  takes values and returns values. I/O and transport (SQLite, HTTP/MCP, the
+  filesystem corpus) live at the edges and are kept deliberately thin. The core
+  never reaches out to the network or the clock.
+- **Testable without a network.** Every behavior worth a test is reachable with
+  in-process values and a temp-dir SQLite file — no live MCP client, no remote
+  model, no fixtures that need credentials. The cheap-executor and embedding
+  work that *does* touch the network stays out of the hot path by construction.
+- **Rebuildable, derived index.** The `experience/` markdown corpus is the
+  single source of truth; the SQLite/FTS5 index is a *cache* that
+  `index.Rebuild` reconstructs from the corpus at will. Losing or deleting the
+  index is never data loss — it is a rebuild. Nothing authoritative lives only
+  in SQLite.
+- **Embedding-free hot path.** Retrieval at decision time is fingerprint-exact
+  then lexical (BM25), capped and floored — no embedding call on the path an
+  agent waits on ([ADR-0001 §3–4](adr/ADR-0001-architecture.md)). Dense/RRF
+  retrieval is a later phase and stays off the hot path.
 
 ## Module map
 
-> A short tree of the top-level packages/dirs and the one job each owns — entry points
-> first, domain core in the middle, IO/transport edges last.
+Single Go module `github.com/dotts-h/twiceshy`, one deployable binary. Entry
+point first, pure domain core in the middle, IO/transport edges last.
+
+- **`cmd/twiceshy/`** *(edge — entry)* — the binary. Thin `main` → `run(ctx,
+  args, out, getenv)`; subcommands `index` (rebuild) and `serve` (MCP server).
+  All logic delegates to `internal/`.
+- **`internal/record/`** *(pure core)* — the experience-record domain: `Parse`,
+  `ParseFile`, `LoadCorpus`, frontmatter validation, and `Marshal` (the inverse
+  — a `Record` back to on-disk markdown). Owns the [SCHEMA.md](SCHEMA.md) format.
+- **`internal/fingerprint/`** *(pure core)* — deterministic signature hashing
+  (`Generic`/`App`/`Normalize`) and `Dedup`, which splits a record's
+  fingerprints into new vs. already-present against a known-set.
+- **`internal/index/`** *(edge — SQLite, derived)* — the only stateful package.
+  `Open`/`Close`/`Rebuild` manage the derived FTS5 index; `Search` is the pure
+  retrieval mechanism (fingerprint-exact → lexical, `MaxK` cap, relevance
+  floor); `Assess` classifies an incoming symptom as `known`/`similar`/`novel`;
+  `Get` and `NextID` round it out.
+- **`internal/ingest/`** *(pure core over the index seam)* — `Prepare`, the
+  dedup-at-ingest write-path core: takes a `Draft` + `Meta`, probes the corpus
+  through `index.Assess`, and returns an `Outcome` (a quarantined draft or a
+  duplicate verdict). Reaches the index only through `Assess`.
+- **`internal/server/`** *(edge — MCP/HTTP)* — the three MCP tools
+  (`search_experience`, `get_experience`, `record_experience`) over streamable
+  HTTP, bearer-gated. Translates tool args to core calls and core values back to
+  tool results; holds no domain logic of its own.
+
+Dependency direction is acyclic and points inward: `cmd` → `server`/`index`;
+`server` → `index`/`record`/`ingest`; `ingest` → `index`/`record`; `index` →
+`record`/`fingerprint`; `record` and `fingerprint` depend on nothing internal.
 
 ## Seams / contracts
 
-> The interfaces that decouple core from edges (the boundaries you mock in tests). Name
-> each seam, its method set, and its implementations (real + test double).
+The stable seams — the boundaries other code (and, soon, sibling repos) build
+against — are registered once in [CONTRACTS.md](CONTRACTS.md) and not duplicated
+here ([CONVENTIONS.md](CONVENTIONS.md) "one fact, one home"). In short:
+
+- **The three MCP tools** are the external surface: `SearchArgs`→`SearchResult`
+  (≤`MaxK`=3 hits, *"empty is an answer"* — no near-miss padding),
+  `GetArgs`→`GetResult`, `RecordArgs`→`RecordResult`; bearer required, no
+  unauthenticated mode ([ADR-0001 §5–6](adr/ADR-0001-architecture.md)).
+- **`index.Index`** is the seam between the pure core and SQLite — the method
+  set and the `Query`/`Hit`/`Stored`/`Novelty`/`Assessment` value types are the
+  contract `ingest` and `server` mock in tests. Retrieval invariants live here:
+  precedence, the `MaxK` hard cap, and the relevance floor as *index policy*
+  ([ADR-0004](adr/ADR-0004-relevance-floor-is-index-policy.md)), with three-state
+  novelty fixed for this phase
+  ([ADR-0006](adr/ADR-0006-defer-score-banding.md)).
+- **The record schema + `exp-NNNN` identity** is the contract between writer
+  (`ingest`/`record`) and reader (`index`), and the durable format of the corpus.
+- **The quarantined-only write invariant** is the trust boundary: agent-proposed
+  records land `quarantined`; the PR is where a human promotes them. No code path
+  writes `validated`; quarantined records never reach the push channel
+  ([ADR-0001 §6](adr/ADR-0001-architecture.md)).
 
 ## Failure & offline behavior
 
-> What happens when a dependency is missing or down — degraded modes, missing-file =
-> defaults, atomic writes — so a first run never errors and a fault never corrupts state.
+- **Missing index = rebuild, not error.** The index is derived; a first run with
+  no SQLite file rebuilds from the `experience/` corpus rather than failing.
+- **Empty / no-hit retrieval is a valid answer.** Below the relevance floor,
+  `search_experience` returns nothing — it never pads with near-misses, which is
+  the measured #1 failure mode ([CONTEXT.md](CONTEXT.md) "near-miss").
+- **No network on the hot path.** Retrieval and ingest classification are
+  embedding-free and run fully in-process; a down model endpoint cannot stall a
+  decision-time query.
+- **Writes are safe by construction.** The write path produces *quarantined*
+  drafts for PR review; it never mutates the validated corpus in place, so a
+  faulted ingest cannot corrupt authoritative state.
+- **Bearer-gated edge.** The server refuses unauthenticated requests; tokens come
+  from the environment, are compared in constant time, and are never logged
+  ([CONVENTIONS.md](CONVENTIONS.md) Security).
 
 ## CI/CD
 
-> The gates that must pass to merge and what ships on a release — lint/vet, tests with
-> the coverage floor, build matrix, and the release/publish path.
+- **One gate per push:** `make ci` = `golangci-lint` + `go test -race` + the
+  coverage floor (`make cover-check`, floor in the Makefile `COVER_FLOOR`).
+  Lowering the floor needs an ADR-grade reason in the commit message.
+- **Process conformance:** `make doctor` runs the cookbook recipe-doctor
+  aggregate (`.recipes/lock.json`); process drift is caught by machinery.
+- CI must be green before merge; no `//nolint` without a trailing reason.
 
 ## Testing philosophy
 
-> How the layers are tested (test-first? edge/invariant/fuzz/concurrency?) and where each
-> layer lives — plus the rule that a fixed bug ships with the test that now guards it.
+- **Test-first.** New behavior starts with a failing test; every regression
+  ships with a guarding test *and* an experience record under `experience/` —
+  twiceshy is its own first corpus ([CONVENTIONS.md](CONVENTIONS.md) TDD).
+- **Test the core as values.** The pure packages (`record`, `fingerprint`,
+  `ingest`) are tested in-process with literal inputs; `index` is tested against
+  a temp-dir SQLite file; `server` is tested through the MCP tool handlers. No
+  test needs a network or live model.
+- **Invariants get explicit tests.** The `MaxK` cap, the relevance floor as
+  policy, fingerprint-exact precedence, and "empty is an answer" are asserted
+  directly so a refactor that erodes one fails loudly.
+- Run race-enabled tests locally before pushing (`make test`).
