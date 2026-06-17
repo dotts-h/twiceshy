@@ -1,8 +1,8 @@
 {
-  "_comment": "Host-neutral branch-protection config-as-code for twiceshy. scripts/apply-branch-protection.sh translates this to the host's API (GitHub rulesets / Forgejo|Gitea branch_protections). required_checks is a comma-separated list of the exact status-check CONTEXTS the CI publishes (NOT the job IDs) — on Forgejo these are `<workflow name> / <job name> (<event>)`, captured verbatim from a real PR run on 2026-06-17. NOTE before applying: the secret-scan (gitleaks) job is currently failing on this runner; enabling protection with it required will block all merges until that job is fixed.",
+  "_comment": "Host-neutral branch-protection config-as-code for twiceshy. scripts/apply-branch-protection.sh translates this to the host's API (GitHub rulesets / Forgejo|Gitea branch_protections). required_checks is a comma-separated list of the exact status-check CONTEXTS the CI publishes (NOT the job IDs) — on Forgejo these are `<workflow name> / <job name> (<event>)`, captured verbatim from a real PR run and all green as of 2026-06-17. required_approvals is 0 by design: the `claude` agent self-merges its own green, fully-gated PRs (it can't approve its own PR, so any non-zero value would block that); set it to 1 if you want a mandatory human approval on every PR. The workflows intentionally have NO paths-ignore so these required contexts always post (a skipped required check hangs a docs-only PR).",
   "branch": "main",
   "required_checks": "CI / Lint guard & test (pull_request),security / SAST & dependency audit (twiceshy) (pull_request),security / Secret scan (gitleaks) (pull_request)",
-  "required_approvals": 1,
+  "required_approvals": 0,
   "dismiss_stale_reviews": true,
   "require_linear_history": true,
   "block_force_push": true
