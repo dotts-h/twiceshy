@@ -3,7 +3,8 @@
 > A release is **outward-facing and hard to reverse** — a published release is
 > indexed and downloaded the moment it exists. Verify before and after; never
 > fire blind. The release is **tag-driven**: pushing a `v*` tag (or a manual
-> `workflow_dispatch` with the tag as input) runs `.github/workflows/release.yml`.
+> `workflow_dispatch` with the tag as input) runs `.forgejo/workflows/release.yml`
+> on the Forgejo runner (the canonical remote is `forgejo`, not the GitHub mirror).
 
 ## SemVer rules
 
@@ -30,8 +31,9 @@ Versions are `vMAJOR.MINOR.PATCH`, bumped per landed change:
 
 ## Publishing
 
-- **Preferred:** `git push origin <tag>` — the `push: tags` trigger runs the
-  workflow; the ref name *is* the tag, so the version is correct.
+- **Preferred:** `git push forgejo <tag>` — the `push: tags` trigger runs the
+  workflow; the ref name *is* the tag, so the version is correct. (`forgejo` is
+  the canonical remote; `origin` is the read-only GitHub mirror and won't run CI.)
 - **Fallback (tag push blocked):** trigger `workflow_dispatch` with the tag as
   input; the workflow's own `contents: write` token creates the tag and release
   server-side. This path *requires* the audited version step above.
@@ -41,7 +43,8 @@ Versions are `vMAJOR.MINOR.PATCH`, bumped per landed change:
 - [ ] The workflow run completed successfully.
 - [ ] Fetching the release **by the exact tag** returns it with `tag_name`
       equal to the tag (NOT a branch name).
-- [ ] Asset names embed the version (`twiceshy-<tag>-…`) and
+- [ ] Asset names embed the version and platform (`twiceshy-<tag>-<os>-<arch>`,
+      one per linux/amd64, linux/arm64, darwin/amd64, darwin/arm64) and
       `checksums.txt` is attached.
 - [ ] If the tag is wrong: the version resolution regressed. Fix the workflow,
       re-cut, and surface the mis-tagged release for deletion by a human.

@@ -24,8 +24,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # TODO(backfill): set up this repo's build toolchain here. On a docker
-      # runner the image is barebones — install what release_build_command needs.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # no GH-Actions cache service on this Forgejo runner (see ci.yml)
 
       - name: Resolve version
         id: ver
@@ -39,10 +41,17 @@ jobs:
       - name: Build artifacts (twiceshy)
         env:
           VERSION: ${{ steps.ver.outputs.version }}
-          ARTIFACT: "twiceshy"
         run: |
           mkdir -p dist
-          CGO_ENABLED=0 go build -o dist/twiceshy ./cmd/twiceshy
+          # Versioned, cross-platform binaries (twiceshy is pure-Go / CGO-free, so
+          # these all cross-compile). Asset names embed the tag + os/arch, which is
+          # exactly what docs/RELEASING.md and the cut-release skill verify.
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            os="${target%/*}"; arch="${target#*/}"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+              go build -trimpath -ldflags "-s -w" \
+              -o "dist/twiceshy-${VERSION}-${os}-${arch}" ./cmd/twiceshy
+          done
           if ! ls -A dist | grep -q .; then
             echo "::error::release build produced nothing in dist/"; exit 1
           fi

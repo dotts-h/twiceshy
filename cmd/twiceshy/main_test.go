@@ -5,6 +5,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
+	"flag"
 	"net/http"
 	"path/filepath"
 	"regexp"
@@ -50,6 +52,22 @@ func TestRunRejectsBadInvocations(t *testing.T) {
 				t.Error("want error, got nil")
 			}
 		})
+	}
+}
+
+// `-h` is a help request, not a failure: run returns flag.ErrHelp (which main
+// maps to exit 0), and the usage text never lands on the program's stdout writer
+// (it goes to stderr) — guards L4/L5.
+func TestRunHelpExitsCleanly(t *testing.T) {
+	for _, sub := range []string{"index", "serve"} {
+		var out bytes.Buffer
+		err := run(context.Background(), []string{sub, "-h"}, &out, func(string) string { return "" })
+		if !errors.Is(err, flag.ErrHelp) {
+			t.Errorf("%s -h: want flag.ErrHelp (exit 0), got %v", sub, err)
+		}
+		if out.Len() != 0 {
+			t.Errorf("%s -h: usage must not go to stdout, got %q", sub, out.String())
+		}
 	}
 }
 
