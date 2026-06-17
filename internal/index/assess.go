@@ -22,9 +22,14 @@ type Assessment struct {
 
 // Assess runs the search pipeline once and classifies the result.
 // It returns the novelty classification and the supporting evidence hits.
-// Assess never touches the database directly, never re-ranks, and never mutates q.
+// Assess applies index.DefaultFloor unless the caller overrides Query.Floor.
 func (ix *Index) Assess(ctx context.Context, q Query) (Assessment, error) {
-	hits, err := ix.Search(ctx, q)
+	qc := q
+	if qc.Floor == 0 {
+		qc.Floor = DefaultFloor
+	}
+
+	hits, err := ix.Search(ctx, qc)
 	if err != nil {
 		return Assessment{}, err
 	}

@@ -87,47 +87,66 @@ func TestAssessNovelWhenNothingMatches(t *testing.T) {
 	}
 }
 
-// The relevance floor moves the Similar/Novel boundary: a weak single-term
-// overlap that would be a lead with no floor must fall through to Novel once
-// the floor is raised above it. Below the floor, returning nothing is a feature.
-func TestAssessFloorDemotesWeakSimilarToNovel(t *testing.T) {
+// ADR-0004: the relevance floor is index POLICY, not a per-call accident.
+// Assess applies index.DefaultFloor unless the caller explicitly overrides it,
+// so a weak single-token overlap that a floor-off search would call a lead is
+// demoted to Novel BY DEFAULT — the locked ADR-0001 §3 invariant holds on every
+// novelty path, not only when a caller remembered to pass Floor. The literal
+// value of DefaultFloor is pinned here against the seed fixtures (ADR-0004 §4):
+// it must sit above a single weak token yet below a genuine multi-term match.
+func TestAssessAppliesDefaultFloorByPolicy(t *testing.T) {
 	ix := openIndex(t, similarCorpus(t))
 
-	strongHits, err := ix.Search(context.Background(), index.Query{
-		Text: "hnsw index build slow maintenance_work_mem vector",
+	// Premise — pin the boundary the constant must straddle. FloorOff yields the
+	// raw lexical score, the only place the zero/off distinction is observable.
+	weak, err := ix.Search(context.Background(), index.Query{Text: "index", Floor: index.FloorOff})
+	if err != nil || len(weak) == 0 {
+		t.Fatalf("setup weak search: %v %v", weak, err)
+	}
+	strong, err := ix.Search(context.Background(), index.Query{
+		Text: "hnsw index build slow maintenance_work_mem vector", Floor: index.FloorOff,
 	})
-	if err != nil || len(strongHits) == 0 {
-		t.Fatalf("setup search: %v %v", strongHits, err)
+	if err != nil || len(strong) == 0 {
+		t.Fatalf("setup strong search: %v %v", strong, err)
 	}
-	strong := strongHits[0].Score
-
-	weakHits, err := ix.Search(context.Background(), index.Query{Text: "index"})
-	if err != nil {
-		t.Fatalf("setup search: %v", err)
+	if !(weak[0].Score < index.DefaultFloor) {
+		t.Fatalf("DefaultFloor (%g) must exceed a weak single token (%g)", index.DefaultFloor, weak[0].Score)
 	}
-	if len(weakHits) == 0 || weakHits[0].Score >= strong {
-		t.Fatalf("test premise broken: weak %v not below strong %v", weakHits, strong)
+	if !(strong[0].Score >= index.DefaultFloor) {
+		t.Fatalf("DefaultFloor (%g) must not demote a multi-term match (%g)", index.DefaultFloor, strong[0].Score)
 	}
 
-	// No floor: the weak overlap is still a lead.
+	// Default policy (Floor unset): the weak single token falls below the floor → Novel.
 	a, err := ix.Assess(context.Background(), index.Query{Text: "index"})
 	if err != nil {
 		t.Fatalf("Assess: %v", err)
 	}
-	if a.Novelty != index.NoveltySimilar {
-		t.Fatalf("no floor: want Similar, got %q", a.Novelty)
-	}
-
-	// Floor above the weak score: it drops to Novel.
-	a, err = ix.Assess(context.Background(), index.Query{Text: "index", Floor: strong})
-	if err != nil {
-		t.Fatalf("Assess: %v", err)
-	}
 	if a.Novelty != index.NoveltyNovel {
-		t.Fatalf("with floor: want Novel, got %q (%+v)", a.Novelty, a)
+		t.Fatalf("default floor: weak overlap must be Novel, got %q (%+v)", a.Novelty, a)
 	}
 	if len(a.Candidates) != 0 {
 		t.Errorf("Novel must carry no candidates, got %+v", a.Candidates)
+	}
+
+	// The genuine multi-term match clears the default floor → Similar.
+	a, err = ix.Assess(context.Background(), index.Query{
+		Text: "hnsw index build slow maintenance_work_mem vector",
+	})
+	if err != nil {
+		t.Fatalf("Assess: %v", err)
+	}
+	if a.Novelty != index.NoveltySimilar {
+		t.Fatalf("default floor: multi-term match must survive as Similar, got %q", a.Novelty)
+	}
+
+	// Explicit opt-out (FloorOff) is the only way to get the weak lead back; the
+	// zero value no longer means "off" at the Assess layer.
+	a, err = ix.Assess(context.Background(), index.Query{Text: "index", Floor: index.FloorOff})
+	if err != nil {
+		t.Fatalf("Assess: %v", err)
+	}
+	if a.Novelty != index.NoveltySimilar {
+		t.Fatalf("FloorOff override: weak overlap must return as Similar, got %q", a.Novelty)
 	}
 }
 
