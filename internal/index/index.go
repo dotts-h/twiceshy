@@ -416,6 +416,7 @@ func (ix *Index) Get(ctx context.Context, id string) (*Stored, error) {
 func ftsQuery(text string) string {
 	var quoted []string
 	for _, tok := range strings.Fields(text) {
+		tok = stripControl(tok)
 		if !hasAlnum(tok) {
 			continue // a token with no letters or digits can't match anything
 		}
@@ -425,6 +426,22 @@ func ftsQuery(text string) string {
 		}
 	}
 	return strings.Join(quoted, " OR ")
+}
+
+// stripControl drops control runes (e.g. a NUL byte) from a token. They match
+// nothing in the FTS5 index, and a NUL would terminate the query string mid-token
+// — FTS5 then reports "unterminated string" on the dangling open quote (exp-0001).
+// Whitespace controls are already removed by strings.Fields; this catches the rest.
+func stripControl(s string) string {
+	if strings.IndexFunc(s, unicode.IsControl) < 0 {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 func hasAlnum(s string) bool {

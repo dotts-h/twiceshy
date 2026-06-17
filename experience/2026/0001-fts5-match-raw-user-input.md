@@ -52,6 +52,13 @@ resolution:
         input then only matches the exact adjacent word sequence, silently
         destroying recall — and an embedded `"` in the input still breaks
         the quoting.
+    - tried: "quoting each token but leaving its raw bytes untouched"
+      why_it_failed: >
+        A token can still carry control bytes the tokenizer can never index.
+        A NUL byte (`\x00`) terminates the FTS5 query string mid-token, so the
+        dangling open quote reports `unterminated string`. Strip control runes
+        from each token before quoting it; whitespace controls are already
+        gone via the token split. Found by fuzzing (FuzzSearchNeverErrors).
 
 guard:
   repro: "experience/repro/0001-fts5-raw-match.sh"

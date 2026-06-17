@@ -26,8 +26,8 @@ func TestParseFileParsesAFullRecord(t *testing.T) {
 	if rec.Symptom == nil || len(rec.Symptom.ErrorSignatures) != 4 {
 		t.Fatalf("want 4 error signatures, got %+v", rec.Symptom)
 	}
-	if rec.Resolution == nil || len(rec.Resolution.DeadEnds) != 2 {
-		t.Fatalf("want 2 dead ends, got %+v", rec.Resolution)
+	if rec.Resolution == nil || len(rec.Resolution.DeadEnds) != 3 {
+		t.Fatalf("want 3 dead ends, got %+v", rec.Resolution)
 	}
 	if rec.Guard == nil || rec.Guard.GuardingTest == nil || *rec.Guard.GuardingTest != "TestSearchQuoteEscapesFTS5Input" {
 		t.Errorf("guard = %+v", rec.Guard)

@@ -47,7 +47,7 @@ _Last generated: 2026-06-17 (UTC)._
 - L18: `type Assessment struct`
 - L27: `func (ix *Index) Assess(ctx context.Context, q Query) (Assessment, error)`
 
-### index.go (437 LOC)
+### index.go (454 LOC)
 - L58: `type Index struct`
 - L63: `type Query struct`
 - L86: `type Hit struct`
@@ -66,7 +66,8 @@ _Last generated: 2026-06-17 (UTC)._
 - L386: `func (ix *Index) NextID(ctx context.Context) (string, error)`
 - L398: `func (ix *Index) Get(ctx context.Context, id string) (*Stored, error)`
 - L416: `func ftsQuery(text string) string`
-- L430: `func hasAlnum(s string) bool`
+- L435: `func stripControl(s string) string`
+- L447: `func hasAlnum(s string) bool`
 
 ## internal/ingest
 
