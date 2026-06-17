@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package server exposes the MCP tools over streamable HTTP behind bearer
 // auth: the pull channel (ADR-0001 §5) search_experience and get_experience,
 // and the write path (Phase 3) record_experience — which dedups an
@@ -105,9 +107,18 @@ type SearchResult struct {
 	Hits []SearchHit `json:"hits"`
 }
 
+// maxQueryBytes caps the query at the MCP edge. index.maxQueryTokens bounds the
+// token *count*, but a single whitespace-free multi-MB token slips past it into
+// a SHA-256 plus a multi-MB FTS5 MATCH term; an authenticated client shouldn't
+// be able to turn one call into that much work.
+const maxQueryBytes = 16 << 10
+
 func (h *handlers) search(ctx context.Context, _ *mcp.CallToolRequest, args SearchArgs) (*mcp.CallToolResult, SearchResult, error) {
 	if strings.TrimSpace(args.Query) == "" {
 		return nil, SearchResult{}, errors.New("query must be non-empty")
+	}
+	if len(args.Query) > maxQueryBytes {
+		return nil, SearchResult{}, fmt.Errorf("query too large: %d bytes (max %d)", len(args.Query), maxQueryBytes)
 	}
 	hits, err := h.ix.Retrieve(ctx, index.Query{
 		Text:               args.Query,

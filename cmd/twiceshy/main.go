@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Command twiceshy is the experience service binary (ADR-0001 §9): one Go
 // process serving the Phase 1 read path.
 //
@@ -127,7 +129,13 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 	}
 	_, _ = fmt.Fprintf(out, "indexed %d records; listening on %s\n", n, ln.Addr())
 
-	srv := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		// Reap idle keep-alive connections so a client that opens and abandons
+		// them can't accumulate file handles indefinitely.
+		IdleTimeout: 120 * time.Second,
+	}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

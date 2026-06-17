@@ -47,22 +47,34 @@ for d in os.environ["WF_DIRS"].split():
 files = sorted(files)
 bad = []
 
+# A push trigger with no branch restriction fires on EVERY branch — the worst
+# double-run case. Distinguish it from "no push trigger" (exempt) and
+# "tag-only push" (exempt) so it can't slip through as None.
+UNRESTRICTED = "*unrestricted-push*"
+
 def branches_via_yaml(path):
     import yaml
     wf = yaml.safe_load(open(path)) or {}
     on = wf.get("on", wf.get(True, {}))  # bare `on:` parses as boolean True (YAML 1.1)
-    if not isinstance(on, dict):
+    if not isinstance(on, dict) or "push" not in on:
         return None
     push = on.get("push")
-    if isinstance(push, dict) and "branches" in push:
-        return [str(b) for b in (push["branches"] or [])]
-    return None
+    if isinstance(push, dict):
+        if "branches" in push:
+            return [str(b) for b in (push["branches"] or [])]
+        if "tags" in push:
+            return None  # tag-triggered without branches — exempt
+        return UNRESTRICTED  # `push: {}` with neither branches nor tags
+    return UNRESTRICTED  # bare `push:` (None/scalar) — fires on every branch
 
 def branches_via_text(path):
     """Fallback when PyYAML is absent: find the push: block under on: and read
-    its branches: list (inline [a, b] or block '- a' form)."""
+    its branches: list (inline [a, b] or block '- a' form). Returns the branch
+    list, None (no push trigger, or tag-only push), or UNRESTRICTED (a push with
+    no branch restriction)."""
     lines = open(path).read().splitlines()
     in_push = push_indent = None
+    saw_push = has_tags = False
     branches = None
     i = 0
     while i < len(lines):
@@ -70,11 +82,15 @@ def branches_via_text(path):
         line = re.sub(r"#.*$", "", raw)
         s, indent = line.strip(), len(line) - len(line.lstrip())
         if in_push is None:
-            if re.match(r"push:\s*$", s):
-                in_push, push_indent = True, indent
+            if re.match(r"push:\s*(\{\s*\})?$", s):
+                in_push, push_indent, saw_push = True, indent, True
+                if "{" in s:
+                    break  # inline `push: {}` — unrestricted
         else:
             if s and indent <= push_indent:
                 break  # left the push block
+            if re.match(r"tags:", s):
+                has_tags = True
             m = re.match(r"branches:\s*(.*)$", s)
             if m:
                 val = m.group(1).strip()
@@ -94,7 +110,11 @@ def branches_via_text(path):
                             break
                 break
         i += 1
-    return branches
+    if branches is not None:
+        return branches
+    if saw_push and not has_tags:
+        return UNRESTRICTED  # push block present but no branch restriction
+    return None
 
 for f in files:
     try:
@@ -107,13 +127,16 @@ for f in files:
         sys.exit(2)
     if got is None:
         continue
+    if got == UNRESTRICTED:
+        bad.append((f, ["<unrestricted: a push trigger with no branches fires on every branch>"]))
+        continue
     extra = [b for b in got if b != default]
     if extra:
         bad.append((f, extra))
 
 for f, extra in bad:
     print(f"ERROR: {f}: push.branches must be [{default}]; drop {extra} — "
-          f"a feature-branch push trigger doubles every CI run "
+          f"a feature-branch (or unrestricted) push trigger doubles every CI run "
           f"(push + pull_request both fire).")
 sys.exit(1 if bad else 0)
 PY

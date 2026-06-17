@@ -1,7 +1,10 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package server
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/dotts-h/twiceshy/internal/index"
@@ -48,10 +51,44 @@ type RecordResult struct {
 	Message    string      `json:"message"`
 }
 
+// Input-size caps for record_experience. The channel is bearer-authed
+// (trusted), so these are guardrails, not a security boundary — but one call
+// shouldn't drive unbounded work, and each error signature costs a dedup probe.
+const (
+	maxRecordBodyBytes  = 64 << 10 // 64 KiB markdown body
+	maxRecordTitleBytes = 1 << 10  // record.validate further bounds title to 8..120 runes
+	maxRecordSignatures = 32       // each drives a fingerprint dedup probe in ingest.Prepare
+	maxSignatureBytes   = 4 << 10  // each signature is hashed and FTS-indexed
+)
+
+// validateRecordSize rejects oversized inputs cheaply, before NextID allocation
+// and the per-signature dedup probes.
+func validateRecordSize(args RecordArgs) error {
+	if len(args.Body) > maxRecordBodyBytes {
+		return fmt.Errorf("body too large: %d bytes (max %d)", len(args.Body), maxRecordBodyBytes)
+	}
+	if len(args.Title) > maxRecordTitleBytes {
+		return fmt.Errorf("title too large: %d bytes (max %d)", len(args.Title), maxRecordTitleBytes)
+	}
+	if n := len(args.ErrorSignatures); n > maxRecordSignatures {
+		return fmt.Errorf("too many error_signatures: %d (max %d)", n, maxRecordSignatures)
+	}
+	for i, sig := range args.ErrorSignatures {
+		if len(sig) > maxSignatureBytes {
+			return fmt.Errorf("error_signatures[%d] too large: %d bytes (max %d)", i, len(sig), maxSignatureBytes)
+		}
+	}
+	return nil
+}
+
 // record processes a record_experience tool call. It builds a draft from the
 // provided arguments, runs dedup-at-ingest, and returns either a known-duplicate
 // result or a quarantined draft ready to be PR'd. It does NOT write to disk.
 func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args RecordArgs) (*mcp.CallToolResult, RecordResult, error) {
+	if err := validateRecordSize(args); err != nil {
+		return nil, RecordResult{}, err
+	}
+
 	// Build the draft from args.
 	draft := ingest.Draft{
 		Kind:  args.Kind,

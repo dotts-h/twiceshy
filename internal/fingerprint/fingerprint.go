@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package fingerprint implements the normative signature-normalization and
 // fingerprinting algorithm from docs/SCHEMA.md ("Fingerprints (normative
 // algorithm)"). The same code runs at index time (over a record's
