@@ -14,3 +14,4 @@ accepted ADR's decision — supersede it (`Status: superseded-by-NNNN`).
 | [0004](ADR-0004-relevance-floor-is-index-policy.md) | The relevance floor is index policy, not a per-call argument | Accepted |
 | [0005](ADR-0005-stable-seams.md) | Register the stable seams in CONTRACTS.md | Accepted |
 | [0006](ADR-0006-defer-score-banding.md) | Keep three-state novelty; defer score-banding to the dense phase | Accepted |
+| [0007](ADR-0007-floor-on-the-read-path.md) | The relevance floor applies to the read path too, via a single injection seam | Accepted |

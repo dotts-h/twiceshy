@@ -109,7 +109,7 @@ func (h *handlers) search(ctx context.Context, _ *mcp.CallToolRequest, args Sear
 	if strings.TrimSpace(args.Query) == "" {
 		return nil, SearchResult{}, errors.New("query must be non-empty")
 	}
-	hits, err := h.ix.Search(ctx, index.Query{
+	hits, err := h.ix.Retrieve(ctx, index.Query{
 		Text:               args.Query,
 		Repo:               h.repo,
 		Ecosystem:          args.Ecosystem,

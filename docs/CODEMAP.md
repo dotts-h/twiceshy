@@ -42,29 +42,31 @@ _Last generated: 2026-06-17 (UTC)._
 
 ## internal/index
 
-### assess.go (59 LOC)
+### assess.go (60 LOC)
 - L6: `type Novelty string`
 - L18: `type Assessment struct`
-- L26: `func (ix *Index) Assess(ctx context.Context, q Query) (Assessment, error)`
+- L27: `func (ix *Index) Assess(ctx context.Context, q Query) (Assessment, error)`
 
-### index.go (402 LOC)
-- L44: `type Index struct`
-- L49: `type Query struct`
-- L72: `type Hit struct`
-- L84: `type Stored struct`
-- L121: `func Open(path string) (*Index, error)`
-- L135: `func (ix *Index) Close() error { return ix.db.Close() }`
-- L141: `func (ix *Index) Rebuild(ctx context.Context, recs []*record.Record, repo string) error`
-- L164: `func insertRecord(ctx context.Context, tx *sql.Tx, r *record.Record, repo string) error`
-- L213: `func (ix *Index) Search(ctx context.Context, q Query) ([]Hit, error)`
-- L241: `func (ix *Index) fingerprintHits(ctx context.Context, q Query, k int) ([]Hit, error)`
-- L277: `func (ix *Index) lexicalHits(ctx context.Context, q Query, k int) ([]Hit, error)`
-- L321: `func appendStatusFilter(sb *strings.Builder, args []any, q Query) []any`
-- L330: `func appendStackFilter(sb *strings.Builder, args []any, q Query) []any`
-- L351: `func (ix *Index) NextID(ctx context.Context) (string, error)`
-- L363: `func (ix *Index) Get(ctx context.Context, id string) (*Stored, error)`
-- L381: `func ftsQuery(text string) string`
-- L395: `func hasAlnum(s string) bool`
+### index.go (437 LOC)
+- L58: `type Index struct`
+- L63: `type Query struct`
+- L86: `type Hit struct`
+- L98: `type Stored struct`
+- L135: `func Open(path string) (*Index, error)`
+- L149: `func (ix *Index) Close() error { return ix.db.Close() }`
+- L155: `func (ix *Index) Rebuild(ctx context.Context, recs []*record.Record, repo string) error`
+- L178: `func insertRecord(ctx context.Context, tx *sql.Tx, r *record.Record, repo string) error`
+- L230: `func floorPolicy(q Query) Query`
+- L242: `func (ix *Index) Retrieve(ctx context.Context, q Query) ([]Hit, error)`
+- L248: `func (ix *Index) Search(ctx context.Context, q Query) ([]Hit, error)`
+- L276: `func (ix *Index) fingerprintHits(ctx context.Context, q Query, k int) ([]Hit, error)`
+- L312: `func (ix *Index) lexicalHits(ctx context.Context, q Query, k int) ([]Hit, error)`
+- L356: `func appendStatusFilter(sb *strings.Builder, args []any, q Query) []any`
+- L365: `func appendStackFilter(sb *strings.Builder, args []any, q Query) []any`
+- L386: `func (ix *Index) NextID(ctx context.Context) (string, error)`
+- L398: `func (ix *Index) Get(ctx context.Context, id string) (*Stored, error)`
+- L416: `func ftsQuery(text string) string`
+- L430: `func hasAlnum(s string) bool`
 
 ## internal/ingest
 

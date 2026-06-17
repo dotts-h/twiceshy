@@ -22,14 +22,10 @@ type Assessment struct {
 
 // Assess runs the search pipeline once and classifies the result.
 // It returns the novelty classification and the supporting evidence hits.
-// Assess applies index.DefaultFloor unless the caller overrides Query.Floor.
+// Assess retrieves through the injection seam (Retrieve), so index.DefaultFloor
+// is applied unless the caller overrides Query.Floor.
 func (ix *Index) Assess(ctx context.Context, q Query) (Assessment, error) {
-	qc := q
-	if qc.Floor == 0 {
-		qc.Floor = DefaultFloor
-	}
-
-	hits, err := ix.Search(ctx, qc)
+	hits, err := ix.Retrieve(ctx, q)
 	if err != nil {
 		return Assessment{}, err
 	}
