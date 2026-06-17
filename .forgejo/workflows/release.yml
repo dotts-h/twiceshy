@@ -1,0 +1,73 @@
+name: Release
+
+# Forgejo/Gitea Actions flavor. Identical version-resolution and checksum logic
+# to the GitHub flavor; only the *publish* step differs — Forgejo/Gitea have no
+# softprops/action-gh-release, so this creates the release and uploads the
+# checksummed assets through the instance's own API with curl (no third-party
+# action, works on a barebones self-hosted runner).
+#
+# Backfill: set a `RELEASE_TOKEN` repo/org secret — a token with
+# `write:repository` on this repo. github.server_url / github.repository are
+# provided by the Forgejo/Gitea runner's GitHub-compat context.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0)"
+        required: true
+
+jobs:
+  build:
+    name: Build & publish artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # TODO(backfill): set up this repo's build toolchain here. On a docker
+      # runner the image is barebones — install what release_build_command needs.
+
+      - name: Resolve version
+        id: ver
+        # Prefer the dispatch input (a manual workflow_dispatch provides the tag);
+        # otherwise use the ref name (a push of a v* tag). The shell-default form
+        # (GITHUB_REF_NAME with a :- fallback) is WRONG on dispatch — the ref is
+        # the *branch*, non-empty, so it shadows the input and the release gets
+        # tagged after the branch. scripts/check-workflows.sh guards this.
+        run: echo "version=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build artifacts (twiceshy)
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          ARTIFACT: "twiceshy"
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=0 go build -o dist/twiceshy ./cmd/twiceshy
+          if ! ls -A dist | grep -q .; then
+            echo "::error::release build produced nothing in dist/"; exit 1
+          fi
+          cd dist && sha256sum * > checksums.txt && cat checksums.txt
+
+      - name: Publish release (twiceshy) via the Forgejo/Gitea API
+        env:
+          TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          SERVER: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::RELEASE_TOKEN secret is unset — see this workflow's backfill note"; exit 1
+          fi
+          api="$SERVER/api/v1/repos/$REPO"
+          rid=$(curl -fsS -X POST "$api/releases" \
+                  -H "Authorization: token $TOKEN" -H "Content-Type: application/json" \
+                  -d "{\"tag_name\":\"$VERSION\",\"name\":\"$VERSION\",\"draft\":false,\"prerelease\":false}" \
+                | python3 -c "import sys,json;print(json.load(sys.stdin)['id'])") \
+            || { echo "::error::could not create release $VERSION (does the tag exist?)"; exit 1; }
+          for f in dist/*; do
+            curl -fsS -X POST "$api/releases/$rid/assets?name=$(basename "$f")" \
+                 -H "Authorization: token $TOKEN" \
+                 -F "attachment=@$f" >/dev/null
+            echo "uploaded $(basename "$f")"
+          done
+          echo "published release $VERSION with $(ls dist | wc -l) asset(s)"

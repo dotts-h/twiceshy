@@ -1,0 +1,9 @@
+{
+  "_comment": "Host-neutral branch-protection config-as-code for twiceshy. scripts/apply-branch-protection.sh translates this to the host's API (GitHub rulesets / Forgejo|Gitea branch_protections). required_checks is a comma-separated list of the exact status-check names CI publishes — edit it to match your CI job/check names.",
+  "branch": "main",
+  "required_checks": "gates,sast,secret-scan",
+  "required_approvals": 1,
+  "dismiss_stale_reviews": true,
+  "require_linear_history": true,
+  "block_force_push": true
+}

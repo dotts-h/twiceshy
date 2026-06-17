@@ -1,0 +1,29 @@
+# gitleaks config — twiceshy
+#
+# Extends gitleaks' built-in rule set (the maintained catalog of credential
+# shapes) so you get upstream coverage without re-declaring every rule here.
+# Add project-specific allowlist entries below; keep them NARROW — an allowlist
+# is the one place a real secret can slip past the gate.
+title = "twiceshy gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Project allowlist — test fixtures and obviously-fake placeholders only."
+# Paths that legitimately contain secret-SHAPED but non-secret strings (test
+# fixtures, sample/example configs, recorded HTTP cassettes). Anchor these as
+# tightly as you can; a broad path here blinds the scanner to that whole tree.
+paths = [
+  '''(^|/)testdata/''',
+  '''(^|/)(__)?fixtures(__)?/''',
+  '''(^|/).*\.(example|sample)($|\.)''',
+  '''(^|/)docs/SECURITY\.md$''',
+]
+# Regexes for strings that are deliberately fake (use these placeholders in docs
+# and tests instead of allowlisting a whole file).
+regexes = [
+  '''EXAMPLE[_-]?(KEY|SECRET|TOKEN)''',
+  '''AKIA[0-9A-Z]*EXAMPLE''',
+  '''(?i)your[_-]?(api[_-]?key|token|secret)[_-]?here''',
+]

@@ -49,6 +49,15 @@ creep in single-purpose services.)
 - ADR-0001's decisions are **locked** — do not relitigate them in reviews or
   refactors; supersede them with a new ADR if the world changes.
 
+## Docs — one fact, one home
+
+Every fact has exactly **one canonical home**; everywhere else **links** to it,
+never copies it. A rule lives in CONVENTIONS, a decision in an ADR, the
+vocabulary in CONTEXT, a fixed bug in REGRESSIONS, a promise in CONTRACTS, the
+roadmap in NEXT_FEATURES. Duplicating a fact across docs guarantees they drift —
+when something moves, update its one home and re-point the links. `CLAUDE.md` /
+`AGENTS.md` stay thin pointers into this corpus, not second copies of it.
+
 ## CI & quality gates
 
 - Single CI run per push: lint (`golangci-lint`) + `go test -race` +
@@ -56,6 +65,9 @@ creep in single-purpose services.)
 - The coverage floor lives in the Makefile (`COVER_FLOOR`); raising it is
   welcome, lowering it needs an ADR-grade reason in the commit message.
 - CI must be green before merge. No `//nolint` without a trailing reason.
+- **Process conformance:** this repo is under cookbook recipe management
+  (`.recipes/lock.json`). `make doctor` runs the recipe-doctor aggregate; keep
+  it green — process drift is caught by machinery, not memory.
 
 ## Code style
 

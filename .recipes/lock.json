@@ -1,0 +1,116 @@
+{
+  "recipes": [
+    {
+      "name": "contracts",
+      "version": "0.1.0",
+      "tier": "L",
+      "answers": {
+        "project_name": "twiceshy",
+        "fleet_member": "false",
+        "fleet_name": "twiceshy"
+      },
+      "installedAt": "2026-06-17T12:47:33Z"
+    },
+    {
+      "name": "core",
+      "version": "0.2.0",
+      "tier": "L",
+      "answers": {
+        "project_name": "twiceshy",
+        "project_description": "Git-backed experience service that feeds engineering lessons to LLM agents via MCP",
+        "default_branch": "main",
+        "lint_command": "make lint",
+        "test_command": "make test"
+      },
+      "installedAt": "2026-06-17T12:47:22Z"
+    },
+    {
+      "name": "issues",
+      "version": "0.3.0",
+      "tier": "L",
+      "answers": {
+        "project_name": "twiceshy",
+        "ci_flavor": "forgejo"
+      },
+      "installedAt": "2026-06-17T12:47:33Z"
+    },
+    {
+      "name": "loop",
+      "version": "0.2.0",
+      "tier": "L",
+      "answers": {
+        "project_name": "twiceshy",
+        "default_branch": "main",
+        "lint_command": "make lint",
+        "test_command": "make test",
+        "ci_flavor": "forgejo"
+      },
+      "installedAt": "2026-06-17T12:47:33Z"
+    },
+    {
+      "name": "pr-gating",
+      "version": "0.1.0",
+      "tier": "L",
+      "answers": {
+        "project_name": "twiceshy",
+        "default_branch": "main",
+        "ci_flavor": "forgejo",
+        "required_checks": "gates,sast,secret-scan",
+        "require_approvals": "1",
+        "dismiss_stale": "true"
+      },
+      "installedAt": "2026-06-17T12:47:33Z"
+    },
+    {
+      "name": "quality",
+      "version": "0.6.0",
+      "tier": "L",
+      "answers": {
+        "project_name": "twiceshy",
+        "default_branch": "main",
+        "ci_flavor": "forgejo",
+        "runner_label": "ubuntu-latest",
+        "build_system": "make",
+        "lint_command": "make lint",
+        "test_command": "make test",
+        "coverage_floor": "80",
+        "node_version": "20",
+        "fuzz_enabled": "no",
+        "fuzz_command": "go test ./... -run x -fuzz . -fuzztime 20s",
+        "monorepo": "no",
+        "modules": "[]",
+        "license_header": "no",
+        "license_spdx": ""
+      },
+      "installedAt": "2026-06-17T12:47:22Z"
+    },
+    {
+      "name": "release",
+      "version": "0.3.0",
+      "tier": "L",
+      "answers": {
+        "project_name": "twiceshy",
+        "ci_flavor": "forgejo",
+        "runner_label": "ubuntu-latest",
+        "artifact_name": "twiceshy",
+        "release_build_command": "CGO_ENABLED=0 go build -o dist/twiceshy ./cmd/twiceshy"
+      },
+      "installedAt": "2026-06-17T12:47:33Z"
+    },
+    {
+      "name": "security",
+      "version": "0.1.0",
+      "tier": "L",
+      "answers": {
+        "project_name": "twiceshy",
+        "default_branch": "main",
+        "ci_flavor": "forgejo",
+        "runner_label": "ubuntu-latest",
+        "sast_command": "go vet ./... ; govulncheck ./...",
+        "dep_audit_command": "govulncheck ./...",
+        "secret_scan": "yes"
+      },
+      "installedAt": "2026-06-17T12:47:22Z"
+    }
+  ]
+}

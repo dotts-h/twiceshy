@@ -1,0 +1,69 @@
+name: security
+
+# Security gate. Same single-run trigger rule as the quality recipe:
+# `pull_request` validates a branch while a PR is open, `push` validates
+# main on merge — a feature branch is NEVER under `push` (that
+# double-runs). scripts/check-workflows.sh (quality recipe) guards this.
+#
+# `paths-ignore` skips docs/agent-config-only changes (they can't introduce a
+# vulnerable dependency, an insecure code pattern, or a leaked secret in code).
+# If `security` is a *required* check in branch protection, confirm your ruleset
+# treats a skipped required check as passing (see the pr-gating recipe), or a
+# docs-only PR hangs unmergeable.
+#
+# Host-neutral: the same file runs on GitHub Actions and on a Forgejo/Gitea
+# Actions runner. The actions used (checkout, gitleaks) resolve from the host's
+# configured action source; on a self-hosted runner mirror them if your host
+# can't reach github.com.
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["docs/**", "**/*.md", ".claude/**"]
+  pull_request:
+    branches: [main]
+    paths-ignore: ["docs/**", "**/*.md", ".claude/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sast:
+    name: SAST & dependency audit (twiceshy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # TODO(backfill): install this repo's toolchain + the scanners your
+      # commands need here (setup-go + `go install golang.org/x/vuln/cmd/govulncheck@latest`,
+      # `pip install semgrep bandit pip-audit`, `npm ci`, trivy …). The
+      # adopt-recipes inventory lists the languages it detected.
+      - name: SAST (static analysis)
+        run: go vet ./... ; govulncheck ./...
+      - name: Dependency / vulnerability audit
+        run: govulncheck ./...
+
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    # Rendered from the secret_scan answer at install time. With secret_scan=no
+    # the recipe omits the .gitleaks.toml config and this guard keeps the job a
+    # no-op; flip it to a literal `true` (or re-install with secret_scan=yes) to
+    # enforce it.
+    if: ${{ 'yes' == 'yes' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks diffs history on a push and the PR range on a PR; fetch the
+          # full history so a secret added in an earlier commit is still caught.
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          # The config lives at .gitleaks.toml (rendered by this recipe); its
+          # allowlist exempts test fixtures. GITLEAKS_LICENSE is only needed for
+          # gitleaks-action's org features — single-repo scanning runs without it.
+          GITLEAKS_CONFIG: .gitleaks.toml
