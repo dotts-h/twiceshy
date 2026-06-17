@@ -3,7 +3,7 @@
 GO          ?= go
 COVER_FLOOR ?= 80
 
-.PHONY: ci lint test cover cover-check build tidy
+.PHONY: ci lint test cover cover-check build tidy doctor
 
 ci: lint cover-check
 
@@ -27,3 +27,15 @@ build:
 
 tidy:
 	$(GO) mod tidy
+
+# Recipe-conformance doctor (cookbook@ori plugin, dotts-h/claude-skills).
+# Resolve the catalog: explicit RECIPES_DIR (CI/manual) > $CLAUDE_PLUGIN_ROOT
+# (set only inside a plugin command/hook, usually empty in a plain make shell) >
+# the marketplace install location > a local clone. The wildcard fallback makes
+# `make doctor` work in a web/CLI session with no env var.
+RECIPES_DIR ?= $(CLAUDE_PLUGIN_ROOT)
+ifeq ($(strip $(RECIPES_DIR)),)
+RECIPES_DIR := $(firstword $(wildcard $(HOME)/.claude/plugins/marketplaces/*/plugins/cookbook) $(HOME)/claude-skills-marketplace/plugins/cookbook ../claude-skills/plugins/cookbook)
+endif
+doctor:
+	bash $(RECIPES_DIR)/skills/recipe-doctor/scripts/run-doctors.sh .

@@ -1,0 +1,63 @@
+name: CI
+
+# Triggers run CI exactly once per change: `pull_request` validates a branch while
+# a PR is open, and `push` validates main on merge. A feature branch
+# is NEVER listed under `push` — that runs the whole pipeline twice per push (the
+# push event AND the pull_request event, on refs the concurrency group can't dedup).
+# scripts/check-workflows.sh guards this invariant.
+#
+# `paths-ignore` skips the whole pipeline for docs-only and agent-config (`.claude/**`)
+# changes — a markdown edit or a Claude settings/skill edit
+# can't change a build or test result. The skip fires only when EVERY changed path
+# matches, so a PR that also touches code still runs in full. Two cautions before
+# trusting it: (1) if any committed `.md`/`docs/**` file is a build or test input
+# (a golden fixture, a doc-snapshot test), narrow these globs or a skipped run will
+# hide a real failure; (2) if this workflow is a *required* status check in branch
+# protection, a skipped run posts no status — confirm your ruleset counts a skipped
+# required check as passing, or a docs-only PR will hang unmergeable.
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["docs/**", "**/*.md", ".claude/**"]
+  pull_request:
+    branches: [main]
+    paths-ignore: ["docs/**", "**/*.md", ".claude/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: Lint, guard & test
+    runs-on: ubuntu-latest
+    env:
+      COVERAGE_FLOOR: "80"
+    steps:
+      - uses: actions/checkout@v4
+      # TODO(backfill): install this repo's toolchain here (setup-go / setup-python /
+      # apt deps ...). The adopt-recipes inventory lists what it detected.
+      - name: Lint
+        run: make lint
+      - name: Workflow invariants (no CI double-runs; release version resolution)
+        run: bash scripts/check-workflows.sh
+      - name: Test
+        run: make test
+      # Enforce the coverage floor: CI FAILS below 80% instead of
+      # merely reporting it. The floor compare + failure are wired here; only the
+      # measurement is language-specific.
+      # TODO(backfill): set COVERAGE to this language's measured % (e.g. parse
+      # `go tool cover -func`, coverage.py, nyc). Until then it reads 0 and the
+      # gate fails closed — wire the measurement, don't delete the gate.
+      - name: Coverage floor
+        run: |
+          COVERAGE="${COVERAGE:-0}"
+          if [ "${COVERAGE%.*}" -lt "${COVERAGE_FLOOR}" ]; then
+            echo "::error::coverage ${COVERAGE}% is below the ${COVERAGE_FLOOR}% floor"
+            exit 1
+          fi
+          echo "coverage ${COVERAGE}% meets the ${COVERAGE_FLOOR}% floor"
