@@ -1,7 +1,10 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package record_test
 
 import (
 	"bytes"
+	"reflect"
 	"testing"
 
 	"github.com/dotts-h/twiceshy/internal/record"
@@ -15,20 +18,69 @@ import (
 
 func eqIgnoringRaw(t *testing.T, want, got *record.Record) {
 	t.Helper()
-	// Compare the canonical serialized form, not reflect.DeepEqual: nil vs empty
-	// slice/map is a yaml representation artifact we don't care about. A stable
-	// on-disk form (and a body/frontmatter that re-marshal identically) is the
-	// property that matters; a dropped required field is caught by Parse failing.
-	mw, err := record.Marshal(want)
-	if err != nil {
-		t.Fatalf("marshal want: %v", err)
+	// STRUCTURAL comparison, not a re-marshal of both sides. Marshaling want and
+	// got and byte-comparing is tautological: a *symmetric* drop is invisible —
+	// if Marshal omits a field, both sides lose it and still match. The whole
+	// point is to catch exactly that (e.g. error_signatures, the dedup key,
+	// silently vanishing on the round trip).
+	//
+	// Compare field-by-field, treating a nil slice/map as equal to an empty one
+	// (a pure YAML representation artifact — `error_signatures: []` reloads as
+	// nil) while still failing when a *populated* field is lost. Raw is the
+	// on-disk byte encoding and legitimately differs, so ignore only it.
+	w, g := *want, *got
+	w.Raw, g.Raw = nil, nil
+	if !valEqualNilEmpty(reflect.ValueOf(w), reflect.ValueOf(g)) {
+		mw, _ := record.Marshal(want)
+		mg, _ := record.Marshal(got)
+		t.Errorf("round-trip changed the record (ignoring Raw):\n--- want ---\n%s\n--- got ---\n%s", mw, mg)
 	}
-	mg, err := record.Marshal(got)
-	if err != nil {
-		t.Fatalf("marshal got: %v", err)
+}
+
+// valEqualNilEmpty is reflect.DeepEqual with one relaxation: a nil and an empty
+// slice/map compare equal (len 0 == len 0). That distinction is a serialization
+// artifact, never data; a length difference (a dropped or added element) still
+// fails, which is the property the round-trip test must guard.
+func valEqualNilEmpty(a, b reflect.Value) bool {
+	if a.Type() != b.Type() {
+		return false
 	}
-	if !bytes.Equal(mw, mg) {
-		t.Errorf("round-trip not stable:\n--- want ---\n%s\n--- got ---\n%s", mw, mg)
+	switch a.Kind() {
+	case reflect.Pointer:
+		if a.IsNil() || b.IsNil() {
+			return a.IsNil() == b.IsNil()
+		}
+		return valEqualNilEmpty(a.Elem(), b.Elem())
+	case reflect.Slice, reflect.Array:
+		if a.Len() != b.Len() {
+			return false
+		}
+		for i := 0; i < a.Len(); i++ {
+			if !valEqualNilEmpty(a.Index(i), b.Index(i)) {
+				return false
+			}
+		}
+		return true
+	case reflect.Map:
+		if a.Len() != b.Len() {
+			return false
+		}
+		for _, k := range a.MapKeys() {
+			bv := b.MapIndex(k)
+			if !bv.IsValid() || !valEqualNilEmpty(a.MapIndex(k), bv) {
+				return false
+			}
+		}
+		return true
+	case reflect.Struct:
+		for i := 0; i < a.NumField(); i++ {
+			if !valEqualNilEmpty(a.Field(i), b.Field(i)) {
+				return false
+			}
+		}
+		return true
+	default:
+		return reflect.DeepEqual(a.Interface(), b.Interface())
 	}
 }
 

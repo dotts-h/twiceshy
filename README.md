@@ -31,7 +31,9 @@ and [docs/adr/ADR-0001-architecture.md](docs/adr/ADR-0001-architecture.md).
 
 Bootstrapping. Phase 1 (read path: parser/validator, FTS5 index,
 fingerprint + lexical search, MCP `search_experience`/`get_experience`) is
-in progress; later phases are tracked as issues.
+done, and the Phase 3 write path (`record_experience` — propose-only,
+returns a quarantined draft to open as a PR) has landed. Remaining phases
+(hooks push channel, dense retrieval, doctors) are tracked as issues.
 
 ## Development
 

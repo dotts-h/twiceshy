@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package record implements parsing and validation of twiceshy experience
 // records — the normative spec is docs/SCHEMA.md, mirrored by
 // schema/experience-record.v1.schema.json. Records are YAML frontmatter

@@ -24,10 +24,11 @@ LLM coding agents at decision time.
   test *and* an experience record under `experience/` (we dogfood).
 - **Dependency budget** (CONVENTIONS.md): SQLite/FTS5 driver, MCP/HTTP
   library, YAML parser. Anything else: ask the owner first.
-- **Phase discipline.** Phase 1 = read path only (parser/validator, FTS5
-  index, fingerprint + lexical search, MCP `search_experience` /
-  `get_experience`). Dense search, hooks, write path, doctors are tracked
-  issues — do not implement them early.
+- **Phase discipline.** Phase 1 (read path: parser/validator, FTS5 index,
+  fingerprint + lexical search, MCP `search_experience` / `get_experience`)
+  and the Phase 3 write path (`record_experience`, propose-only) are done.
+  Dense search, hooks push channel, and doctors are tracked issues — do not
+  implement them early.
 - **Retrieval invariants** (ADR-0001 §3–4): hot path embedding-free; hard
   cap k≤3; relevance floor below which nothing is injected; quarantined
   records never reach the push channel.

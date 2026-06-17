@@ -81,7 +81,7 @@ The architecture behind these terms is locked in
   `UserPromptSubmit`/`PreToolUse` hook calls a plain HTTP endpoint and injects
   trap cards via `additionalContext` — only on high-confidence matches.
 - **Pull channel** — on-demand: MCP tools (`search_experience`,
-  `get_experience`, later `record_experience`) over **streamable HTTP**
+  `get_experience`, and `record_experience`) over **streamable HTTP**
   (never the deprecated HTTP+SSE transport).
 - **Index channel** — cheap ambient awareness: generated skill /
   `AGENTS.md`-style one-liners so the model knows the store exists. Never

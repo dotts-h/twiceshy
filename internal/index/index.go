@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package index is the derived, always-rebuildable SQLite index over the
 // experience corpus (ADR-0001 §1) and the embedding-free retrieval path
 // (§3–4): fingerprint-exact first, BM25/FTS5 lexical second, hard cap k≤3,
@@ -131,6 +133,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS records_fts USING fts5(
 );
 `
 
+// maxOpenConns bounds the SQLite connection pool to the documented
+// ≤4-concurrent budget. WAL makes concurrent reads safe; the cap stops an
+// unbounded pool from opening a file handle per in-flight request.
+const maxOpenConns = 4
+
 // Open opens (creating if needed) the index file.
 func Open(path string) (*Index, error) {
 	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
@@ -138,6 +145,7 @@ func Open(path string) (*Index, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening index %s: %w", path, err)
 	}
+	db.SetMaxOpenConns(maxOpenConns)
 	if _, err := db.Exec(ddl); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("creating index schema: %w", err)
@@ -383,6 +391,13 @@ func appendStackFilter(sb *strings.Builder, args []any, q Query) []any {
 // NextID returns the next sequential record id ("exp-NNNN"): one past the
 // highest currently indexed. The write path uses it to allocate an id for a
 // new quarantined record. An empty corpus yields "exp-0001".
+//
+// This is a MAX+1 read, NOT an atomic allocation: two concurrent
+// record_experience calls can be handed the same id. That is acceptable only
+// because the write path is propose-only — it returns a draft for a human to
+// open as a PR (the trust boundary), where a colliding id is caught in review
+// and cheap to re-derive at merge. Reserve/allocate transactionally before
+// allowing any unattended (auto-merge / non-PR) write path. See docs/TECH_DEBT.md (M3).
 func (ix *Index) NextID(ctx context.Context) (string, error) {
 	var max sql.NullInt64
 	err := ix.db.QueryRowContext(ctx,
