@@ -69,8 +69,12 @@ when something moves, update its one home and re-point the links. `CLAUDE.md` /
 
 ## CI & quality gates
 
-- Single CI run per push: lint (`golangci-lint`) + `go test -race` +
-  coverage floor. `make ci` reproduces it locally.
+- CI runs two workflows per push: `ci.yml` (lint `golangci-lint` + `go test
+  -race` + coverage floor) and `security.yml` (`go vet`/`govulncheck` +
+  `gitleaks`). `make ci` reproduces **all** required checks locally
+  (`lint cover-check sec`), so green locally means green in CI. The `sec` step
+  warns + skips if `govulncheck`/`gitleaks` aren't installed (CI always
+  enforces); install them (the brain has both) to enforce locally too.
 - The coverage floor lives in the Makefile (`COVER_FLOOR`); raising it is
   welcome, lowering it needs an ADR-grade reason in the commit message.
 - CI must be green before merge. No `//nolint` without a trailing reason.
