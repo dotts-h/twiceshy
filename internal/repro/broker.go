@@ -285,35 +285,16 @@ func (b *dockerBroker) populate(ctx context.Context, id, vol string, job Job) er
 	if err != nil {
 		return fmt.Errorf("repro: tar files: %w", err)
 	}
-	// populate stages files into the disk-backed volume and hands it to the
-	// non-root exec user. It runs the ONLY trusted command in the broker — the
-	// `tar`+`chown` below — never untrusted code, with no network. The
-	// disk-backed volume is root-owned on create, so populate runs as root with
-	// exactly CAP_CHOWN added back (nothing else) to chown it to execUID; the
-	// file bytes are written, never executed. The tar is wrapped in `sh -ec`
-	// because under runsc a binary running as PID 1 does not reliably consume a
-	// piped stdin, but a shell child does.
-	args := []string{
-		"run", "--rm", "-i",
-		"--name", "twiceshy-repro-" + id + "-populate",
-		"--label", labelKey + "=" + id,
-		"--runtime", b.runtime,
-		"--network", "none",
-		"--read-only",
-		"--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=" + b.limits.TmpfsSize,
-		"--cap-drop", "ALL",
-		"--cap-add", "CHOWN", // only to chown the root-owned volume; no other cap
-		"--security-opt", "no-new-privileges",
-		"--memory", b.limits.Memory,
-		"--memory-swap", b.limits.Memory,
-		"--cpus", b.limits.CPUs,
-		"--pids-limit", strconv.Itoa(b.limits.PidsLimit),
-		"--user", "0:0",
-		"-v", vol + ":" + workDir,
-		"-w", workDir,
-		job.Image,
-		"sh", "-ec", "tar -xf - -C " + workDir + " && chown -R " + execUID + " " + workDir,
-	}
+	// populate runs the ONLY trusted command in the broker — the `tar`+`chown`
+	// below — never untrusted code, with no network. It uses the SAME hardcoded
+	// sandbox policy as every other phase (sandboxArgs), differing only in: it
+	// runs as root with exactly CAP_CHOWN added back (the disk-backed volume is
+	// root-owned on create, so it must chown it to execUID) and it reads the tar
+	// on stdin (-i). The tar is wrapped in `sh -ec` because under runsc a binary
+	// running as PID 1 does not reliably consume a piped stdin, but a shell does.
+	args := b.sandboxArgs(id, vol, "populate", "none", "0:0", []string{"CHOWN"})
+	args = append(args, "-i", job.Image,
+		"sh", "-ec", "tar -xf - -C "+workDir+" && chown -R "+execUID+" "+workDir)
 	r, err := b.runner.run(ctx, tarball, b.phaseTimeout(job), "docker", args...)
 	if err != nil {
 		return fmt.Errorf("repro: populate: %w", err)
@@ -353,8 +334,12 @@ func (b *dockerBroker) runPhase(ctx context.Context, id, vol, phase, network, us
 	return pr
 }
 
-// policyArgs builds the hardcoded `docker run` flags for a sandboxed phase.
-func (b *dockerBroker) policyArgs(id, vol, phase, network, user string, env map[string]string) []string {
+// sandboxArgs is the SINGLE SOURCE of the hardcoded sandbox policy: the
+// `docker run` flags every phase shares. Keeping it in one place means a
+// hardening change can't be applied to one phase and forgotten on another. The
+// only per-phase variation is the network, the user, and (populate only) an
+// added capability — none of which a record can influence.
+func (b *dockerBroker) sandboxArgs(id, vol, phase, network, user string, capAdd []string) []string {
 	args := []string{
 		"run", "--rm",
 		"--name", "twiceshy-repro-" + id + "-" + phase,
@@ -375,6 +360,16 @@ func (b *dockerBroker) policyArgs(id, vol, phase, network, user string, env map[
 		"-v", vol + ":" + workDir,
 		"-w", workDir,
 	}
+	for _, c := range capAdd {
+		args = append(args, "--cap-add", c)
+	}
+	return args
+}
+
+// policyArgs builds the sandbox flags for a networked/no-network phase that runs
+// the (untrusted) command — full policy, no added capabilities, plus env.
+func (b *dockerBroker) policyArgs(id, vol, phase, network, user string, env map[string]string) []string {
+	args := b.sandboxArgs(id, vol, phase, network, user, nil)
 	for _, k := range sortedKeys(env) {
 		args = append(args, "--env", k+"="+env[k])
 	}
