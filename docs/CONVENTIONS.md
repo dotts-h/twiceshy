@@ -30,6 +30,15 @@ added — open an issue or ask in the session. When in doubt, write the 50
 lines yourself. (The research's prior art is explicit about transitive-dep
 creep in single-purpose services.)
 
+**Check a dependency against the locked build before planning around it.** The
+release is **CGO-free** (`CGO_ENABLED=0`, pure-Go `modernc.org/sqlite`,
+cross-compiled for linux/darwin × amd64/arm64). A storage/retrieval tech named
+in a roadmap item (e.g. a vector store) must be verified against that invariant
+*before* it's committed to — `sqlite-vec` was planned, then found to be a CGO
+extension that breaks the build, and replaced with pure-Go cosine
+([ADR-0009](adr/ADR-0009-dense-retrieval-is-pure-go-cosine.md)). Don't carry a
+dep assumption from plan to implementation unchecked. (Retro 0001.)
+
 ## TDD & regressions
 
 - **Test first.** New behavior starts with a failing test; the commit
@@ -68,6 +77,16 @@ when something moves, update its one home and re-point the links. `CLAUDE.md` /
 - **Process conformance:** this repo is under cookbook recipe management
   (`.recipes/lock.json`). `make doctor` runs the recipe-doctor aggregate; keep
   it green — process drift is caught by machinery, not memory.
+- **Reading CI status (Forgejo):** poll `actions/tasks` filtered by `head_sha`
+  for terminal per-run `success`/`failure` — the *combined* commit-status
+  `.state` is unreliable (stale/partial), and a naive `group_by(.context)|.[-1]`
+  reads the **oldest** status, not the latest. (Retro 0001.)
+- **gitleaks scans the whole commit range, not just the working tree.** A
+  follow-up "fix" commit does NOT clear a secret already in branch history —
+  squash to a single clean commit. Corollary: **secret-shaped test data is
+  assembled at run time** (e.g. `strings.Repeat`/split literals; a high-entropy
+  value via `hex(sha256(seed))`), never a literal token in any commit — otherwise
+  the scanner flags the very tests of a secret detector. (Retro 0001; REGRESSIONS.)
 
 ## Code style
 
