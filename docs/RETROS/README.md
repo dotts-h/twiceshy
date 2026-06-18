@@ -8,4 +8,4 @@ the story. A lesson that lives only in a retro is a lesson that will be re-learn
 
 | id | title |
 |----|-------|
-| — | *(no retros yet)* |
+| [0001](0001-build-the-remaining-program.md) | building the remaining program (importer → dense → security → doctors → deploy-ready) |
