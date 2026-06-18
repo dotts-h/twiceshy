@@ -172,19 +172,22 @@ func (h *handlers) search(ctx context.Context, _ *mcp.CallToolRequest, args Sear
 			ID:      hit.ID,
 			Kind:    hit.Kind,
 			Status:  hit.Status,
-			Title:   hit.Title,
-			Summary: hit.Summary,
+			Title:   capText(sanitizeForTransport(hit.Title), maxSearchTitleBytes),
+			Summary: capText(sanitizeForTransport(hit.Summary), maxSearchSummaryBytes),
 			Score:   hit.Score,
 			Matched: hit.Matched,
 		})
 	}
+	enveloped := renderSearchResults(out.Hits)
 	h.logger.Info("tool call",
 		slog.String("tool", tool),
 		slog.String("outcome", "ok"),
 		slog.Int64("duration_ms", time.Since(start).Milliseconds()),
 		slog.Int("hits", len(out.Hits)),
 	)
-	return nil, out, nil
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: enveloped}},
+	}, out, nil
 }
 
 // GetArgs is the get_experience input.
@@ -221,14 +224,18 @@ func (h *handlers) get(ctx context.Context, _ *mcp.CallToolRequest, args GetArgs
 		slog.String("id", args.ID),
 		slog.Bool("found", true),
 	)
-	return nil, GetResult{
+	enveloped := renderGetExperience(stored.Status, stored.ID, stored.Markdown)
+	result := GetResult{
 		ID:       stored.ID,
 		Kind:     stored.Kind,
 		Status:   stored.Status,
 		Title:    stored.Title,
 		Path:     stored.Path,
-		Markdown: stored.Markdown,
-	}, nil
+		Markdown: enveloped,
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: enveloped}},
+	}, result, nil
 }
 
 func (h *handlers) logToolError(tool string, start time.Time, err error, extra ...slog.Attr) {
