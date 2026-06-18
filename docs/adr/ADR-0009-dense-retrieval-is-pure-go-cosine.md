@@ -44,6 +44,20 @@ scale. The hot path is embedding-free by rule (ADR-0001 §4) regardless.
 This **supersedes the "sqlite-vec" wording** in ADR-0001 §3, ADR-0006, and issue
 #0006; the RRF and (deferred) score-banding intent is unchanged.
 
+## The dense floor (two floors, no fused-score floor)
+
+Lexical hits are filtered by the calibrated BM25 relevance floor (`Query.Floor`);
+dense hits are filtered by a separate coarse `denseFloor` (cosine ≥ 0.5) — a
+demote-the-noise heuristic, **not** a calibrated band (banding stays deferred,
+ADR-0006). The fused RRF score is not floored again; instead, **a record reaches
+fusion only if it cleared at least one modality's floor**, so a record below
+*both* floors can never be surfaced (guarded by
+`TestRetrieveFusedDropsDoublyBelowFloor`). A dense-only hit (semantically near,
+lexically weak) riding in is the intended value of dense retrieval, gated by
+`denseFloor`. If `denseFloor` proves mis-calibrated as the corpus grows, recalibrate
+it (or land normalized banding) here — it is the dense-phase analogue of
+`DefaultFloor`'s deferred-calibration debt (TECH_DEBT L6/L7).
+
 ## Consequences
 
 - The CGO-free, `CGO_ENABLED=0` cross-compiled release is preserved — no new CGO

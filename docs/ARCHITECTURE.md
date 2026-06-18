@@ -28,7 +28,9 @@ from [ADR-0001](adr/ADR-0001-architecture.md) and the research behind it
 - **Embedding-free hot path.** Retrieval at decision time is fingerprint-exact
   then lexical (BM25), capped and floored — no embedding call on the path an
   agent waits on ([ADR-0001 §3–4](adr/ADR-0001-architecture.md)). Dense/RRF
-  retrieval is a later phase and stays off the hot path.
+  retrieval ([ADR-0009](adr/ADR-0009-dense-retrieval-is-pure-go-cosine.md),
+  pure-Go cosine) runs only on the pull path behind an optional embedder and
+  stays off the hot path; `Assess` (the hot/push classifier) never embeds.
 
 ## Module map
 
@@ -48,19 +50,32 @@ point first, pure domain core in the middle, IO/transport edges last.
   `Open`/`Close`/`Rebuild` manage the derived FTS5 index; `Search` is the pure
   retrieval mechanism (fingerprint-exact → lexical, `MaxK` cap, relevance
   floor); `Assess` classifies an incoming symptom as `known`/`similar`/`novel`;
+  `RetrieveFused` is the pull entry point that fuses fingerprint + lexical +
+  optional dense (cosine) via RRF behind an `Embedder` seam (ADR-0009);
   `Get` and `NextID` round it out.
 - **`internal/ingest/`** *(pure core over the index seam)* — `Prepare`, the
   dedup-at-ingest write-path core: takes a `Draft` + `Meta`, probes the corpus
-  through `index.Assess`, and returns an `Outcome` (a quarantined draft or a
-  duplicate verdict). Reaches the index only through `Assess`.
+  through `index.Assess`, screens it through `internal/screen`, and returns an
+  `Outcome` (a quarantined draft or a duplicate verdict). The `Source` adapter
+  seam (`deprecationSource` for go/py, `osvSource`) feeds the importer.
+- **`internal/screen/`** *(pure core)* — the ingestion safety gate (#0011):
+  `Scan` over record text for secrets / executable-harmful-code / PII; masked
+  findings, never echoes a raw secret.
+- **`internal/pack/`** *(pure core)* — the experience-pack builder: `Classify`
+  (fail-closed commercial-license eligibility) + `BuildManifest` (ADR-0002 §4).
+- **`internal/doctor/`** *(pure core + endoflife edge)* — store-hygiene jobs,
+  report-only/delta (ADR-0010): the `Doctor` seam + D2 staleness over an
+  `EOLSource` (endoflife.date).
 - **`internal/server/`** *(edge — MCP/HTTP)* — the three MCP tools
   (`search_experience`, `get_experience`, `record_experience`) over streamable
-  HTTP, bearer-gated. Translates tool args to core calls and core values back to
-  tool results; holds no domain logic of its own.
+  HTTP, bearer-gated, behind a middleware chain (auth → rate-limit → timeout →
+  max-bytes). Translates tool args to core calls and back; holds no domain logic.
 
-Dependency direction is acyclic and points inward: `cmd` → `server`/`index`;
-`server` → `index`/`record`/`ingest`; `ingest` → `index`/`record`; `index` →
-`record`/`fingerprint`; `record` and `fingerprint` depend on nothing internal.
+Dependency direction is acyclic and points inward: `cmd` →
+`server`/`index`/`ingest`/`pack`/`doctor`; `server` → `index`/`record`/`ingest`;
+`ingest` → `index`/`record`/`screen`; `pack`/`doctor` → `record`; `index` →
+`record`/`fingerprint`; `record`, `fingerprint`, `screen` depend on nothing
+internal.
 
 ## Seams / contracts
 
