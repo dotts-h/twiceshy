@@ -56,6 +56,8 @@ approvals = int(cfg.get("required_approvals", 0))
 dismiss = bool(cfg.get("dismiss_stale_reviews", True))
 linear = bool(cfg.get("require_linear_history", True))
 noff = bool(cfg.get("block_force_push", True))
+outdated = bool(cfg.get("block_on_outdated_branch", True))
+admins = bool(cfg.get("apply_to_admins", True))
 
 if flavor == "github":
     rules = [
@@ -79,7 +81,8 @@ else:  # forgejo / gitea
     out = {"rule_name": branch, "branch_name": branch,
            "enable_status_check": bool(checks), "status_check_contexts": checks,
            "required_approvals": approvals, "dismiss_stale_approvals": dismiss,
-           "block_on_outdated_branch": True, "require_signed_commits": False}
+           "block_on_outdated_branch": outdated, "apply_to_admins": admins,
+           "require_signed_commits": False}
 print(json.dumps(out, indent=2))
 PY
 )"
