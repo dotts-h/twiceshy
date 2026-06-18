@@ -41,6 +41,107 @@ func (l *lockedBuffer) String() string {
 // the repo itself is a valid corpus (the three worked examples).
 const corpus = "../.."
 
+// writeFixture marshals rec into dir's corpus at its Path (mirrors how a real
+// record lands on disk), for tests that need a controlled corpus.
+func writeFixture(t *testing.T, dir string, rec *record.Record) {
+	t.Helper()
+	md, err := record.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal fixture %s: %v", rec.ID, err)
+	}
+	dst := filepath.Join(dir, filepath.FromSlash(rec.Path))
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, md, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func packFixture(id, status, license, url string) *record.Record {
+	prov := record.Provenance{
+		Source:        record.Source{Author: "twiceshy-importer"},
+		RecordedAt:    "2026-06-18",
+		Valid:         record.Validity{From: "2026-06-18"},
+		SourceLicense: license,
+		SourceURL:     url,
+	}
+	if status == "validated" {
+		v := "2026-06-18"
+		prov.ValidatedAt = &v // a validated record must record validated_at
+	}
+	return &record.Record{
+		SchemaVersion: 1,
+		ID:            "exp-" + id,
+		Kind:          "convention",
+		Status:        status,
+		Title:         "Pack fixture record " + id,
+		AppliesTo:     []record.AppliesTo{{Ecosystem: "Go"}},
+		Provenance:    prov,
+		Body:          "Distilled fact for the pack-builder test.",
+		Path:          "experience/2026/" + id + "-pack-fixture.md",
+	}
+}
+
+func TestRunPackCommercialExcludesAndAttributes(t *testing.T) {
+	dir := tempCorpus(t)
+	writeFixture(t, dir, packFixture("0101", "validated", "MIT", ""))
+	writeFixture(t, dir, packFixture("0102", "validated", "CC-BY-4.0", "https://github.com/advisories/GHSA-x"))
+	writeFixture(t, dir, packFixture("0103", "validated", "GPL-3.0-only", ""))
+	writeFixture(t, dir, packFixture("0104", "quarantined", "MIT", ""))
+
+	outDir := filepath.Join(t.TempDir(), "pack")
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"pack", "-corpus", dir, "-out", outDir, "-commercial"}, &out, noEnv); err != nil {
+		t.Fatalf("pack: %v", err)
+	}
+
+	manifest, err := os.ReadFile(filepath.Join(outDir, "MANIFEST.json"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	ms := string(manifest)
+	if !strings.Contains(ms, "exp-0101") || !strings.Contains(ms, "exp-0102") {
+		t.Errorf("manifest should include exp-0101 + exp-0102:\n%s", ms)
+	}
+	for _, reason := range []string{"copyleft", "not validated"} {
+		if !strings.Contains(ms, reason) {
+			t.Errorf("manifest should record exclusion reason %q:\n%s", reason, ms)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "experience", "2026", "0101-pack-fixture.md")); err != nil {
+		t.Errorf("included record file missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "experience", "2026", "0103-pack-fixture.md")); err == nil {
+		t.Error("excluded (GPL) record must not be written into the pack")
+	}
+	attr, err := os.ReadFile(filepath.Join(outDir, "ATTRIBUTION.md"))
+	if err != nil {
+		t.Fatalf("read attribution: %v", err)
+	}
+	if !strings.Contains(string(attr), "exp-0102") || !strings.Contains(string(attr), "GHSA-x") {
+		t.Errorf("ATTRIBUTION.md must attribute the CC-BY record:\n%s", attr)
+	}
+}
+
+func TestRunPackRequiresOut(t *testing.T) {
+	if err := run(context.Background(), []string{"pack", "-corpus", tempCorpus(t)}, &bytes.Buffer{}, noEnv); err == nil {
+		t.Error("pack without -out must error")
+	}
+}
+
+func TestRunPackIncludeQuarantined(t *testing.T) {
+	dir := tempCorpus(t)
+	writeFixture(t, dir, packFixture("0201", "quarantined", "MIT", ""))
+	outDir := filepath.Join(t.TempDir(), "pack")
+	if err := run(context.Background(), []string{"pack", "-corpus", dir, "-out", outDir, "-include-quarantined"}, &bytes.Buffer{}, noEnv); err != nil {
+		t.Fatalf("pack: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "experience", "2026", "0201-pack-fixture.md")); err != nil {
+		t.Errorf("-include-quarantined should write the quarantined record: %v", err)
+	}
+}
+
 func TestRunRejectsBadInvocations(t *testing.T) {
 	env := func(string) string { return "" }
 	cases := map[string][]string{
