@@ -42,11 +42,15 @@ execution-validation engine that makes "validated" *mean* "we ran it and it hold
 
 3. **The validation engine is the moat (Option C; refines PLATFORM_RESEARCH §2).**
    A delta-only, report-only doctor (`internal/repro` / `twiceshy doctor revalidate`)
-   runs a record's repro in **gVisor (runsc)** ephemeral containers across a **version
+   runs a record's tests in **gVisor (runsc)** ephemeral containers across a **version
    matrix**, two-phase (prepare=allowlist-egress → execute=`--network=none`), to prove
    fail→pass and **empirically derive `applies_to` version boundaries**. It emits a
    Finding + a signed-able **attestation**; a human flips `validated`/`validated_at` in
    the PR. Promotion is never automatic (git/PR trust boundary, ADR-0001/0008 unchanged).
+   **A record carries AS MANY tests as the gotcha requires, not one** — positive tests
+   (the fix holds) AND **negative tests that encode the dead-ends** (prove "don't try Z"
+   by showing Z still fails), plus variants across inputs/configs/versions. More tests =
+   stronger validation, tighter version boundaries, and (see §5) clearer original authorship.
 
 4. **The 3 hardening must-haves are preconditions** for running any untrusted repro
    (research §5, SECURITY_ANALYSIS): broker-enforced ephemeral container with a
@@ -56,12 +60,27 @@ execution-validation engine that makes "validated" *mean* "we ran it and it hold
    these.
 
 5. **Licensing reframe — PROPOSED, needs Horia's explicit sign-off (extends ADR-0003 §3).**
-   Stack Overflow / issue-tracker **prose stays excluded** (CC-BY-SA / ToS, irreversible
-   per ADR-0002). But the *problems* they document become admissible when we **re-derive
-   the fact and author an original test/repro from scratch** — never ingesting their text.
-   Facts aren't copyrightable (*Feist*); independent authoring + execution-validation makes
-   the record both ours and correct. This widens coverage hugely without contaminating the
-   commercial-pack cleanliness. **Do not act on this clause until horia accepts it.**
+   Stack Overflow / issue-tracker / blog **text stays excluded** (CC-BY-SA / ToS, irreversible
+   per ADR-0002). But the *problems* they document become admissible under a strict rule:
+   - **Use those sources (and the model's training) only as awareness that a problem class
+     exists — the topic, never the content.** For each problem, **independently re-derive the
+     fact from first principles + official docs + execution**, and author **our own**
+     description and **as many original tests as the gotcha requires** (§3). Never ingest,
+     store, quote, or closely paraphrase their text or snippets; never scrape SO or use its
+     data dump (so SO's ToS is never even triggered).
+   - **Why clean:** facts aren't copyrightable (*Feist*; idea/expression, 17 USC §102(b));
+     CC-BY-SA's ShareAlike attaches only to adaptations of the licensed *expression*, which we
+     never make; and a set of independently-authored, executed tests is structurally our own
+     work — not a restatement of someone's post.
+   - **Provenance honesty:** these records are `source = authored+validated`, NOT "derived from
+     <url>" (we didn't derive from it, and owe no attribution because we didn't use the work).
+   - **Residual risk + gate:** the real danger is near-verbatim reproduction of a memorized
+     snippet/phrase by the LLM — mitigated by author-from-spec+docs+execution discipline (the
+     "distill, never copy" rule of ADR-0003 §4, which can't be fully mechanized → needs human
+     care) and an optional similarity check. This ADR is **not legal advice**; because the
+     commercial-pack cleanliness (ADR-0002) is irreversible, sign-off should be staged:
+     **OK for the internal/single-tenant corpus now; a real legal review gates any COMMERCIAL
+     pack shipping SO-derived records.** **Do not act on this clause until horia accepts it.**
 
 6. **Prove the value with the eval (#0005).** Build a GitChameleon-style execution
    harness measuring agent task success **with vs without** twiceshy retrieval. This both
@@ -80,8 +99,11 @@ execution-validation engine that makes "validated" *mean* "we ran it and it hold
 ## Consequences
 
 - New `internal/repro` package + `repro-base` images (pinned by digest) + runsc installed
-  on the brain; per-ecosystem fetch proxies for the prepare phase. The schema already
-  supports this (`guard.repro`, `provenance.security_flags`, `validated_at`).
+  on the brain; per-ecosystem fetch proxies for the prepare phase.
+- **Schema evolves: `guard.repro` (a single path) → a SET of tests per record** (a tests
+  dir / list), positive + negative, so a record can carry as many as the gotcha requires
+  (§3). `provenance.security_flags` / `validated_at` already exist; the test-set is the one
+  additive schema change (stays `schema_version: 1`-compatible if modeled as an optional list).
 - "Validated" gains a precise, auditable meaning (attestation in the promotion PR).
 - `internal/ingest` extends from embedded YAML to live fetchers; `internal/screen` extends
   to repro-script content.
