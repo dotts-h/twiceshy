@@ -15,3 +15,17 @@ them before acting. One fact, one home: never copy a rule here, link it.
 Quick gates (exact commands in CONVENTIONS): `make lint` and `make test`
 before push; CI must be green before merge. Branch from `main`; never
 commit to it directly.
+
+## Experience store (index channel)
+
+This repo hosts a **twiceshy** experience store — validated engineering traps,
+fixes, and dead-ends from past sessions. **Check known traps before debugging**
+an unfamiliar error or retrying a failed approach; do not wait for the problem to
+surface on its own.
+
+- **Pull (on demand):** call the `search_experience` MCP tool with verbatim error
+  text or a short symptom; follow up with `get_experience` on a hit id. Empty
+  results are valid — do not force a near-miss.
+- **Push (automatic):** if the Claude Code `UserPromptSubmit` hook is installed
+  ([docs/PUSH_HOOK.md](docs/PUSH_HOOK.md)), high-confidence matches inject trap
+  cards via `additionalContext` at prompt time.
