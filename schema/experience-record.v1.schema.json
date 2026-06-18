@@ -181,11 +181,25 @@
         }
       }
     },
+    "repro": {
+      "type": "object",
+      "required": ["path", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["positive", "negative"] },
+        "label": { "type": "string" }
+      }
+    },
     "guard": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "repro": { "type": ["string", "null"] },
+        "repros": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/repro" }
+        },
         "guarding_test": { "type": ["string", "null"] }
       }
     },

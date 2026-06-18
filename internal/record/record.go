@@ -88,8 +88,21 @@ type DeadEnd struct {
 	WhyItFailed string `yaml:"why_it_failed"`
 }
 
+// ReproKinds are the allowed guard.repros[].kind values.
+var ReproKinds = []string{"positive", "negative"}
+
+// Repro is one executable proof in a record's guard test-set.
+// Kind "positive" = fail-to-pass (fails pre-fix, passes post-fix);
+// "negative" = a dead-end that must stay failing (proves "don't try Z").
+type Repro struct {
+	Path  string `yaml:"path"`
+	Kind  string `yaml:"kind"`
+	Label string `yaml:"label,omitempty"`
+}
+
 type Guard struct {
 	Repro        *string `yaml:"repro"`
+	Repros       []Repro `yaml:"repros,omitempty"`
 	GuardingTest *string `yaml:"guarding_test"`
 }
 
@@ -227,10 +240,18 @@ func LoadCorpus(root string) ([]*Record, error) {
 				errs = append(errs, fmt.Errorf("%s: superseded_by %s does not exist in the corpus", r.Path, *sb))
 			}
 		}
-		if r.Guard != nil && r.Guard.Repro != nil {
-			repro := filepath.Join(root, filepath.FromSlash(*r.Guard.Repro))
-			if _, err := os.Stat(repro); err != nil {
-				errs = append(errs, fmt.Errorf("%s: guard.repro %s: %w", r.Path, *r.Guard.Repro, err))
+		if r.Guard != nil {
+			if r.Guard.Repro != nil {
+				repro := filepath.Join(root, filepath.FromSlash(*r.Guard.Repro))
+				if _, err := os.Stat(repro); err != nil {
+					errs = append(errs, fmt.Errorf("%s: guard.repro %s: %w", r.Path, *r.Guard.Repro, err))
+				}
+			}
+			for _, repro := range r.Guard.Repros {
+				p := filepath.Join(root, filepath.FromSlash(repro.Path))
+				if _, err := os.Stat(p); err != nil {
+					errs = append(errs, fmt.Errorf("%s: guard.repros path %s: %w", r.Path, repro.Path, err))
+				}
 			}
 		}
 	}
@@ -373,6 +394,23 @@ func (r *Record) validateResolution(fail func(string, ...any)) {
 }
 
 func (r *Record) validateGuard(fail func(string, ...any)) {
+	if r.Guard != nil {
+		seen := make(map[string]struct{}, len(r.Guard.Repros))
+		for i, repro := range r.Guard.Repros {
+			if strings.TrimSpace(repro.Path) == "" {
+				fail("guard.repros[%d].path must be non-empty", i)
+			}
+			if !contains(ReproKinds, repro.Kind) {
+				fail("guard.repros[%d].kind %q is not one of %v", i, repro.Kind, ReproKinds)
+			}
+			if repro.Path != "" {
+				if _, dup := seen[repro.Path]; dup {
+					fail("guard.repros contains duplicate path %q", repro.Path)
+				}
+				seen[repro.Path] = struct{}{}
+			}
+		}
+	}
 	needsGuard := r.Status == "validated" && (r.Kind == "trap" || r.Kind == "fix")
 	if !needsGuard {
 		return
