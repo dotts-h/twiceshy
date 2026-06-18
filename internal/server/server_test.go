@@ -8,11 +8,15 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"unicode"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"gopkg.in/yaml.v3"
 
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/record"
@@ -20,6 +24,8 @@ import (
 )
 
 const token = "s3cret-test-token"
+
+const testRepo = "github.com/dotts-h/twiceshy"
 
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
@@ -32,10 +38,10 @@ func newTestServer(t *testing.T) *httptest.Server {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { _ = ix.Close() })
-	if err := ix.Rebuild(context.Background(), recs, "github.com/dotts-h/twiceshy"); err != nil {
+	if err := ix.Rebuild(context.Background(), recs, testRepo); err != nil {
 		t.Fatalf("Rebuild: %v", err)
 	}
-	h, err := server.New(server.Config{Index: ix, Token: token})
+	h, err := server.New(server.Config{Index: ix, Token: token, Repo: testRepo})
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -269,6 +275,265 @@ func TestRecordExperienceQuarantinesNewDraft(t *testing.T) {
 	}
 }
 
+// M7: the agent merge loop — record_experience proposes a draft, the human (or
+// test) writes it under its declared corpus path, LoadCorpus+Rebuild reload it,
+// then get_experience can pull it while search_experience hides it until
+// include_quarantined. Stopping at the returned markdown (above) would miss
+// Marshal↔path↔Parse↔Rebuild drift.
+func TestRecordExperienceProposeDiskReloadRead(t *testing.T) {
+	ctx := context.Background()
+	corpusRoot := t.TempDir()
+
+	ix, err := index.Open(filepath.Join(t.TempDir(), "ix.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ix.Close() })
+	if err := ix.Rebuild(ctx, nil, testRepo); err != nil {
+		t.Fatal(err)
+	}
+	h, err := server.New(server.Config{Index: ix, Token: token, Repo: testRepo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(h)
+	t.Cleanup(ts.Close)
+
+	const (
+		title   = "E2E loop trap about a manatee connection stall"
+		summary = "manatee pool stalls under a novel burst pattern"
+		sig     = "manatee-e2e-loop-signature-unique-7711"
+	)
+	res, err := connect(t, ts).CallTool(ctx, &mcp.CallToolParams{
+		Name: "record_experience",
+		Arguments: map[string]any{
+			"kind":             "trap",
+			"title":            title,
+			"summary":          summary,
+			"error_signatures": []string{sig},
+			"ecosystem":        "Go",
+			"package":          "example.com/manatee",
+			"root_cause":       "leaked connections on a retry path",
+			"fix":              "defer rows.Close on the retry branch",
+			"guarding_test":    "TestManateeE2ELoop",
+			"body":             "How the manatee pool runs dry on retries and how to guard it.",
+			"author":           "claude",
+			"session":          "sess-e2e",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tool error: %s", toolText(res))
+	}
+
+	var draft server.RecordResult
+	raw, err := json.Marshal(res.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &draft); err != nil {
+		t.Fatal(err)
+	}
+	if draft.Novelty == "known" || draft.RecordID == "" || draft.Markdown == "" {
+		t.Fatalf("expected a quarantined draft, got %+v", draft)
+	}
+
+	declared, err := declaredPathFromMarkdown(draft.Markdown)
+	if err != nil {
+		t.Fatalf("derive declared path: %v", err)
+	}
+	full := filepath.Join(corpusRoot, filepath.FromSlash(declared))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(draft.Markdown), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	recs, err := record.LoadCorpus(corpusRoot)
+	if err != nil {
+		t.Fatalf("LoadCorpus: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("LoadCorpus loaded %d records, want 1", len(recs))
+	}
+	if recs[0].ID != draft.RecordID {
+		t.Errorf("loaded id = %q, want %q", recs[0].ID, draft.RecordID)
+	}
+	if recs[0].Path != declared {
+		t.Errorf("loaded path = %q, want declared %q", recs[0].Path, declared)
+	}
+
+	reloaded, err := index.Open(filepath.Join(t.TempDir(), "reloaded.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reloaded.Close() })
+	if err := reloaded.Rebuild(ctx, recs, testRepo); err != nil {
+		t.Fatal(err)
+	}
+	reloadHandler, err := server.New(server.Config{Index: reloaded, Token: token, Repo: testRepo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloadTS := httptest.NewServer(reloadHandler)
+	t.Cleanup(reloadTS.Close)
+	reloadSession := connect(t, reloadTS)
+
+	gotRes, err := reloadSession.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "get_experience",
+		Arguments: map[string]any{"id": draft.RecordID},
+	})
+	if err != nil {
+		t.Fatalf("get_experience: %v", err)
+	}
+	if gotRes.IsError {
+		t.Fatalf("get_experience error: %s", toolText(gotRes))
+	}
+	gotRaw, err := json.Marshal(gotRes.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got server.GetResult
+	if err := json.Unmarshal(gotRaw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != draft.RecordID {
+		t.Errorf("get id = %q, want %q", got.ID, draft.RecordID)
+	}
+	if got.Status != "quarantined" {
+		t.Errorf("get status = %q, want quarantined", got.Status)
+	}
+	if got.Path != declared {
+		t.Errorf("get path = %q, want %q", got.Path, declared)
+	}
+	if !strings.Contains(got.Markdown, sig) {
+		t.Errorf("get markdown must contain the proposed signature %q", sig)
+	}
+
+	hidden, err := reloadSession.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "search_experience",
+		Arguments: map[string]any{"query": sig},
+	})
+	if err != nil {
+		t.Fatalf("search_experience: %v", err)
+	}
+	if hidden.IsError {
+		t.Fatalf("search_experience error: %s", toolText(hidden))
+	}
+	hiddenRaw, _ := json.Marshal(hidden.StructuredContent)
+	if strings.Contains(string(hiddenRaw), draft.RecordID) {
+		t.Errorf("quarantined draft must be hidden from default search, got %s", hiddenRaw)
+	}
+
+	visible, err := reloadSession.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "search_experience",
+		Arguments: map[string]any{"query": sig, "include_quarantined": true},
+	})
+	if err != nil {
+		t.Fatalf("search_experience (include_quarantined): %v", err)
+	}
+	if visible.IsError {
+		t.Fatalf("search_experience error: %s", toolText(visible))
+	}
+	visRaw, _ := json.Marshal(visible.StructuredContent)
+	if !strings.Contains(string(visRaw), draft.RecordID) {
+		t.Errorf("include_quarantined must surface the draft, got %s", visRaw)
+	}
+}
+
+// declaredPathFromMarkdown derives experience/<year>/<num>-<slug>.md from the
+// quarantined draft's frontmatter — the same path ingest.Prepare assigns.
+func declaredPathFromMarkdown(md string) (string, error) {
+	const delim = "---\n"
+	parts := strings.SplitN(md, delim, 3)
+	if len(parts) < 3 {
+		return "", fmt.Errorf("markdown missing YAML frontmatter")
+	}
+	var meta struct {
+		ID    string `yaml:"id"`
+		Title string `yaml:"title"`
+		Prov  struct {
+			RecordedAt string `yaml:"recorded_at"`
+		} `yaml:"provenance"`
+	}
+	if err := yaml.Unmarshal([]byte(parts[1]), &meta); err != nil {
+		return "", err
+	}
+	if meta.ID == "" || meta.Title == "" || meta.Prov.RecordedAt == "" {
+		return "", fmt.Errorf("frontmatter missing id/title/recorded_at")
+	}
+	year := meta.Prov.RecordedAt
+	if len(year) >= 4 {
+		year = year[:4]
+	}
+	num := strings.TrimPrefix(meta.ID, "exp-")
+	slug := slugifyTitle(meta.Title)
+	if slug == "" {
+		slug = "record"
+	}
+	return fmt.Sprintf("experience/%s/%s-%s.md", year, num, slug), nil
+}
+
+func slugifyTitle(title string) string {
+	title = strings.ToLower(title)
+	var b strings.Builder
+	prevDash := false
+	for _, r := range title {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			b.WriteRune(r)
+			prevDash = false
+		} else if unicode.IsPrint(r) {
+			if !prevDash {
+				b.WriteRune('-')
+				prevDash = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+// H8 (server half): drive concurrent authenticated HTTP requests against one
+// shared handler so -race has something to observe on the HTTP edge. Raw POSTs
+// exercise bearer auth + the shared middleware stack without tripping the MCP
+// rate limiter (each SDK session is a burst of its own).
+func TestConcurrentAuthenticatedRequestsAreRaceFree(t *testing.T) {
+	ts := newTestServer(t)
+	const workers = 16
+	var wg sync.WaitGroup
+	errCh := make(chan error, workers)
+
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req, err := http.NewRequest(http.MethodPost, ts.URL, strings.NewReader("{}"))
+			if err != nil {
+				errCh <- err
+				return
+			}
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusUnauthorized {
+				errCh <- fmt.Errorf("unexpected 401")
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Errorf("concurrent authenticated request failed: %v", err)
+	}
+}
+
 // An exact duplicate (matching an existing record's signature) is NOT recorded.
 func TestRecordExperienceKnownNotDuplicated(t *testing.T) {
 	ts := newTestServer(t)
@@ -329,10 +594,10 @@ func newTestServerWith(t *testing.T, recs ...*record.Record) *httptest.Server {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { _ = ix.Close() })
-	if err := ix.Rebuild(context.Background(), recs, "github.com/dotts-h/twiceshy"); err != nil {
+	if err := ix.Rebuild(context.Background(), recs, testRepo); err != nil {
 		t.Fatalf("Rebuild: %v", err)
 	}
-	h, err := server.New(server.Config{Index: ix, Token: token})
+	h, err := server.New(server.Config{Index: ix, Token: token, Repo: testRepo})
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
