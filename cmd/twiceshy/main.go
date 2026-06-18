@@ -8,7 +8,9 @@
 //	twiceshy ingest <source> -corpus <dir> -db <file> import quarantined records
 //	twiceshy pack   -corpus <dir> -out <dir>          build a distributable pack
 //
-// serve requires the bearer token in TWICESHY_TOKEN.
+// serve requires the bearer token in TWICESHY_TOKEN. index and serve accept an
+// optional -embed-url (Ollama) to enable dense, pull-only retrieval (ADR-0009);
+// unset keeps retrieval embedding-free.
 package main
 
 import (
@@ -85,9 +87,11 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 }
 
 type commonFlags struct {
-	corpus string
-	db     string
-	repo   string
+	corpus     string
+	db         string
+	repo       string
+	embedURL   string
+	embedModel string
 }
 
 func addCommonFlags(fs *flag.FlagSet) *commonFlags {
@@ -95,7 +99,18 @@ func addCommonFlags(fs *flag.FlagSet) *commonFlags {
 	fs.StringVar(&c.corpus, "corpus", ".", "corpus root (the directory containing experience/)")
 	fs.StringVar(&c.db, "db", "twiceshy.db", "path of the derived SQLite index")
 	fs.StringVar(&c.repo, "repo", "", "corpus repository identifier for app-scoped fingerprints")
+	fs.StringVar(&c.embedURL, "embed-url", "", "Ollama endpoint for dense (pull-only) retrieval, e.g. http://192.168.50.150:11434; empty disables dense (ADR-0009)")
+	fs.StringVar(&c.embedModel, "embed-model", "nomic-embed-text", "embedding model name for -embed-url")
 	return &c
+}
+
+// embedderFor builds the pull-only dense embedder from the flags, or nil when
+// -embed-url is unset (dense disabled; retrieval stays embedding-free).
+func embedderFor(c *commonFlags) index.Embedder {
+	if c.embedURL == "" {
+		return nil
+	}
+	return index.NewOllamaEmbedder(c.embedURL, c.embedModel)
 }
 
 // buildIndex loads + validates the corpus and rebuilds the derived index.
@@ -113,6 +128,14 @@ func buildIndex(ctx context.Context, c *commonFlags) (*index.Index, int, error) 
 	if err := ix.Rebuild(ctx, recs, c.repo); err != nil {
 		_ = ix.Close()
 		return nil, 0, err
+	}
+	// Dense retrieval (pull-only) — populate embeddings when configured; cached
+	// by content hash so a rebuild only re-embeds changed records (ADR-0009).
+	if emb := embedderFor(c); emb != nil {
+		if err := ix.EmbedCorpus(ctx, recs, emb); err != nil {
+			_ = ix.Close()
+			return nil, 0, fmt.Errorf("embedding corpus: %w", err)
+		}
 	}
 	return ix, len(recs), nil
 }
@@ -150,7 +173,7 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 	}
 	defer func() { _ = ix.Close() }()
 
-	handler, err := server.New(server.Config{Index: ix, Token: token, Repo: c.repo})
+	handler, err := server.New(server.Config{Index: ix, Token: token, Repo: c.repo, Embedder: embedderFor(c)})
 	if err != nil {
 		return err
 	}

@@ -33,6 +33,10 @@ type Config struct {
 	// Repo, when set, lets fingerprint matching also use app-scoped
 	// fingerprints for that repository identifier.
 	Repo string
+	// Embedder, when set, enables dense (cosine) retrieval on the pull channel,
+	// fused with fingerprint + BM25 via RRF (ADR-0009). nil = embedding-free
+	// retrieval only. The hot/push path never uses it.
+	Embedder index.Embedder
 }
 
 // Tool descriptions are load-bearing: description text alone produces
@@ -62,7 +66,7 @@ func New(cfg Config) (http.Handler, error) {
 		return nil, errors.New("server: a bearer token is required; there is no unauthenticated mode")
 	}
 
-	h := &handlers{ix: cfg.Index, repo: cfg.Repo}
+	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder}
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "twiceshy",
 		Title:   "twiceshy experience service",
@@ -87,6 +91,7 @@ func New(cfg Config) (http.Handler, error) {
 type handlers struct {
 	ix   *index.Index
 	repo string
+	emb  index.Embedder // optional; enables pull-channel dense retrieval
 }
 
 // SearchArgs is the search_experience input.
@@ -127,14 +132,17 @@ func (h *handlers) search(ctx context.Context, _ *mcp.CallToolRequest, args Sear
 	if len(args.Query) > maxQueryBytes {
 		return nil, SearchResult{}, fmt.Errorf("query too large: %d bytes (max %d)", len(args.Query), maxQueryBytes)
 	}
-	hits, err := h.ix.Retrieve(ctx, index.Query{
+	// Pull channel: dense (cosine) retrieval fused with fingerprint + BM25 when
+	// an embedder is configured; falls back to the embedding-free path otherwise
+	// (ADR-0009). RetrieveFused applies the relevance floor like Retrieve.
+	hits, err := h.ix.RetrieveFused(ctx, index.Query{
 		Text:               args.Query,
 		Repo:               h.repo,
 		Ecosystem:          args.Ecosystem,
 		Package:            args.Package,
 		K:                  args.K,
 		IncludeQuarantined: args.IncludeQuarantined,
-	})
+	}, h.emb)
 	if err != nil {
 		return nil, SearchResult{}, fmt.Errorf("search failed: %w", err)
 	}
