@@ -1,7 +1,7 @@
 ---
 id: 0022
 title: Schedule live importers on the brain — the feed heartbeat (cron)
-status: open
+status: closed
 severity: medium
 group: 0015
 depends_on: [0021]
