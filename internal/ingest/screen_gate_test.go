@@ -23,6 +23,30 @@ func secretDraft() ingest.Draft {
 	}
 }
 
+func TestPrepare_FlagsSecretInAppliesTo(t *testing.T) {
+	// A clean narrative but a secret stashed in applies_to (runtime map) must
+	// still be flagged — the gate scans every record text field (defense in
+	// depth, #0011 completeness).
+	ix := openIx(t)
+	d := ingest.Draft{
+		Kind:  "convention",
+		Title: "Some ecosystem note",
+		Body:  "Nothing sensitive in the prose here.",
+		AppliesTo: []record.AppliesTo{{
+			Ecosystem: "Go",
+			Runtime:   map[string]string{"leaked": "AKIAIOSFODNN7EXAMPLE"},
+		}},
+	}
+	out, err := ingest.Prepare(context.Background(), ix, repo, d,
+		ingest.Meta{ID: "exp-9009", Author: "a", Now: "2026-06-18"})
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if out.Record == nil || len(out.Record.Provenance.SecurityFlags) == 0 {
+		t.Fatalf("secret in applies_to.runtime must be flagged; flags=%v", out.Record.Provenance.SecurityFlags)
+	}
+}
+
 func TestPrepare_FlagsSecretButStaysQuarantined(t *testing.T) {
 	ix := openIx(t)
 	out, err := ingest.Prepare(context.Background(), ix, repo, secretDraft(),
