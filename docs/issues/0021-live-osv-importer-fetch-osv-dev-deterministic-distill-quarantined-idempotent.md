@@ -1,7 +1,7 @@
 ---
 id: 0021
 title: Live OSV importer — fetch osv.dev, deterministic distill, quarantined, idempotent
-status: open
+status: closed
 severity: high
 group: 0015
 depends_on: []
