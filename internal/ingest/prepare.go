@@ -158,6 +158,24 @@ func scanTexts(r *record.Record) []string {
 			ts = append(ts, *r.Guard.GuardingTest)
 		}
 	}
+	// Scan applies_to too, so the gate covers EVERY text field a record carries
+	// (defense in depth — no unscanned corner even if the gate is ever made a
+	// hard boundary; package names/versions aren't secret- or exec-shaped, so
+	// this adds no false positives on legitimate records).
+	for _, a := range r.AppliesTo {
+		ts = append(ts, a.Ecosystem, a.Package)
+		if a.Versions != nil {
+			if a.Versions.Introduced != nil {
+				ts = append(ts, *a.Versions.Introduced)
+			}
+			if a.Versions.Fixed != nil {
+				ts = append(ts, *a.Versions.Fixed)
+			}
+		}
+		for k, v := range a.Runtime {
+			ts = append(ts, k, v)
+		}
+	}
 	return ts
 }
 
