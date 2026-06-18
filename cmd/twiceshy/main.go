@@ -216,8 +216,10 @@ func importSource(name string) (ingest.Source, error) {
 		return ingest.NewOSVSource(), nil
 	case "py":
 		return ingest.NewPySource(), nil
+	case "osv-live":
+		return ingest.NewOSVLiveSource(), nil
 	default:
-		return nil, fmt.Errorf("unknown ingest source %q (want: go, osv, py)", name)
+		return nil, fmt.Errorf("unknown ingest source %q (want: go, osv, osv-live, py)", name)
 	}
 }
 
@@ -230,7 +232,7 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 	// stops at the first non-flag arg, so pull the source off the front before
 	// parsing (otherwise `ingest go -corpus X` would leave -corpus unparsed).
 	if len(args) < 1 {
-		return errors.New("usage: twiceshy ingest <source> [flags] (sources: go, osv, py)")
+		return errors.New("usage: twiceshy ingest <source> [flags] (sources: go, osv, osv-live, py)")
 	}
 	src, err := importSource(args[0])
 	if err != nil {
@@ -239,6 +241,7 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	c := addCommonFlags(fs)
 	dryRun := fs.Bool("dry-run", false, "classify and report, but write no files")
+	limit := fs.Int("limit", 0, "max new records to write this run (0 = unlimited); bounds a scheduled import")
 	author := fs.String("author", "twiceshy-importer", "provenance author recorded on imported records")
 	if err := parseFlags(fs, args[1:]); err != nil {
 		return err
@@ -295,6 +298,9 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 		}
 		created++
 		id = bumpID(id)
+		if *limit > 0 && created >= *limit {
+			break // bound a scheduled import so it grows the corpus gradually (0022)
+		}
 	}
 
 	verb := "created"
