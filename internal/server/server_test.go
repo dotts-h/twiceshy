@@ -804,7 +804,8 @@ func TestRecordExperienceCandidatesSanitizedForTransport(t *testing.T) {
 	titleRaw := "visible\x00title" + strings.Repeat("T", 520)
 	summaryRaw := "line\x1fone\n\tkept" + strings.Repeat("S", 2100)
 
-	ts := newTestServerWith(t, mkDirtyCandidateRecord(t, 88, titleRaw, summaryRaw, sig))
+	ts := newTestServerWith(t, mkDirtyCandidateRecord(t, 88, titleRaw, summaryRaw, sig,
+		"TestRecordExperienceCandidatesSanitizedForTransport"))
 	session := connect(t, ts)
 
 	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -869,10 +870,69 @@ func TestRecordExperienceCandidatesSanitizedForTransport(t *testing.T) {
 	}
 }
 
-func mkDirtyCandidateRecord(t *testing.T, num int, title, summary, sig string) *record.Record {
+// Guard #0012: search_experience structured Hits get transport sanitization and
+// length caps on Title/Summary before they leave the handler.
+func TestSearchExperienceHitsSanitizedForTransport(t *testing.T) {
+	const sig = "dirty-search-hit-sanitization-sig-unique-7755"
+	titleRaw := "visible\x00title" + strings.Repeat("T", 520)
+	summaryRaw := "line\x1fone\n\tkept" + strings.Repeat("S", 2100)
+
+	ts := newTestServerWith(t, mkDirtyCandidateRecord(t, 89, titleRaw, summaryRaw, sig,
+		"TestSearchExperienceHitsSanitizedForTransport"))
+	session := connect(t, ts)
+
+	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "search_experience",
+		Arguments: map[string]any{"query": sig},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tool error: %s", toolText(res))
+	}
+
+	var got server.SearchResult
+	raw, err := json.Marshal(res.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Hits) == 0 {
+		t.Fatal("search must return the dirty record as a hit")
+	}
+	h := got.Hits[0]
+	if h.ID != "exp-0089" {
+		t.Errorf("id must pass through unchanged, got %q", h.ID)
+	}
+	if strings.ContainsRune(h.Title, '\x00') || strings.ContainsRune(h.Summary, '\x1f') {
+		t.Errorf("C0 controls must be stripped: title=%q summary=%q", h.Title, h.Summary)
+	}
+	for _, want := range []string{"visible", "title"} {
+		if !strings.Contains(h.Title, want) {
+			t.Errorf("title missing semantic content %q: %q", want, h.Title)
+		}
+	}
+	if !strings.Contains(h.Summary, "lineone") || !strings.Contains(h.Summary, "kept") {
+		t.Errorf("summary missing semantic content: %q", h.Summary)
+	}
+	if !strings.Contains(h.Summary, "\n") || !strings.Contains(h.Summary, "\t") {
+		t.Errorf("whitelisted controls must be kept in summary: %q", h.Summary)
+	}
+	if !strings.Contains(h.Title, "…[truncated") {
+		t.Errorf("over-long title must be capped with visible marker: %q", h.Title)
+	}
+	if !strings.Contains(h.Summary, "…[truncated") {
+		t.Errorf("over-long summary must be capped with visible marker: %q", h.Summary)
+	}
+}
+
+func mkDirtyCandidateRecord(t *testing.T, num int, title, summary, sig, guardingTest string) *record.Record {
 	t.Helper()
 	id := fmt.Sprintf("exp-%04d", num)
-	gt := "TestRecordExperienceCandidatesSanitizedForTransport"
+	gt := guardingTest
 	return &record.Record{
 		ID:     id,
 		Kind:   "trap",
