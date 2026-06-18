@@ -15,6 +15,8 @@ never a cycle).
 | id | title | status | children |
 |----|-------|--------|----------|
 | [0008](0008-epic-deployable-twiceshy-remaining-phases.md) | Epic: Deployable twiceshy — the remaining phases | open | 0007, 0006, 0004, 0002, 0005 |
+| [0009](0009-epic-pre-deploy-security.md) | Epic: Pre-deploy security hardening (Tier A) | open | 0011, 0012, 0013, 0014 |
+| [0010](0010-epic-public-release.md) | Epic: Public release (Tier B) — multi-tenant, trial, anti-abuse | open | — |
 
 ## Issues
 
@@ -27,3 +29,7 @@ never a cycle).
 | [0005](0005-evals-trap-avoidance.md) | Trap-avoidance eval suite — memory on/off regression | open | medium | 0008 | ADR-0001 §8 |
 | [0006](0006-dense-retrieval-sqlite-vec-rrf.md) | Dense retrieval — sqlite-vec + RRF (pull channel only) | open | medium | 0008 | ADR-0006 |
 | [0007](0007-corpus-importer.md) | Corpus importer — license-clean version-knowledge bootstrap | closed | high | 0008 | ADR-0003 |
+| [0011](0011-ingestion-safety-gate.md) | Ingestion safety gate — secret/harmful-code/PII screening | open | high | 0009 | SEC §2 |
+| [0012](0012-injection-safe-rendering.md) | Injection-safe rendering — record content is data, not instructions | open | high | 0009 | SEC §1 |
+| [0013](0013-app-hardening-gaps.md) | App-hardening gaps — body cap, timeouts, rate limit, path/error hygiene | open | medium | 0009 | SEC §3 |
+| [0014](0014-ongoing-security-maintenance.md) | Ongoing security maintenance — deps, OSV self-dogfood, PR checklist | open | medium | 0009 | SEC §4 |
