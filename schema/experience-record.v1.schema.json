@@ -81,8 +81,29 @@
         "required": ["guard"],
         "properties": {
           "guard": {
-            "required": ["guarding_test"],
-            "properties": { "guarding_test": { "type": "string", "minLength": 1 } }
+            "anyOf": [
+              {
+                "required": ["guarding_test"],
+                "properties": { "guarding_test": { "type": "string", "minLength": 1 } }
+              },
+              {
+                "required": ["repro"],
+                "properties": { "repro": { "type": "string", "minLength": 1 } }
+              },
+              {
+                "required": ["repros"],
+                "properties": {
+                  "repros": {
+                    "type": "array",
+                    "contains": {
+                      "type": "object",
+                      "required": ["kind"],
+                      "properties": { "kind": { "const": "positive" } }
+                    }
+                  }
+                }
+              }
+            ]
           }
         }
       }
