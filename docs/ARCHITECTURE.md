@@ -57,7 +57,8 @@ point first, pure domain core in the middle, IO/transport edges last.
   dedup-at-ingest write-path core: takes a `Draft` + `Meta`, probes the corpus
   through `index.Assess`, screens it through `internal/screen`, and returns an
   `Outcome` (a quarantined draft or a duplicate verdict). The `Source` adapter
-  seam (`deprecationSource` for go/py, `osvSource`) feeds the importer.
+  seam (`deprecationSource` for go/py, `osvSource` embedded, `OSVLiveSource` live)
+  feeds the importer.
 - **`internal/screen/`** *(pure core)* — the ingestion safety gate (#0011):
   `Scan` over record text for secrets / executable-harmful-code / PII; masked
   findings, never echoes a raw secret.

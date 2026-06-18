@@ -204,22 +204,16 @@ func mapOSVLiveRecord(rec osvLiveRecord) (Draft, bool) {
 	rootCause := fmt.Sprintf("Known vulnerability documented in OSV advisory %s.", rec.ID)
 	fix := fmt.Sprintf("Upgrade affected packages past the fixed version; see %s.", sourceURL)
 
-	return Draft{
-		Kind:  "trap",
-		Title: title,
-		Symptom: &record.Symptom{
-			Summary:         summary,
-			ErrorSignatures: sigs,
-		},
-		AppliesTo: applies,
-		Resolution: &record.Resolution{
-			RootCause: rootCause,
-			Fix:       fix,
-		},
-		Body:          body,
-		SourceLicense: ghsaLicense,
-		SourceURL:     sourceURL,
-	}, true
+	return buildOSVDraft(osvDraftInput{
+		Signatures: sigs,
+		AppliesTo:  applies,
+		Title:      title,
+		Summary:    summary,
+		RootCause:  rootCause,
+		Fix:        fix,
+		Body:       body,
+		SourceURL:  sourceURL,
+	}), true
 }
 
 func osvLiveRangeEvents(events []osvLiveEvent) (introduced, fixed string) {
