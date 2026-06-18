@@ -45,7 +45,6 @@ status: open
 severity: ${sev}
 group: ${group}
 depends_on: ${dep_yaml}
-github:
 forgejo:
 links:
   adr:

@@ -35,8 +35,8 @@ mirrored to the forgejo tracker so the team gets the familiar UI, labels, and no
      This is the directional dependency graph (distinct from non-blocking `links.issues`): the
      `get-next` picker won't offer a blocked item and uses it to compute what's parallelizable.
      Reserve it for *real* blockers; never form a cycle.
-3. **Mirror to forgejo:** run the recipe's sync script — `scripts/sync-github.sh` on GitHub
-   (via `gh`), or `scripts/sync-forgejo.sh` on Forgejo/Gitea (via the REST API). It creates/updates
+3. **Mirror to forgejo:** run the recipe's sync script — `scripts/sync-forgejo.sh`
+   (Forgejo/Gitea, via the REST API). It creates/updates
    the issue, applies the group as a label, prepends a **relationships header** (`Part of` epic #,
    `Blocked by` #…) so the issue never reads isolated, best-effort links the native sub-issue /
    blocked-by relationships where the forge supports them, and writes the issue number back.

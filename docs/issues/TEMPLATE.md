@@ -8,7 +8,6 @@ status: open            # open | in-progress | closed
 severity: medium        # low | medium | high | critical
 group:                  # epic id if connected; empty if isolated
 depends_on: []          # issue ids that MUST land first (blocked-by edges); [] if none
-github:                 # issue number, filled by sync-github.sh (github host)
 forgejo:                # issue number, filled by sync-forgejo.sh (forgejo/gitea host)
 links:
   adr:                  # decision record if one caused/relates to it

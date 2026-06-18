@@ -108,9 +108,8 @@ def write_back(path, num):
     txt = open(path).read()
     if re.search(r"(?m)^forgejo:", txt):
         txt = re.sub(r"(?m)^forgejo:.*$", f"forgejo: {num}", txt)
-    else:  # add it right after the github: line (or after id: as a fallback)
-        anchor = "github:" if re.search(r"(?m)^github:", txt) else "id:"
-        txt = re.sub(rf"(?m)^({anchor}.*)$", rf"\1\nforgejo: {num}", txt, count=1)
+    else:  # add it right after the id: line
+        txt = re.sub(r"(?m)^(id:.*)$", rf"\1\nforgejo: {num}", txt, count=1)
     open(path, "w").write(txt)
 
 for f in FILES:
