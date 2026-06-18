@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package server exposes the MCP tools over streamable HTTP behind bearer
-// auth: the pull channel (ADR-0001 §5) search_experience and get_experience,
-// and the write path (Phase 3) record_experience — which dedups an
-// agent-proposed draft and returns a quarantined record to PR, never a direct
-// write. The push channel (Phase 2) still lives elsewhere.
+// Package server exposes the MCP pull channel over streamable HTTP and the
+// push channel (ADR-0001 §5) as POST /push — both behind the same bearer
+// auth and middleware chain. Pull: search_experience, get_experience, and
+// the write path (Phase 3) record_experience. Push: embedding-free trap
+// cards for hook additionalContext injection.
 package server
 
 import (
@@ -89,12 +89,18 @@ func New(cfg Config) (http.Handler, error) {
 	mcpHandler := mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return srv }, nil)
 
+	mux := http.NewServeMux()
+	// Route all methods to pushHTTP so a non-POST gets a clean 405 from the
+	// handler itself, rather than falling through to the MCP catch-all.
+	mux.HandleFunc("/push", h.pushHTTP)
+	mux.Handle("/", mcpHandler)
+
 	// Middleware chain (outermost first): access log, then reject unauthenticated
 	// requests before any work, then rate-limit, then bound time and body size.
 	limiter := newTokenBucket(defaultRatePerSec, defaultBurst)
 	hardened := withRateLimit(logger, limiter,
 		withTimeout(requestTimeout,
-			withMaxBytes(maxRequestBytes, mcpHandler)))
+			withMaxBytes(maxRequestBytes, mux)))
 	return withRequestLog(logger, bearerAuth(logger, cfg.Token, hardened)), nil
 }
 

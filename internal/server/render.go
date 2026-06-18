@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/dotts-h/twiceshy/internal/record"
 )
 
 const (
@@ -83,6 +85,75 @@ func renderEnvelope(recordType, trust, id, body string) string {
 
 func renderGetExperience(status, id, markdown string) string {
 	return renderEnvelope("experience-record", status, id, markdown)
+}
+
+// RenderTrapCard formats one push-channel trap card: title, applicability,
+// the trap (symptom), and the escape (resolution.fix).
+func RenderTrapCard(rec *record.Record) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[ID: %s  TRUST: %s]\n", rec.ID, rec.Status)
+	fmt.Fprintf(&b, "Title: %s\n", sanitizeForTransport(rec.Title))
+	fmt.Fprintf(&b, "Applies to: %s\n", sanitizeForTransport(formatAppliesTo(rec.AppliesTo)))
+	trap := ""
+	if rec.Symptom != nil {
+		trap = strings.TrimSpace(rec.Symptom.Summary)
+	}
+	fmt.Fprintf(&b, "The trap: %s\n", sanitizeForTransport(trap))
+	escape := ""
+	if rec.Resolution != nil {
+		escape = strings.TrimSpace(rec.Resolution.Fix)
+	}
+	fmt.Fprintf(&b, "The escape: %s", sanitizeForTransport(escape))
+	return b.String()
+}
+
+func formatAppliesTo(items []record.AppliesTo) string {
+	if len(items) == 0 {
+		return "(unspecified)"
+	}
+	parts := make([]string, 0, len(items))
+	for _, a := range items {
+		var sb strings.Builder
+		if a.Ecosystem != "" {
+			sb.WriteString(a.Ecosystem)
+		}
+		if a.Package != "" {
+			if sb.Len() > 0 {
+				sb.WriteByte('/')
+			}
+			sb.WriteString(a.Package)
+		}
+		if a.Versions != nil {
+			if sb.Len() > 0 {
+				sb.WriteString(" ")
+			}
+			if a.Versions.Introduced != nil {
+				fmt.Fprintf(&sb, ">= %s", *a.Versions.Introduced)
+			}
+			if a.Versions.Fixed != nil {
+				if a.Versions.Introduced != nil {
+					sb.WriteString(", ")
+				}
+				fmt.Fprintf(&sb, "< %s", *a.Versions.Fixed)
+			}
+		}
+		if sb.Len() > 0 {
+			parts = append(parts, sb.String())
+		}
+	}
+	if len(parts) == 0 {
+		return "(unspecified)"
+	}
+	return strings.Join(parts, "; ")
+}
+
+// RenderPushContext wraps rendered trap cards in the injection-safe envelope.
+// An empty card list yields an empty string (no injection).
+func RenderPushContext(cards []string) string {
+	if len(cards) == 0 {
+		return ""
+	}
+	return renderEnvelope("trap-cards", "validated", "push", strings.Join(cards, "\n\n"))
 }
 
 func renderSearchResults(hits []SearchHit) string {
