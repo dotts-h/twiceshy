@@ -26,6 +26,9 @@ surface on its own.
 - **Pull (on demand):** call the `search_experience` MCP tool with verbatim error
   text or a short symptom; follow up with `get_experience` on a hit id. Empty
   results are valid — do not force a near-miss.
-- **Push (automatic):** if the Claude Code `UserPromptSubmit` hook is installed
-  ([docs/PUSH_HOOK.md](docs/PUSH_HOOK.md)), high-confidence matches inject trap
-  cards via `additionalContext` at prompt time.
+- **Push (deferred):** a `UserPromptSubmit` hook ([docs/PUSH_HOOK.md](docs/PUSH_HOOK.md))
+  can inject cards at prompt time, but it is off by design until its precision is
+  tuned (#0005) — prefer pull.
+
+Wiring twiceshy into a consuming agent (MCP registration + the affordance pointer):
+[docs/CONSUMING.md](docs/CONSUMING.md).

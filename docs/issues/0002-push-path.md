@@ -1,7 +1,7 @@
 ---
 id: 0002
 title: Push path — hook → trap cards via additionalContext
-status: done
+status: closed
 severity: high
 group: 0008
 depends_on: [0004]
