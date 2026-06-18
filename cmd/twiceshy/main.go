@@ -299,6 +299,20 @@ func bumpID(id string) string {
 	return fmt.Sprintf("exp-%04d", n+1)
 }
 
+// safeJoin joins rel under base and verifies the result stays within base —
+// defense in depth (#0013) against a record path that escapes the corpus/output
+// root. Record paths are already derived (buildPath/slugify), so this is a
+// belt-and-suspenders guard. The error names only rel, never the absolute base.
+func safeJoin(base, rel string) (string, error) {
+	clean := filepath.FromSlash(rel)
+	dst := filepath.Join(base, clean)
+	rp, err := filepath.Rel(filepath.Clean(base), dst)
+	if filepath.IsAbs(clean) || err != nil || rp == ".." || strings.HasPrefix(rp, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("refusing path that escapes the output root: %q", rel)
+	}
+	return dst, nil
+}
+
 // writeRecord marshals a record and writes it under the corpus at its path,
 // creating the year directory. Persistence is a CLI concern (ADR-0008).
 func writeRecord(corpus string, rec *record.Record) error {
@@ -306,7 +320,10 @@ func writeRecord(corpus string, rec *record.Record) error {
 	if err != nil {
 		return err
 	}
-	dst := filepath.Join(corpus, filepath.FromSlash(rec.Path))
+	dst, err := safeJoin(corpus, rec.Path)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
@@ -350,7 +367,10 @@ func runPack(args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		dst := filepath.Join(*outDir, filepath.FromSlash(r.Path))
+		dst, err := safeJoin(*outDir, r.Path)
+		if err != nil {
+			return err
+		}
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return err
 		}

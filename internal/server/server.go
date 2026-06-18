@@ -74,7 +74,14 @@ func New(cfg Config) (http.Handler, error) {
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return srv }, nil)
-	return bearerAuth(cfg.Token, mcpHandler), nil
+
+	// Middleware chain (outermost first): reject unauthenticated requests before
+	// any work, then rate-limit, then bound the request's time and body size.
+	limiter := newTokenBucket(defaultRatePerSec, defaultBurst)
+	hardened := withRateLimit(limiter,
+		withTimeout(requestTimeout,
+			withMaxBytes(maxRequestBytes, mcpHandler)))
+	return bearerAuth(cfg.Token, hardened), nil
 }
 
 type handlers struct {
