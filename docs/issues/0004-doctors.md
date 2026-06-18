@@ -1,7 +1,7 @@
 ---
 id: 0004
 title: Doctors — background store-hygiene jobs (D1–D5), delta-only
-status: open
+status: closed
 severity: high
 group: 0008
 depends_on: [0007]
@@ -43,3 +43,12 @@ LLM-arbitrated steps use local Ollama or a Haiku-class API, batch/overnight
 ## Notes
 Depends on #0007 (records to validate/keep fresh). D3's sandbox runner is the
 seam the future "check issues in isolated containers" enhancement builds on.
+
+## Closeout (PR #36)
+Shipped the **doctor framework** (`internal/doctor`: report-only, delta, never
+mutates the corpus) + **D2 staleness** (`twiceshy doctor staleness`: past
+`valid.until`, and `Fixed`-version EOL via an injectable endoflife.date seam;
+fail-closed, real corpus → 0 false flags). **D1, D3, D4, D5 are deferred per
+[ADR-0010](../adr/ADR-0010-doctors-build-d2-defer-the-rest.md)** until their
+substrate exists (D3 ← runnable repros; D4 ← usage tracking; D1 ← Assess proves
+insufficient; D5 ← a clusterable corpus). Reopen via the triggers in ADR-0010.

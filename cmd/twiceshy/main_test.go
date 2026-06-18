@@ -335,3 +335,33 @@ func TestRunServeServesUntilCancelled(t *testing.T) {
 		t.Fatal("serve did not shut down after cancel")
 	}
 }
+
+// doctor staleness runs over a corpus and reports (offline: -endoflife-url ""
+// means only the valid.until signal runs, so a fresh import yields no findings).
+func TestRunDoctorStaleness(t *testing.T) {
+	dir := tempCorpus(t)
+	// populate the corpus with importer records (no past valid.until → clean)
+	if err := run(context.Background(), []string{"ingest", "go", "-corpus", dir,
+		"-db", filepath.Join(t.TempDir(), "ix.db")}, &bytes.Buffer{}, noEnv); err != nil {
+		t.Fatalf("ingest go: %v", err)
+	}
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"doctor", "staleness", "-corpus", dir,
+		"-endoflife-url", ""}, &out, noEnv); err != nil {
+		t.Fatalf("doctor staleness: %v", err)
+	}
+	if !strings.Contains(out.String(), "doctor staleness:") {
+		t.Errorf("output = %q", out.String())
+	}
+}
+
+func TestRunDoctorBadInvocations(t *testing.T) {
+	for name, args := range map[string][]string{
+		"no doctor":      {"doctor"},
+		"unknown doctor": {"doctor", "nope", "-corpus", t.TempDir()},
+	} {
+		if err := run(context.Background(), args, &bytes.Buffer{}, noEnv); err == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+}

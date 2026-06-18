@@ -1,7 +1,7 @@
 ---
 id: 0011
 title: Ingestion safety gate — secret / harmful-code / PII screening before write
-status: open
+status: closed
 severity: high
 group: 0009
 depends_on: []
