@@ -7,7 +7,7 @@
 //	twiceshy serve  -corpus <dir> -db <file> -addr …  rebuild, then serve MCP
 //	twiceshy ingest <source> -corpus <dir> -db <file> import quarantined records
 //	twiceshy pack   -corpus <dir> -out <dir>          build a distributable pack
-//	twiceshy doctor <name> -corpus <dir>              run a store-hygiene doctor (staleness)
+//	twiceshy doctor <name> -corpus <dir>              run a doctor (staleness | revalidate)
 //
 // serve requires the bearer token in TWICESHY_TOKEN. index and serve accept an
 // optional -embed-url (Ollama) to enable dense, pull-only retrieval (ADR-0009);
@@ -36,6 +36,7 @@ import (
 	"github.com/dotts-h/twiceshy/internal/ingest"
 	"github.com/dotts-h/twiceshy/internal/pack"
 	"github.com/dotts-h/twiceshy/internal/record"
+	"github.com/dotts-h/twiceshy/internal/repro"
 	"github.com/dotts-h/twiceshy/internal/server"
 )
 
@@ -459,8 +460,21 @@ func runDoctor(ctx context.Context, args []string, out io.Writer) error {
 	corpus := fs.String("corpus", ".", "corpus root (the directory containing experience/)")
 	eolURL := fs.String("endoflife-url", doctor.DefaultEOLBase, "endoflife.date API base; empty runs only the valid.until check")
 	asJSON := fs.Bool("json", false, "emit the report as JSON")
+	attest := fs.Bool("attest", false, "(revalidate) also emit the structured attestations as JSON")
 	if err := parseFlags(fs, args[1:]); err != nil {
 		return err
+	}
+
+	recs, err := record.LoadCorpus(*corpus)
+	if err != nil {
+		return fmt.Errorf("loading corpus: %w", err)
+	}
+
+	// revalidate runs untrusted repros in the gVisor broker, so it has a distinct
+	// path: it needs a corpus root + Docker/runsc, and it emits attestations the
+	// reviewer reads before flipping `validated` in the PR. (Report-only.)
+	if name == "revalidate" {
+		return runRevalidate(ctx, *corpus, recs, *asJSON, *attest, out)
 	}
 
 	var d doctor.Doctor
@@ -472,13 +486,9 @@ func runDoctor(ctx context.Context, args []string, out io.Writer) error {
 		}
 		d = doctor.NewStaleness(eol, time.Now().UTC())
 	default:
-		return fmt.Errorf("unknown doctor %q (want: staleness)", name)
+		return fmt.Errorf("unknown doctor %q (want: staleness, revalidate)", name)
 	}
 
-	recs, err := record.LoadCorpus(*corpus)
-	if err != nil {
-		return fmt.Errorf("loading corpus: %w", err)
-	}
 	rep, err := d.Run(ctx, recs)
 	if err != nil {
 		return err
@@ -492,9 +502,49 @@ func runDoctor(ctx context.Context, args []string, out io.Writer) error {
 		_, _ = fmt.Fprintln(out, string(b))
 		return nil
 	}
+	printReport(out, rep)
+	return nil
+}
+
+// runRevalidate runs the execution-validation harness (#0020) over the corpus:
+// each record's repro test-set runs in the gVisor broker, and the doctor proposes
+// promotion/demotion plus a structured attestation. Report-only.
+func runRevalidate(ctx context.Context, corpus string, recs []*record.Record, asJSON, attest bool, out io.Writer) error {
+	images := make([]string, 0, len(repro.DefaultGoMatrix))
+	for _, e := range repro.DefaultGoMatrix {
+		images = append(images, e.Image)
+	}
+	rv := repro.NewRevalidator(repro.NewBroker(images), corpus)
+	rep, atts, err := rv.RunWithAttestations(ctx, recs)
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		payload := struct {
+			Report       doctor.Report       `json:"report"`
+			Attestations []repro.Attestation `json:"attestations"`
+		}{rep, atts}
+		b, err := json.MarshalIndent(payload, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(out, string(b))
+		return nil
+	}
+	printReport(out, rep)
+	if attest {
+		b, err := json.MarshalIndent(atts, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(out, "\nattestations:\n%s\n", string(b))
+	}
+	return nil
+}
+
+func printReport(out io.Writer, rep doctor.Report) {
 	_, _ = fmt.Fprintf(out, "doctor %s: %d finding(s)\n", rep.Doctor, len(rep.Findings))
 	for _, f := range rep.Findings {
 		_, _ = fmt.Fprintf(out, "  %s (%s)\n    issue:    %s\n    proposal: %s\n", f.RecordID, f.Path, f.Issue, f.Proposal)
 	}
-	return nil
 }

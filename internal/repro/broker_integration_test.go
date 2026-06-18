@@ -5,10 +5,12 @@ package repro_test
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/repro"
 )
 
@@ -139,5 +141,72 @@ func TestIntegration_NoLeaksAfterRun(t *testing.T) {
 	}
 	if c != 0 || v != 0 {
 		t.Errorf("leaked %d containers and %d volumes after a clean run", c, v)
+	}
+}
+
+// End-to-end: the revalidate doctor proves a real Go record by running its
+// repro through the real broker under runsc, and proposes promotion. The repro
+// is stdlib-only so it runs offline in the execute phase (no prepare needed).
+func TestIntegration_RevalidatorPromotesGoRecord(t *testing.T) {
+	requireIntegration(t)
+	root := t.TempDir()
+	rel := filepath.Join("experience", "repro", "go-stdlib.sh")
+	abs := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// F2P repro: builds a tiny stdlib-only Go test and runs it offline. exit 0 =
+	// the claim holds; exit 1 = world changed; exit 75 = can't run (skip).
+	script := `#!/bin/sh
+set -u
+command -v go >/dev/null 2>&1 || { echo "SKIP: no go"; exit 75; }
+# TMPDIR must be the exec-able work volume: /tmp is mounted noexec, and 'go test'
+# compiles the test binary into TMPDIR and execs it (would be EACCES on /tmp).
+export GOCACHE=/work/.gocache GOPATH=/work/.gopath GOTOOLCHAIN=local GOFLAGS=-mod=mod
+export TMPDIR=/work/.tmp
+mkdir -p "$TMPDIR" || exit 75
+cd /work || exit 75
+mkdir -p m && cd m || exit 75
+cat > go.mod <<'EOM'
+module reprotest
+go 1.25
+EOM
+cat > x_test.go <<'EOM'
+package reprotest
+import ("strconv";"testing")
+func TestAtoiLeadingZeros(t *testing.T){
+  n,err:=strconv.Atoi("0123") // decimal, not octal
+  if err!=nil || n!=123 { t.Fatalf("got %d %v",n,err) }
+}
+EOM
+if go test ./... >out 2>&1; then exit 0; fi
+cat out; exit 1
+`
+	if err := os.WriteFile(abs, []byte(script), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.ToSlash(rel)
+	rec := &record.Record{
+		ID: "exp-9001", Status: "quarantined", Path: "experience/2026/9001-x.md",
+		AppliesTo: []record.AppliesTo{{Ecosystem: "Go", Runtime: map[string]string{"go": ">=1.25"}}},
+		Guard:     &record.Guard{Repros: []record.Repro{{Path: p, Kind: "positive"}}},
+	}
+
+	rv := repro.NewRevalidator(newRealBroker(), root)
+	rep, atts, err := rv.RunWithAttestations(context.Background(), []*record.Record{rec})
+	if err != nil {
+		t.Fatalf("RunWithAttestations: %v", err)
+	}
+	if len(atts) != 1 {
+		t.Fatalf("want 1 attestation, got %d", len(atts))
+	}
+	if !atts[0].Holds {
+		t.Fatalf("expected the record to hold; attestation=%+v", atts[0])
+	}
+	if rec.Status != "quarantined" {
+		t.Errorf("revalidator must be report-only; status changed to %q", rec.Status)
+	}
+	if len(rep.Findings) != 1 || !strings.Contains(rep.Findings[0].Proposal, "promote to validated") {
+		t.Errorf("expected a promotion proposal, got %+v", rep.Findings)
 	}
 }
