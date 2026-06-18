@@ -4,7 +4,7 @@
 > indexed and downloaded the moment it exists. Verify before and after; never
 > fire blind. The release is **tag-driven**: pushing a `v*` tag (or a manual
 > `workflow_dispatch` with the tag as input) runs `.forgejo/workflows/release.yml`
-> on the Forgejo runner (the canonical remote is `forgejo`, not the GitHub mirror).
+> on the Forgejo runner (push to the canonical `origin` remote).
 
 ## SemVer rules
 
@@ -31,9 +31,9 @@ Versions are `vMAJOR.MINOR.PATCH`, bumped per landed change:
 
 ## Publishing
 
-- **Preferred:** `git push forgejo <tag>` — the `push: tags` trigger runs the
-  workflow; the ref name *is* the tag, so the version is correct. (`forgejo` is
-  the canonical remote; `origin` is the read-only GitHub mirror and won't run CI.)
+- **Preferred:** `git push origin <tag>` — the `push: tags` trigger runs the
+  workflow; the ref name *is* the tag, so the version is correct. (`origin` is
+  the canonical Forgejo remote that runs CI.)
 - **Fallback (tag push blocked):** trigger `workflow_dispatch` with the tag as
   input; the workflow's own `contents: write` token creates the tag and release
   server-side. This path *requires* the audited version step above.
