@@ -106,6 +106,10 @@ type Provenance struct {
 	SourceURL     string  `yaml:"source_url,omitempty"`
 	SupersededBy  *string `yaml:"superseded_by"`
 	Usage         *Usage  `yaml:"usage,omitempty"`
+	// SecurityFlags records hazards the ingestion safety gate detected
+	// (#0011), e.g. "secret:aws-access-key". A flagged record is documented and
+	// quarantined but MUST NOT be promoted to validated (see validateProvenance).
+	SecurityFlags []string `yaml:"security_flags,omitempty"`
 }
 
 // SourceLicenseFactsOnly is the source_license sentinel for a record that
@@ -396,6 +400,9 @@ func (r *Record) validateProvenance(fail func(string, ...any)) {
 
 	if r.Status == "validated" && p.ValidatedAt == nil {
 		fail("status validated requires provenance.validated_at")
+	}
+	if r.Status == "validated" && len(p.SecurityFlags) > 0 {
+		fail("status validated is not allowed with provenance.security_flags %v — a flagged record cannot be promoted", p.SecurityFlags)
 	}
 	if r.Status == "superseded" {
 		if p.SupersededBy == nil {

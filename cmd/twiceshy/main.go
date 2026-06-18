@@ -234,7 +234,7 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 	}
 	now := time.Now().UTC().Format("2006-01-02")
 
-	var created, skipped int
+	var created, skipped, flagged int
 	seen := map[string]bool{} // within-batch dedup, keyed by the primary signal
 	for _, d := range drafts {
 		key := batchKey(d)
@@ -253,13 +253,18 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 		}
 		seen[key] = true
 		rec := outcome.Record
+		flag := ""
+		if len(rec.Provenance.SecurityFlags) > 0 {
+			flagged++
+			flag = fmt.Sprintf("  [FLAGGED: %s]", strings.Join(rec.Provenance.SecurityFlags, ", "))
+		}
 		if *dryRun {
-			_, _ = fmt.Fprintf(out, "  would create %s %s\n", rec.ID, rec.Path)
+			_, _ = fmt.Fprintf(out, "  would create %s %s%s\n", rec.ID, rec.Path, flag)
 		} else {
 			if err := writeRecord(c.corpus, rec); err != nil {
 				return err
 			}
-			_, _ = fmt.Fprintf(out, "  created %s %s\n", rec.ID, rec.Path)
+			_, _ = fmt.Fprintf(out, "  created %s %s%s\n", rec.ID, rec.Path, flag)
 		}
 		created++
 		id = bumpID(id)
@@ -269,7 +274,8 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 	if *dryRun {
 		verb = "would create"
 	}
-	_, _ = fmt.Fprintf(out, "ingest %s: %s %d records, skipped %d (known)\n", src.Name(), verb, created, skipped)
+	_, _ = fmt.Fprintf(out, "ingest %s: %s %d records, skipped %d (known), flagged %d (quarantined+documented)\n",
+		src.Name(), verb, created, skipped, flagged)
 	return nil
 }
 

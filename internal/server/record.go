@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/dotts-h/twiceshy/internal/index"
@@ -176,11 +177,17 @@ func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args Reco
 		return nil, RecordResult{}, err
 	}
 
+	msg := "Quarantined draft created — open it as a PR to validate; it is NOT yet active."
+	if flags := out.Record.Provenance.SecurityFlags; len(flags) > 0 {
+		msg += " SECURITY: the safety gate flagged this draft (" + strings.Join(flags, ", ") +
+			"); it cannot be promoted to validated until the hazard is resolved."
+	}
+
 	return nil, RecordResult{
 		Novelty:    string(out.Novelty),
 		RecordID:   out.Record.ID,
 		Markdown:   string(md),
 		Candidates: cands,
-		Message:    "Quarantined draft created — open it as a PR to validate; it is NOT yet active.",
+		Message:    msg,
 	}, nil
 }
