@@ -6,12 +6,14 @@
 //	twiceshy index  -corpus <dir> -db <file>          rebuild the derived index
 //	twiceshy serve  -corpus <dir> -db <file> -addr …  rebuild, then serve MCP
 //	twiceshy ingest <source> -corpus <dir> -db <file> import quarantined records
+//	twiceshy pack   -corpus <dir> -out <dir>          build a distributable pack
 //
 // serve requires the bearer token in TWICESHY_TOKEN.
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -28,6 +30,7 @@ import (
 
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/ingest"
+	"github.com/dotts-h/twiceshy/internal/pack"
 	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/server"
 )
@@ -65,17 +68,19 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|ingest> [flags]")
+		return errors.New("usage: twiceshy <index|serve|ingest|pack> [flags]")
 	}
 	switch args[0] {
 	case "index":
 		return runIndex(ctx, args[1:], out)
 	case "serve":
 		return runServe(ctx, args[1:], out, getenv)
+	case "pack":
+		return runPack(args[1:], out)
 	case "ingest":
 		return runIngest(ctx, args[1:], out)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, or ingest)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, or pack)", args[0])
 	}
 }
 
@@ -298,4 +303,85 @@ func writeRecord(corpus string, rec *record.Record) error {
 		return err
 	}
 	return os.WriteFile(dst, md, 0o644)
+}
+
+// runPack builds a distributable experience pack (#0007, ADR-0002 §4). It
+// selects validated records, optionally enforces commercial-pack license
+// cleanliness (pack.BuildManifest), and writes the included records plus a
+// MANIFEST.json and ATTRIBUTION.md to -out. Pure selection lives in
+// internal/pack; this edge does the I/O.
+func runPack(args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("pack", flag.ContinueOnError)
+	corpus := fs.String("corpus", ".", "corpus root (the directory containing experience/)")
+	outDir := fs.String("out", "", "output directory for the built pack")
+	commercial := fs.Bool("commercial", false, "build a commercial pack: exclude copyleft/contract-encumbered records")
+	includeQ := fs.Bool("include-quarantined", false, "include not-yet-validated records (inspection only)")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if *outDir == "" {
+		return errors.New("pack requires -out <dir>")
+	}
+
+	recs, err := record.LoadCorpus(*corpus)
+	if err != nil {
+		return fmt.Errorf("loading corpus: %w", err)
+	}
+	m := pack.BuildManifest(recs, *commercial, *includeQ)
+
+	byID := make(map[string]*record.Record, len(recs))
+	for _, r := range recs {
+		byID[r.ID] = r
+	}
+	if err := os.MkdirAll(*outDir, 0o755); err != nil {
+		return err
+	}
+	for _, id := range m.Included {
+		r := byID[id]
+		md, err := record.Marshal(r)
+		if err != nil {
+			return err
+		}
+		dst := filepath.Join(*outDir, filepath.FromSlash(r.Path))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(dst, md, 0o644); err != nil {
+			return err
+		}
+	}
+
+	mj, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(*outDir, "MANIFEST.json"), append(mj, '\n'), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(*outDir, "ATTRIBUTION.md"), attributionDoc(m), 0o644); err != nil {
+		return err
+	}
+
+	kind := "open"
+	if *commercial {
+		kind = "commercial"
+	}
+	_, _ = fmt.Fprintf(out, "pack (%s): included %d, excluded %d, attribution %d -> %s\n",
+		kind, len(m.Included), len(m.Excluded), len(m.Attribution), *outDir)
+	return nil
+}
+
+// attributionDoc renders the pack's ATTRIBUTION.md from its manifest.
+func attributionDoc(m pack.Manifest) []byte {
+	var b strings.Builder
+	b.WriteString("# Attribution\n\n")
+	if len(m.Attribution) == 0 {
+		b.WriteString("No records in this pack require attribution.\n")
+		return []byte(b.String())
+	}
+	b.WriteString("This pack includes records distilled from the following attributed sources:\n\n")
+	for _, a := range m.Attribution {
+		_, _ = fmt.Fprintf(&b, "- `%s` — %s — %s\n", a.ID, a.SourceLicense, a.SourceURL)
+	}
+	return []byte(b.String())
 }
