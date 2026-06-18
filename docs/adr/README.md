@@ -16,3 +16,6 @@ accepted ADR's decision — supersede it (`Status: superseded-by-NNNN`).
 | [0006](ADR-0006-defer-score-banding.md) | Keep three-state novelty; defer score-banding to the dense phase | Accepted |
 | [0007](ADR-0007-floor-on-the-read-path.md) | The relevance floor applies to the read path too, via a single injection seam | Accepted |
 | [0008](ADR-0008-write-path-persistence-is-a-cli-concern.md) | Persistence is a trusted-CLI concern — the MCP server never holds push credentials | Accepted |
+| [0009](ADR-0009-dense-retrieval-is-pure-go-cosine.md) | Dense retrieval is pure-Go cosine, not sqlite-vec — preserve the CGO-free build | Accepted |
+| [0010](ADR-0010-doctors-build-d2-defer-the-rest.md) | Doctors — build the framework + D2 staleness now; defer D1/D3/D4/D5 | Accepted |
+| [0011](ADR-0011-corpus-growth-and-validation-engine.md) | Corpus growth as a live feed, with execution-validation as the moat | Proposed |
