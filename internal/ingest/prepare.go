@@ -120,10 +120,11 @@ func Prepare(ctx context.Context, ix *index.Index, repo string, d Draft, m Meta)
 	// record stays quarantined ("a documented hazard beats ingesting it"); with
 	// RejectOnFlag the draft is refused outright. The error never echoes a secret.
 	if fs := screen.Scan(scanTexts(rec)...); len(fs) > 0 {
+		flags := screen.Flags(fs)
 		if m.RejectOnFlag {
-			return Outcome{}, fmt.Errorf("ingest: draft rejected by safety gate: %v", screen.Flags(fs))
+			return Outcome{}, fmt.Errorf("ingest: draft rejected by safety gate: %v", flags)
 		}
-		rec.Provenance.SecurityFlags = screen.Flags(fs)
+		rec.Provenance.SecurityFlags = flags
 	}
 
 	if err := record.Validate(rec); err != nil {

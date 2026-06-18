@@ -87,6 +87,40 @@ func TestRetrieveFusedDenseSurfacesLexicalMiss(t *testing.T) {
 	}
 }
 
+// RRF fusion must NOT smuggle a near-miss that is below BOTH floors (the lexical
+// BM25 floor AND the dense cosine floor) into the top-k — that is exactly the
+// near-miss injection the relevance floor exists to prevent (ADR-0001 §3,
+// ADR-0009). A record with no lexical overlap AND an orthogonal embedding
+// (cosine 0 < denseFloor) must be absent from the fused result.
+func TestRetrieveFusedDropsDoublyBelowFloor(t *testing.T) {
+	emb := &stubEmbedder{dim: 3, basis: map[string][]float32{
+		"quux":  {1, 0, 0}, // query
+		"florb": {1, 0, 0}, // near record: same basis → cosine 1 (clears dense floor)
+		"zonk":  {0, 1, 0}, // far record: orthogonal → cosine 0 (below dense floor)
+	}}
+	recs := []*record.Record{
+		mkRecord(t, 1, "Near via embedding", "the florb subsystem stalls", nil, "Go", ""),
+		mkRecord(t, 2, "Doubly below floor", "the zonk widget is unrelated", nil, "Go", ""),
+	}
+	ix := openIndex(t, recs)
+	embedAll(t, ix, recs, emb)
+
+	// "quux" shares no lexical token with either record (both miss BM25); it
+	// embeds near exp-0001 (cosine 1) and orthogonal to exp-0002 (cosine 0).
+	fused, err := ix.RetrieveFused(context.Background(), index.Query{Text: "quux"}, emb)
+	if err != nil {
+		t.Fatalf("RetrieveFused: %v", err)
+	}
+	for _, h := range fused {
+		if h.ID == "exp-0002" {
+			t.Fatalf("doubly-below-floor record exp-0002 must not be fused in; got %+v", fused)
+		}
+	}
+	if len(fused) != 1 || fused[0].ID != "exp-0001" {
+		t.Fatalf("only the above-floor record should appear; got %+v", fused)
+	}
+}
+
 // A fingerprint-exact hit keeps absolute precedence under fusion.
 func TestRetrieveFusedFingerprintStillWins(t *testing.T) {
 	sig := "panic: runtime error: index out of range [5]"
