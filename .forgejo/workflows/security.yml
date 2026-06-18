@@ -39,9 +39,11 @@ jobs:
           # No GH-Actions cache service on this Forgejo runner; cache=true hangs
           # ~5min then fails (connect ETIMEDOUT). See .forgejo/workflows/ci.yml.
           cache: false
+      - name: Verify module checksums (supply chain)
+        run: go mod verify
       - name: install govulncheck
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.4.0
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: SAST (go vet)
         run: go vet ./...
