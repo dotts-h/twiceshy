@@ -43,6 +43,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/dotts-h/twiceshy/internal/screen"
 )
 
 // Broker runs a single repro job in an isolated sandbox and returns the result
@@ -187,6 +189,14 @@ func NewBroker(allowedImages []string, opts ...Option) Broker {
 // (optional, networked, trusted) → execute (no network, untrusted) → teardown.
 func (b *dockerBroker) Run(ctx context.Context, job Job) (Result, error) {
 	if err := b.validate(job); err != nil {
+		return Result{}, err
+	}
+	// Execution trust boundary (#0019): independently screen every staged file's
+	// CONTENT and refuse before doing any work if it carries an execution hazard
+	// (embedded secret or harmful-code sequence). This is defense-in-depth at the
+	// execution chokepoint — even a buggy or compromised caller cannot make the
+	// broker run a script that the screen would reject.
+	if err := screenFiles(job.Files); err != nil {
 		return Result{}, err
 	}
 	id, err := b.newID()
@@ -414,6 +424,20 @@ func (b *dockerBroker) phaseTimeout(job Job) time.Duration {
 		return job.Timeout
 	}
 	return b.limits.Timeout
+}
+
+// screenFiles refuses to run any staged file whose content carries an execution
+// hazard (embedded secret or harmful-code sequence). Files are screened in a
+// deterministic order so the reported flags are stable.
+func screenFiles(files map[string][]byte) error {
+	for _, name := range sortedKeys(files) {
+		hz := screen.ExecutionHazards(screen.Scan(string(files[name])))
+		if len(hz) > 0 {
+			return fmt.Errorf("repro: refusing to execute %q — screen flagged %v (trust boundary)",
+				name, screen.Flags(hz))
+		}
+	}
+	return nil
 }
 
 // safeRelPath rejects absolute paths and ".." traversal so staged files can only

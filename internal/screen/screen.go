@@ -48,9 +48,12 @@ var patternRules = []sigRule{
 	{"harmful-code", "netcat-exec", regexp.MustCompile(`(?i)\bnc\b[^\n]*\s-e\s`)},
 	{"harmful-code", "rm-rf-root", regexp.MustCompile(`\brm\s+-rf\s+/(?:\s|$)`)},
 	{"harmful-code", "fork-bomb", regexp.MustCompile(`:\(\)\s*\{[^}]*:\|:[^}]*\}\s*;\s*:`)},
-	// pii — conservative (private/loopback IPs only, so version numbers don't match)
+	// pii — conservative (RFC-1918 private ranges only, so version numbers don't
+	// match). Loopback (127.0.0.0/8) is localhost, not PII — and Docker's embedded
+	// DNS at 127.0.0.11 appears legitimately in sandbox/repro scripts (exp-0016),
+	// so it is deliberately excluded.
 	{"pii", "email", regexp.MustCompile(`[\w.+-]+@[\w-]+\.[\w.-]+`)},
-	{"pii", "private-ip", regexp.MustCompile(`\b(?:10|127)(?:\.\d{1,3}){3}\b|\b192\.168(?:\.\d{1,3}){2}\b`)},
+	{"pii", "private-ip", regexp.MustCompile(`\b10(?:\.\d{1,3}){3}\b|\b192\.168(?:\.\d{1,3}){2}\b`)},
 }
 
 // reAssignedSecret catches a generic high-entropy value assigned to a
@@ -93,6 +96,22 @@ func Scan(texts ...string) []Finding {
 		}
 		return out[i].Rule < out[j].Rule
 	})
+	return out
+}
+
+// ExecutionHazards returns the subset of findings that make a script unsafe to
+// EXECUTE — embedded secrets and harmful-code sequences. PII findings are
+// excluded on purpose: a repro/test fixture may legitimately contain an email or
+// a private IP, and PII is an ingestion/storage concern, not an execution one
+// (the broker's execute phase has no network to exfiltrate anything). This is the
+// calibrated gate the sandbox broker (#0018/#0019) uses to refuse a repro.
+func ExecutionHazards(findings []Finding) []Finding {
+	out := make([]Finding, 0, len(findings))
+	for _, f := range findings {
+		if f.Category == "secret" || f.Category == "harmful-code" {
+			out = append(out, f)
+		}
+	}
 	return out
 }
 
