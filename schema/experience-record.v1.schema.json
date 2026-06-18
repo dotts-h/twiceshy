@@ -61,7 +61,10 @@
         "properties": {
           "provenance": {
             "required": ["validated_at"],
-            "properties": { "validated_at": { "$ref": "#/$defs/date" } }
+            "properties": {
+              "validated_at": { "$ref": "#/$defs/date" },
+              "security_flags": { "maxItems": 0 }
+            }
           }
         }
       }
@@ -219,6 +222,10 @@
         "source_url": {
           "type": "string",
           "pattern": "^https?://[^\\s]+$"
+        },
+        "security_flags": {
+          "type": "array",
+          "items": { "type": "string" }
         },
         "superseded_by": {
           "oneOf": [

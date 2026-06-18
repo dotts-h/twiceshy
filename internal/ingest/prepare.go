@@ -10,6 +10,7 @@ import (
 
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/record"
+	"github.com/dotts-h/twiceshy/internal/screen"
 )
 
 // Draft is an agent-proposed record before it is identified, dated, or sited.
@@ -40,6 +41,10 @@ type Meta struct {
 	// idempotent (it must not re-import what it already quarantined); the agent
 	// write path leaves it false (a re-proposed draft is a fresh PR).
 	IncludeQuarantined bool
+	// RejectOnFlag changes the safety-gate policy from quarantine-with-flag
+	// (default: document the hazard, keep the record quarantined) to hard
+	// rejection (return an error, create nothing). (#0011)
+	RejectOnFlag bool
 }
 
 // Outcome is the ingest decision plus its evidence.
@@ -110,6 +115,17 @@ func Prepare(ctx context.Context, ix *index.Index, repo string, d Draft, m Meta)
 		Path: buildPath(m.Now, m.ID, d.Title),
 	}
 
+	// Safety gate (#0011): scan the record's text for secrets / harmful code /
+	// PII before it can be written. A hit is documented in security_flags and the
+	// record stays quarantined ("a documented hazard beats ingesting it"); with
+	// RejectOnFlag the draft is refused outright. The error never echoes a secret.
+	if fs := screen.Scan(scanTexts(rec)...); len(fs) > 0 {
+		if m.RejectOnFlag {
+			return Outcome{}, fmt.Errorf("ingest: draft rejected by safety gate: %v", screen.Flags(fs))
+		}
+		rec.Provenance.SecurityFlags = screen.Flags(fs)
+	}
+
 	if err := record.Validate(rec); err != nil {
 		return Outcome{}, fmt.Errorf("ingest: invalid draft: %w", err)
 	}
@@ -119,6 +135,30 @@ func Prepare(ctx context.Context, ix *index.Index, repo string, d Draft, m Meta)
 		Candidates: candidates,
 		Record:     rec,
 	}, nil
+}
+
+// scanTexts gathers every free-text field of a record for the safety gate.
+func scanTexts(r *record.Record) []string {
+	ts := []string{r.Title, r.Body}
+	if r.Symptom != nil {
+		ts = append(ts, r.Symptom.Summary)
+		ts = append(ts, r.Symptom.ErrorSignatures...)
+	}
+	if r.Resolution != nil {
+		ts = append(ts, r.Resolution.RootCause, r.Resolution.Fix)
+		for _, de := range r.Resolution.DeadEnds {
+			ts = append(ts, de.Tried, de.WhyItFailed)
+		}
+	}
+	if r.Guard != nil {
+		if r.Guard.Repro != nil {
+			ts = append(ts, *r.Guard.Repro)
+		}
+		if r.Guard.GuardingTest != nil {
+			ts = append(ts, *r.Guard.GuardingTest)
+		}
+	}
+	return ts
 }
 
 // probes returns the dedup probes for a draft, strongest signal first: each
