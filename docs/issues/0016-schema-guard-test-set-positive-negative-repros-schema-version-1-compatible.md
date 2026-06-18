@@ -1,7 +1,7 @@
 ---
 id: 0016
 title: Schema — guard test-set (positive+negative repros), schema_version-1 compatible
-status: open
+status: closed
 severity: high
 group: 0015
 depends_on: []
