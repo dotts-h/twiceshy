@@ -1,0 +1,69 @@
+# License-clean projection of the GitHub Advisory Database / OSV. GHSA content
+# is CC-BY-4.0, so per ADR-0003 §4 these records are licensed CC-BY-4.0 with
+# attribution (source_url). Only FUNCTIONAL identifiers are verbatim — GHSA/CVE
+# ids, ecosystem + package names, and affected version ranges (introduced/fixed
+# from OSV affected[].ranges[].events). All prose (title, summary, root_cause,
+# fix, body) is distilled in twiceshy's own words; no advisory prose is copied.
+# Sources: https://github.com/advisories (GitHub Advisory Database, CC-BY-4.0)
+# and https://osv.dev. Ranges should be spot-checked against osv.dev before a
+# record is promoted past quarantine.
+- ghsa: GHSA-jfh8-c2jp-5v3q
+  cve: CVE-2021-44228
+  url: https://github.com/advisories/GHSA-jfh8-c2jp-5v3q
+  title: "Log4Shell — Log4j 2 evaluates JNDI lookups in logged data (RCE)"
+  summary: "Untrusted data logged by Log4j 2 can trigger a JNDI lookup that loads and runs remote code."
+  root_cause: "Message-lookup substitution expanded ${jndi:...} inside logged strings, letting attacker-controlled input reach JNDI/LDAP and load remote classes."
+  fix: "Upgrade org.apache.logging.log4j:log4j-core to 2.15.0 or later (2.17.1+ recommended to also cover the follow-on CVEs)."
+  body: |
+    Any application that logged attacker-influenced input with a vulnerable
+    Log4j 2 version could be made to execute remote code via a crafted
+    ${jndi:ldap://...} string. Upgrade log4j-core to a fixed release; message
+    lookups are disabled by default afterward.
+  # OSV lists three disjoint ranges — the 2.3.1 and 2.12.2 backport fixes mean
+  # 2.3.1+ and 2.12.2+ on those branches are NOT vulnerable (verified at
+  # github.com/advisories/GHSA-jfh8-c2jp-5v3q, 2026-06-18).
+  affected:
+    - ecosystem: Maven
+      package: org.apache.logging.log4j:log4j-core
+      introduced: "2.0-beta9"
+      fixed: "2.3.1"
+    - ecosystem: Maven
+      package: org.apache.logging.log4j:log4j-core
+      introduced: "2.4"
+      fixed: "2.12.2"
+    - ecosystem: Maven
+      package: org.apache.logging.log4j:log4j-core
+      introduced: "2.13.0"
+      fixed: "2.15.0"
+- ghsa: GHSA-jf85-cpcp-j695
+  cve: CVE-2019-10744
+  url: https://github.com/advisories/GHSA-jf85-cpcp-j695
+  title: "lodash prototype pollution via defaultsDeep"
+  summary: "lodash defaultsDeep can be tricked into modifying Object.prototype, polluting every object in the program."
+  root_cause: "defaultsDeep merged attacker-controlled keys such as __proto__ into the target, writing onto the global Object prototype."
+  fix: "Upgrade lodash to 4.17.12 or later."
+  body: |
+    Passing a payload with a __proto__ key to lodash's defaultsDeep let an
+    attacker add or override properties on Object.prototype, affecting unrelated
+    objects across the program. The merge was hardened in 4.17.12.
+  affected:
+    - ecosystem: npm
+      package: lodash
+      introduced: "0"
+      fixed: "4.17.12"
+- ghsa: GHSA-8q59-q68h-6hv4
+  cve: CVE-2020-14343
+  url: https://github.com/advisories/GHSA-8q59-q68h-6hv4
+  title: "PyYAML arbitrary code execution via the non-safe loader"
+  summary: "Loading untrusted YAML with PyYAML's full_load / default loader can execute arbitrary Python."
+  root_cause: "The FullLoader and default loader could instantiate arbitrary Python objects from YAML tags, allowing code execution on untrusted input."
+  fix: "Upgrade PyYAML to 5.4 or later and use yaml.safe_load for untrusted input."
+  body: |
+    PyYAML's full_load and the default loader could construct arbitrary Python
+    objects from crafted YAML, executing code when parsing untrusted documents.
+    The 5.4 release completed the fix; prefer yaml.safe_load regardless.
+  affected:
+    - ecosystem: PyPI
+      package: PyYAML
+      introduced: "0"
+      fixed: "5.4"

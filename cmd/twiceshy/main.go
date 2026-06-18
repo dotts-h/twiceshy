@@ -180,8 +180,10 @@ func importSource(name string) (ingest.Source, error) {
 	switch name {
 	case "go":
 		return ingest.NewGoSource(), nil
+	case "osv":
+		return ingest.NewOSVSource(), nil
 	default:
-		return nil, fmt.Errorf("unknown ingest source %q (want: go)", name)
+		return nil, fmt.Errorf("unknown ingest source %q (want: go, osv)", name)
 	}
 }
 
@@ -194,7 +196,7 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 	// stops at the first non-flag arg, so pull the source off the front before
 	// parsing (otherwise `ingest go -corpus X` would leave -corpus unparsed).
 	if len(args) < 1 {
-		return errors.New("usage: twiceshy ingest <source> [flags] (sources: go)")
+		return errors.New("usage: twiceshy ingest <source> [flags] (sources: go, osv)")
 	}
 	src, err := importSource(args[0])
 	if err != nil {
