@@ -13,12 +13,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"unicode"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"gopkg.in/yaml.v3"
 
 	"github.com/dotts-h/twiceshy/internal/index"
+	"github.com/dotts-h/twiceshy/internal/ingest"
 	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/server"
 )
@@ -340,10 +340,25 @@ func TestRecordExperienceProposeDiskReloadRead(t *testing.T) {
 		t.Fatalf("expected a quarantined draft, got %+v", draft)
 	}
 
-	declared, err := declaredPathFromMarkdown(draft.Markdown)
-	if err != nil {
-		t.Fatalf("derive declared path: %v", err)
+	const delim = "---\n"
+	parts := strings.SplitN(draft.Markdown, delim, 3)
+	if len(parts) < 3 {
+		t.Fatal("draft markdown missing YAML frontmatter")
 	}
+	var meta struct {
+		ID    string `yaml:"id"`
+		Title string `yaml:"title"`
+		Prov  struct {
+			RecordedAt string `yaml:"recorded_at"`
+		} `yaml:"provenance"`
+	}
+	if err := yaml.Unmarshal([]byte(parts[1]), &meta); err != nil {
+		t.Fatalf("parse draft frontmatter: %v", err)
+	}
+	if meta.ID == "" || meta.Title == "" || meta.Prov.RecordedAt == "" {
+		t.Fatal("draft frontmatter missing id/title/recorded_at")
+	}
+	declared := ingest.BuildPath(meta.Prov.RecordedAt, meta.ID, meta.Title)
 	full := filepath.Join(corpusRoot, filepath.FromSlash(declared))
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		t.Fatal(err)
@@ -442,57 +457,6 @@ func TestRecordExperienceProposeDiskReloadRead(t *testing.T) {
 	if !strings.Contains(string(visRaw), draft.RecordID) {
 		t.Errorf("include_quarantined must surface the draft, got %s", visRaw)
 	}
-}
-
-// declaredPathFromMarkdown derives experience/<year>/<num>-<slug>.md from the
-// quarantined draft's frontmatter — the same path ingest.Prepare assigns.
-func declaredPathFromMarkdown(md string) (string, error) {
-	const delim = "---\n"
-	parts := strings.SplitN(md, delim, 3)
-	if len(parts) < 3 {
-		return "", fmt.Errorf("markdown missing YAML frontmatter")
-	}
-	var meta struct {
-		ID    string `yaml:"id"`
-		Title string `yaml:"title"`
-		Prov  struct {
-			RecordedAt string `yaml:"recorded_at"`
-		} `yaml:"provenance"`
-	}
-	if err := yaml.Unmarshal([]byte(parts[1]), &meta); err != nil {
-		return "", err
-	}
-	if meta.ID == "" || meta.Title == "" || meta.Prov.RecordedAt == "" {
-		return "", fmt.Errorf("frontmatter missing id/title/recorded_at")
-	}
-	year := meta.Prov.RecordedAt
-	if len(year) >= 4 {
-		year = year[:4]
-	}
-	num := strings.TrimPrefix(meta.ID, "exp-")
-	slug := slugifyTitle(meta.Title)
-	if slug == "" {
-		slug = "record"
-	}
-	return fmt.Sprintf("experience/%s/%s-%s.md", year, num, slug), nil
-}
-
-func slugifyTitle(title string) string {
-	title = strings.ToLower(title)
-	var b strings.Builder
-	prevDash := false
-	for _, r := range title {
-		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
-			b.WriteRune(r)
-			prevDash = false
-		} else if unicode.IsPrint(r) {
-			if !prevDash {
-				b.WriteRune('-')
-				prevDash = true
-			}
-		}
-	}
-	return strings.Trim(b.String(), "-")
 }
 
 // H8 (server half): drive concurrent authenticated HTTP requests against one
