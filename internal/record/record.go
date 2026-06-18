@@ -415,9 +415,35 @@ func (r *Record) validateGuard(fail func(string, ...any)) {
 	if !needsGuard {
 		return
 	}
-	if r.Guard == nil || r.Guard.GuardingTest == nil || strings.TrimSpace(*r.Guard.GuardingTest) == "" {
-		fail("validated %s requires guard.guarding_test", r.Kind)
+	// A validated trap/fix needs executable proof: either a named guarding test
+	// (the unit test that keeps the fix fixed) OR a positive repro (the
+	// fail-to-pass script the execution-validation harness ran, ADR-0011). The
+	// repro IS the proof for execution-validated records, so it satisfies this on
+	// its own — requiring an extra Go unit test would defeat the harness.
+	if r.Guard != nil && r.Guard.GuardingTest != nil && strings.TrimSpace(*r.Guard.GuardingTest) != "" {
+		return
 	}
+	if r.Guard != nil && r.hasPositiveRepro() {
+		return
+	}
+	fail("validated %s requires guard.guarding_test or a positive guard repro", r.Kind)
+}
+
+// hasPositiveRepro reports whether the guard carries at least one positive
+// fail-to-pass repro (the legacy single guard.repro is a positive).
+func (r *Record) hasPositiveRepro() bool {
+	if r.Guard == nil {
+		return false
+	}
+	if r.Guard.Repro != nil && strings.TrimSpace(*r.Guard.Repro) != "" {
+		return true
+	}
+	for _, rp := range r.Guard.Repros {
+		if rp.Kind == "positive" && strings.TrimSpace(rp.Path) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Record) validateProvenance(fail func(string, ...any)) {

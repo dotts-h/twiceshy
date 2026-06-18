@@ -141,6 +141,43 @@ func TestParseAcceptsTheBaseFixture(t *testing.T) {
 	}
 }
 
+// A validated trap proven by EXECUTION (a positive repro) needs no separate
+// guarding_test — the repro is the proof (ADR-0011). Both the legacy single
+// guard.repro and a guard.repros positive entry satisfy this.
+func TestParseAcceptsValidatedTrapWithReproAndNoGuardingTest(t *testing.T) {
+	legacy := fm()
+	legacy["guard"] = map[string]any{"repro": "experience/repro/0017.sh", "guarding_test": nil}
+	if _, err := record.Parse(fmPath, render(t, legacy)); err != nil {
+		t.Errorf("validated trap with a positive guard.repro must be valid, got: %v", err)
+	}
+
+	testSet := fm()
+	testSet["guard"] = map[string]any{
+		"repro":         nil,
+		"guarding_test": nil,
+		"repros": []any{
+			map[string]any{"path": "experience/repro/0017.sh", "kind": "positive"},
+		},
+	}
+	if _, err := record.Parse(fmPath, render(t, testSet)); err != nil {
+		t.Errorf("validated trap with a positive guard.repros entry must be valid, got: %v", err)
+	}
+
+	// A validated trap with ONLY a negative repro (no positive, no guarding_test)
+	// has no proof the fix holds — it must still be rejected.
+	negOnly := fm()
+	negOnly["guard"] = map[string]any{
+		"repro":         nil,
+		"guarding_test": nil,
+		"repros": []any{
+			map[string]any{"path": "experience/repro/neg.sh", "kind": "negative"},
+		},
+	}
+	if _, err := record.Parse(fmPath, render(t, negOnly)); err == nil {
+		t.Error("validated trap with only a negative repro and no guarding_test must be rejected")
+	}
+}
+
 func TestParseRejections(t *testing.T) {
 	del := func(keys ...string) func(map[string]any) {
 		return func(m map[string]any) {

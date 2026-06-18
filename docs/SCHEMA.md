@@ -83,7 +83,13 @@ boosts retrieval and is what Doctor 2 cross-checks against the live world.
 |---|---|---|---|
 | `repro` | string\|null | recommended | repo-root-relative path to a script with **fail-to-pass discipline**: exits non-zero in the trap/pre-fix state, zero post-fix; exit `75` = environment can't run it (skip). Semantically a single **positive** repro; kept for back-compat. Becomes **mandatory for promotion to `validated`** once Doctor 3 ships (Phase 4) |
 | `repros` | array | no | optional test-set; each item: `{path, kind, label?}`. `kind`: `positive` (fail-to-pass — the fix holds) or `negative` (dead-end — must stay failing, proves "don't try Z"). `path` uses the same repro-script discipline as `repro`. A record may use `repro`, `repros`, or both; paths within one record's `repros` must be unique. The validation harness (#0020) runs the whole set |
-| `guarding_test` | string\|null | for validated `trap`/`fix` | the test name that keeps the fix fixed |
+| `guarding_test` | string\|null | see note | the test name that keeps the fix fixed |
+
+A validated `trap`/`fix` requires **executable proof**: a `guarding_test` **or**
+a positive repro (`guard.repro`, or a `guard.repros` entry with `kind: positive`).
+The repro IS the proof for execution-validated records (ADR-0011, Doctor 3), so it
+satisfies the requirement on its own — a record proven by the harness need not
+also carry a named Go unit test.
 
 ### `provenance`
 
