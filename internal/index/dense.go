@@ -6,9 +6,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -157,8 +159,8 @@ func (ix *Index) EmbedCorpus(ctx context.Context, recs []*record.Record, emb Emb
 		}
 		h := hashText(text)
 		var blob []byte
-		err := tx.QueryRowContext(ctx, "SELECT vec FROM embedding_cache WHERE hash = ?", h).Scan(&blob)
-		if err != nil { // cache miss (or error): embed and cache
+		switch err := tx.QueryRowContext(ctx, "SELECT vec FROM embedding_cache WHERE hash = ?", h).Scan(&blob); {
+		case errors.Is(err, sql.ErrNoRows): // genuine cache miss: embed and cache
 			vec, eerr := emb.Embed(ctx, text)
 			if eerr != nil {
 				return fmt.Errorf("embed %s: %w", r.ID, eerr)
@@ -168,6 +170,8 @@ func (ix *Index) EmbedCorpus(ctx context.Context, recs []*record.Record, emb Emb
 				"INSERT OR REPLACE INTO embedding_cache (hash, vec) VALUES (?,?)", h, blob); err != nil {
 				return fmt.Errorf("embed corpus: cache %s: %w", r.ID, err)
 			}
+		case err != nil: // a real lookup failure must not masquerade as a miss
+			return fmt.Errorf("embed corpus: cache lookup %s: %w", r.ID, err)
 		}
 		if _, err := tx.ExecContext(ctx,
 			"INSERT OR REPLACE INTO embeddings (record_id, vec) VALUES (?,?)", r.ID, blob); err != nil {
