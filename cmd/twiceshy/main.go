@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Command twiceshy is the experience service binary (ADR-0001 §9): one Go
-// process serving the Phase 1 read path.
+// process serving the Phase 1 read path, plus corpus tooling.
 //
-//	twiceshy index -corpus <dir> -db <file>          rebuild the derived index
-//	twiceshy serve -corpus <dir> -db <file> -addr …  rebuild, then serve MCP
+//	twiceshy index  -corpus <dir> -db <file>          rebuild the derived index
+//	twiceshy serve  -corpus <dir> -db <file> -addr …  rebuild, then serve MCP
+//	twiceshy ingest <source> -corpus <dir> -db <file> import quarantined records
 //
 // serve requires the bearer token in TWICESHY_TOKEN.
 package main
@@ -19,10 +20,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/dotts-h/twiceshy/internal/index"
+	"github.com/dotts-h/twiceshy/internal/ingest"
 	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/server"
 )
@@ -60,15 +65,17 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve> [flags]")
+		return errors.New("usage: twiceshy <index|serve|ingest> [flags]")
 	}
 	switch args[0] {
 	case "index":
 		return runIndex(ctx, args[1:], out)
 	case "serve":
 		return runServe(ctx, args[1:], out, getenv)
+	case "ingest":
+		return runIngest(ctx, args[1:], out)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index or serve)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, or ingest)", args[0])
 	}
 }
 
@@ -166,4 +173,127 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 		return err
 	}
 	return nil
+}
+
+// importSource resolves a CLI source selector to its adapter.
+func importSource(name string) (ingest.Source, error) {
+	switch name {
+	case "go":
+		return ingest.NewGoSource(), nil
+	default:
+		return nil, fmt.Errorf("unknown ingest source %q (want: go)", name)
+	}
+}
+
+// runIngest imports quarantined records from a license-clean source (#0007).
+// Records are deduped against the corpus (via ingest.Prepare) and within the
+// batch, then written to disk for a human to open as a PR — git is the trust
+// boundary, so nothing is born validated and nothing reaches the push channel.
+func runIngest(ctx context.Context, args []string, out io.Writer) error {
+	// The source is the first positional; flags follow it. Go's flag package
+	// stops at the first non-flag arg, so pull the source off the front before
+	// parsing (otherwise `ingest go -corpus X` would leave -corpus unparsed).
+	if len(args) < 1 {
+		return errors.New("usage: twiceshy ingest <source> [flags] (sources: go)")
+	}
+	src, err := importSource(args[0])
+	if err != nil {
+		return err
+	}
+	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
+	c := addCommonFlags(fs)
+	dryRun := fs.Bool("dry-run", false, "classify and report, but write no files")
+	author := fs.String("author", "twiceshy-importer", "provenance author recorded on imported records")
+	if err := parseFlags(fs, args[1:]); err != nil {
+		return err
+	}
+
+	ix, _, err := buildIndex(ctx, c)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = ix.Close() }()
+
+	drafts, err := src.Drafts(ctx)
+	if err != nil {
+		return err
+	}
+
+	id, err := ix.NextID(ctx)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format("2006-01-02")
+
+	var created, skipped int
+	seen := map[string]bool{} // within-batch dedup, keyed by the primary signal
+	for _, d := range drafts {
+		key := batchKey(d)
+		if seen[key] {
+			skipped++
+			continue
+		}
+		outcome, err := ingest.Prepare(ctx, ix, c.repo, d,
+			ingest.Meta{ID: id, Author: *author, Now: now, IncludeQuarantined: true})
+		if err != nil {
+			return fmt.Errorf("ingest %q: %w", d.Title, err)
+		}
+		if outcome.Record == nil { // Known — already in the corpus
+			skipped++
+			continue
+		}
+		seen[key] = true
+		rec := outcome.Record
+		if *dryRun {
+			_, _ = fmt.Fprintf(out, "  would create %s %s\n", rec.ID, rec.Path)
+		} else {
+			if err := writeRecord(c.corpus, rec); err != nil {
+				return err
+			}
+			_, _ = fmt.Fprintf(out, "  created %s %s\n", rec.ID, rec.Path)
+		}
+		created++
+		id = bumpID(id)
+	}
+
+	verb := "created"
+	if *dryRun {
+		verb = "would create"
+	}
+	_, _ = fmt.Fprintf(out, "ingest %s: %s %d records, skipped %d (known)\n", src.Name(), verb, created, skipped)
+	return nil
+}
+
+// batchKey is a draft's primary dedup signal for within-batch deduplication:
+// its first error signature, else its title.
+func batchKey(d ingest.Draft) string {
+	if d.Symptom != nil {
+		for _, sig := range d.Symptom.ErrorSignatures {
+			if s := strings.TrimSpace(sig); s != "" {
+				return s
+			}
+		}
+	}
+	return d.Title
+}
+
+// bumpID returns the next sequential exp-NNNN id. The index is not rebuilt
+// mid-batch, so ids are advanced locally as records are created.
+func bumpID(id string) string {
+	n, _ := strconv.Atoi(strings.TrimPrefix(id, "exp-"))
+	return fmt.Sprintf("exp-%04d", n+1)
+}
+
+// writeRecord marshals a record and writes it under the corpus at its path,
+// creating the year directory. Persistence is a CLI concern (ADR-0008).
+func writeRecord(corpus string, rec *record.Record) error {
+	md, err := record.Marshal(rec)
+	if err != nil {
+		return err
+	}
+	dst := filepath.Join(corpus, filepath.FromSlash(rec.Path))
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(dst, md, 0o644)
 }
