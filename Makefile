@@ -3,9 +3,31 @@
 GO          ?= go
 COVER_FLOOR ?= 80
 
-.PHONY: ci lint test cover cover-check build tidy doctor
+.PHONY: ci lint test cover cover-check build tidy doctor sec vuln secret-scan
 
-ci: lint cover-check
+ci: lint cover-check sec
+
+# Security gate — mirrors .forgejo/workflows/security.yml so `make ci` reproduces
+# ALL required CI checks locally (golangci-lint already covers `go vet`). Both
+# tools are optional in a bare checkout: a missing one warns + skips (CI still
+# enforces it); where installed (the brain, via `make tools`) it enforces.
+sec: vuln secret-scan
+
+vuln:
+	@if command -v govulncheck >/dev/null 2>&1; then \
+		govulncheck ./...; \
+	else \
+		echo "WARN: govulncheck not installed — skipping (CI enforces it)."; \
+		echo "      go install golang.org/x/vuln/cmd/govulncheck@latest"; \
+	fi
+
+secret-scan:
+	@if command -v gitleaks >/dev/null 2>&1; then \
+		gitleaks detect --source . --config .gitleaks.toml --redact --no-banner; \
+	else \
+		echo "WARN: gitleaks not installed — skipping (CI enforces it)."; \
+		echo "      https://github.com/gitleaks/gitleaks/releases (v8.30.1)"; \
+	fi
 
 lint:
 	golangci-lint fmt --diff ./...
