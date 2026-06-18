@@ -1,14 +1,14 @@
 ---
 id: 0002
 title: Push path — hook → trap cards via additionalContext
-status: open
+status: done
 severity: high
 group: 0008
 depends_on: [0004]
 forgejo:
 links:
   adr: docs/adr/ADR-0001-architecture.md
-  prs: []
+  prs: [49, 50]
   issues: [0005]
   regression:
 assets: []
