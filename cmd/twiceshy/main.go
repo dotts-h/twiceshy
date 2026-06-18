@@ -7,6 +7,7 @@
 //	twiceshy serve  -corpus <dir> -db <file> -addr …  rebuild, then serve MCP
 //	twiceshy ingest <source> -corpus <dir> -db <file> import quarantined records
 //	twiceshy pack   -corpus <dir> -out <dir>          build a distributable pack
+//	twiceshy doctor <name> -corpus <dir>              run a store-hygiene doctor (staleness)
 //
 // serve requires the bearer token in TWICESHY_TOKEN. index and serve accept an
 // optional -embed-url (Ollama) to enable dense, pull-only retrieval (ADR-0009);
@@ -30,6 +31,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dotts-h/twiceshy/internal/doctor"
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/ingest"
 	"github.com/dotts-h/twiceshy/internal/pack"
@@ -70,7 +72,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|ingest|pack> [flags]")
+		return errors.New("usage: twiceshy <index|serve|ingest|pack|doctor> [flags]")
 	}
 	switch args[0] {
 	case "index":
@@ -81,8 +83,10 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runPack(args[1:], out)
 	case "ingest":
 		return runIngest(ctx, args[1:], out)
+	case "doctor":
+		return runDoctor(ctx, args[1:], out)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, or pack)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, pack, or doctor)", args[0])
 	}
 }
 
@@ -435,4 +439,56 @@ func attributionDoc(m pack.Manifest) []byte {
 		_, _ = fmt.Fprintf(&b, "- `%s` — %s — %s\n", a.ID, a.SourceLicense, a.SourceURL)
 	}
 	return []byte(b.String())
+}
+
+// runDoctor runs a store-hygiene doctor over the corpus and prints its proposed
+// deltas. Doctors are report-only (ADR-0001 §7, ADR-0010); they never mutate
+// the corpus — a human applies the proposal via PR.
+func runDoctor(ctx context.Context, args []string, out io.Writer) error {
+	if len(args) < 1 {
+		return errors.New("usage: twiceshy doctor <name> [flags] (doctors: staleness)")
+	}
+	name := args[0]
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	corpus := fs.String("corpus", ".", "corpus root (the directory containing experience/)")
+	eolURL := fs.String("endoflife-url", doctor.DefaultEOLBase, "endoflife.date API base; empty runs only the valid.until check")
+	asJSON := fs.Bool("json", false, "emit the report as JSON")
+	if err := parseFlags(fs, args[1:]); err != nil {
+		return err
+	}
+
+	var d doctor.Doctor
+	switch name {
+	case "staleness":
+		var eol doctor.EOLSource
+		if *eolURL != "" {
+			eol = doctor.NewEndOfLifeSource(*eolURL)
+		}
+		d = doctor.NewStaleness(eol, time.Now().UTC())
+	default:
+		return fmt.Errorf("unknown doctor %q (want: staleness)", name)
+	}
+
+	recs, err := record.LoadCorpus(*corpus)
+	if err != nil {
+		return fmt.Errorf("loading corpus: %w", err)
+	}
+	rep, err := d.Run(ctx, recs)
+	if err != nil {
+		return err
+	}
+
+	if *asJSON {
+		b, err := json.MarshalIndent(rep, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(out, string(b))
+		return nil
+	}
+	_, _ = fmt.Fprintf(out, "doctor %s: %d finding(s)\n", rep.Doctor, len(rep.Findings))
+	for _, f := range rep.Findings {
+		_, _ = fmt.Fprintf(out, "  %s (%s)\n    issue:    %s\n    proposal: %s\n", f.RecordID, f.Path, f.Issue, f.Proposal)
+	}
+	return nil
 }

@@ -1,0 +1,131 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package doctor
+
+import (
+	"context"
+	"fmt"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/dotts-h/twiceshy/internal/record"
+)
+
+// Staleness is D2 (ADR-0001 §7, CONTEXT.md "stale"): it flags records whose
+// applies_to no longer matches the live world. Report-only — it proposes a
+// `stale` transition for human review, never mutates a record.
+//
+// Two signals, both fail-closed (no data ⇒ no flag):
+//  1. provenance.valid.until is a date in the past (unambiguous; pure).
+//  2. a Fixed version maps to an endoflife.date product cycle that is EOL.
+//
+// Signal 2 keys ONLY on Versions.Fixed (a version-bounded record, e.g. a vuln
+// "fixed in X") and requires the version to match a real product cycle — so a
+// deprecation record keyed on `introduced` (which persists) is never flagged,
+// and a package version that isn't a runtime cycle simply finds no match.
+type Staleness struct {
+	eol      EOLSource
+	now      time.Time
+	products map[string]string // lower-cased ecosystem → endoflife product
+}
+
+// NewStaleness builds D2. eol may be nil (only the valid.until signal runs).
+func NewStaleness(eol EOLSource, now time.Time) *Staleness {
+	return &Staleness{
+		eol: eol,
+		now: now,
+		products: map[string]string{
+			"go":   "go",
+			"npm":  "nodejs",
+			"pypi": "python",
+		},
+	}
+}
+
+func (*Staleness) Name() string { return "staleness" }
+
+var reMajorMinor = regexp.MustCompile(`^(\d+)(?:\.(\d+))?`)
+
+// majorMinor reduces "2.15.0" → "2.15", "1.16" → "1.16", "18" → "18"; "" if no
+// leading numeric version.
+func majorMinor(v string) string {
+	m := reMajorMinor.FindStringSubmatch(strings.TrimSpace(v))
+	if m == nil {
+		return ""
+	}
+	if m[2] != "" {
+		return m[1] + "." + m[2]
+	}
+	return m[1]
+}
+
+func parseDate(s string) (time.Time, bool) {
+	t, err := time.Parse("2006-01-02", strings.TrimSpace(s))
+	return t, err == nil
+}
+
+func (s *Staleness) Run(ctx context.Context, recs []*record.Record) (Report, error) {
+	rep := Report{Doctor: s.Name()}
+	cache := map[string][]Cycle{} // product → cycles, fetched once per run
+
+	for _, r := range recs {
+		if r.Status == "stale" || r.Status == "superseded" {
+			continue // already retired
+		}
+		// Signal 1: an explicit validity window that has closed.
+		if u := r.Provenance.Valid.Until; u != nil {
+			if d, ok := parseDate(*u); ok && d.Before(s.now) {
+				rep.Findings = append(rep.Findings, Finding{
+					RecordID: r.ID, Path: r.Path,
+					Issue:    fmt.Sprintf("provenance.valid.until %s is in the past", *u),
+					Proposal: "confirm and set status: stale",
+				})
+				continue // one finding per record is enough to act on
+			}
+		}
+		// Signal 2: a Fixed version on an EOL product cycle.
+		if s.eol == nil {
+			continue
+		}
+		if f := s.staleByEOL(ctx, r, cache); f != nil {
+			rep.Findings = append(rep.Findings, *f)
+		}
+	}
+	return rep, nil
+}
+
+func (s *Staleness) staleByEOL(ctx context.Context, r *record.Record, cache map[string][]Cycle) *Finding {
+	for _, at := range r.AppliesTo {
+		product := s.products[strings.ToLower(at.Ecosystem)]
+		if product == "" || at.Versions == nil || at.Versions.Fixed == nil {
+			continue // no confident mapping / no version-bound → skip
+		}
+		cyc := majorMinor(*at.Versions.Fixed)
+		if cyc == "" {
+			continue
+		}
+		cycles, ok := cache[product]
+		if !ok {
+			c, err := s.eol.Cycles(ctx, product)
+			if err != nil {
+				continue // skip on no data — never a false flag
+			}
+			cycles, cache[product] = c, c
+		}
+		for _, c := range cycles {
+			if c.Cycle != cyc {
+				continue
+			}
+			if d, ok := parseDate(c.EOL); ok && d.Before(s.now) {
+				return &Finding{
+					RecordID: r.ID, Path: r.Path,
+					Issue:    fmt.Sprintf("%s %s reached end-of-life %s", product, cyc, c.EOL),
+					Proposal: "confirm the affected versions are out of use and set status: stale",
+				}
+			}
+			break // matched the cycle; not EOL → not stale
+		}
+	}
+	return nil
+}
