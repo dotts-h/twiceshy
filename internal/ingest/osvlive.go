@@ -155,11 +155,20 @@ func mapOSVLiveRecord(rec osvLiveRecord) (Draft, bool) {
 	if strings.TrimSpace(rec.Withdrawn) != "" {
 		return Draft{}, false
 	}
+	// An advisory with no id can't carry a usable error_signature (an empty sig
+	// fails validateSymptom in Prepare and would abort the whole import batch), so
+	// skip it like a withdrawn entry — a bulk importer skips junk, never fails.
+	if strings.TrimSpace(rec.ID) == "" {
+		return Draft{}, false
+	}
 	var applies []record.AppliesTo
 	primaryPkg := ""
 	for _, aff := range rec.Affected {
 		if aff.Package.Ecosystem != "Go" {
 			continue
+		}
+		if strings.TrimSpace(aff.Package.Name) == "" {
+			continue // a vuln "in <nothing>" is not actionable; skip nameless affected blocks
 		}
 		if primaryPkg == "" {
 			primaryPkg = aff.Package.Name
@@ -181,8 +190,11 @@ func mapOSVLiveRecord(rec osvLiveRecord) (Draft, bool) {
 	sigs = append(sigs, rec.ID)
 	sigs = append(sigs, rec.Aliases...)
 
-	aliases := strings.Join(rec.Aliases, ", ")
-	summary := fmt.Sprintf("%s (%s): known vulnerability in %s", rec.ID, aliases, primaryPkg)
+	ids := rec.ID
+	if len(rec.Aliases) > 0 {
+		ids = fmt.Sprintf("%s (%s)", rec.ID, strings.Join(rec.Aliases, ", "))
+	}
+	summary := fmt.Sprintf("%s: known vulnerability in %s", ids, primaryPkg)
 	sourceURL := osvLiveGHSAURL(rec.References)
 	if sourceURL == "" {
 		sourceURL = fmt.Sprintf("https://osv.dev/vulnerability/%s", rec.ID)
