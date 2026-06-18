@@ -94,13 +94,24 @@ type Guard struct {
 }
 
 type Provenance struct {
-	Source       Source   `yaml:"source"`
-	RecordedAt   string   `yaml:"recorded_at"`
-	ValidatedAt  *string  `yaml:"validated_at"`
-	Valid        Validity `yaml:"valid"`
-	SupersededBy *string  `yaml:"superseded_by"`
-	Usage        *Usage   `yaml:"usage,omitempty"`
+	Source      Source   `yaml:"source"`
+	RecordedAt  string   `yaml:"recorded_at"`
+	ValidatedAt *string  `yaml:"validated_at"`
+	Valid       Validity `yaml:"valid"`
+	// SourceLicense and SourceURL are additive, optional importer-provenance
+	// fields (ADR-0003 §4): they let the pack builder mechanically keep
+	// commercial packs license-clean. SourceLicense is an SPDX id or the
+	// SourceLicenseFactsOnly sentinel; both are omitted when empty.
+	SourceLicense string  `yaml:"source_license,omitempty"`
+	SourceURL     string  `yaml:"source_url,omitempty"`
+	SupersededBy  *string `yaml:"superseded_by"`
+	Usage         *Usage  `yaml:"usage,omitempty"`
 }
+
+// SourceLicenseFactsOnly is the source_license sentinel for a record that
+// distills only non-copyrightable facts (no third-party expression), so it
+// carries no license obligation. (ADR-0003 §4)
+const SourceLicenseFactsOnly = "none (facts only)"
 
 type Source struct {
 	Author  string  `yaml:"author"`
@@ -125,6 +136,11 @@ var (
 	reFingerprint = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	// experience/<YYYY>/<NNNN...>-<slug>.md
 	reRecordPath = regexp.MustCompile(`^experience/([0-9]{4})/([0-9]{4,})-[a-z0-9-]+\.md$`)
+	// A single SPDX license id (e.g. MIT, Apache-2.0, CC-BY-4.0); not a full
+	// SPDX expression (no AND/OR/WITH) — one source, one license id.
+	reSPDX = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.+-]*$`)
+	// source_url must be an http(s) URL with a non-empty host/path.
+	reHTTPURL = regexp.MustCompile(`^https?://[^\s]+$`)
 )
 
 // Parse parses and validates one record. path is the corpus-relative file
@@ -405,6 +421,12 @@ func (r *Record) validateProvenance(fail func(string, ...any)) {
 		if u.LastHit != nil {
 			checkDate(fail, "provenance.usage.last_hit", *u.LastHit)
 		}
+	}
+	if lic := p.SourceLicense; lic != "" && lic != SourceLicenseFactsOnly && !reSPDX.MatchString(lic) {
+		fail("provenance.source_license %q is not an SPDX id or %q", lic, SourceLicenseFactsOnly)
+	}
+	if u := p.SourceURL; u != "" && !reHTTPURL.MatchString(u) {
+		fail("provenance.source_url %q is not an http(s) URL", u)
 	}
 }
 
