@@ -1,0 +1,10 @@
+.git
+.forgejo
+docs
+experience
+*.db
+twiceshy
+/out
+.recipes
+.claude
+*_test.go
