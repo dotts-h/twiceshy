@@ -92,6 +92,8 @@ boosts retrieval and is what Doctor 2 cross-checks against the live world.
 | `recorded_at` | date | yes | `YYYY-MM-DD` |
 | `validated_at` | date\|null | when `status: validated` | last successful sandbox validation |
 | `valid` | object | yes | `{from: date (required), until: date\|null}` — the **time axis**; `until` set only by supersession/staleness |
+| `source_license` | string | no | SPDX id (e.g. `CC-BY-4.0`, `MIT`) or `none (facts only)`; set by the corpus importer so the pack builder keeps commercial packs license-clean ([ADR-0003](adr/ADR-0003-corpus-bootstrap-source-scope.md) §4) |
+| `source_url` | string | no | `http(s)` URL the imported fact was distilled from; recorded alongside `source_license` |
 | `superseded_by` | string\|null | when `status: superseded` | id of the replacement. **Supersede, never delete** |
 | `usage` | object | no | `{retrieved: int, confirmed_helpful: int, last_hit: date\|null}` — Doctor 4's signal; maintained by tooling, zero-valued at creation |
 

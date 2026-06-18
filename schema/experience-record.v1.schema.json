@@ -212,6 +212,14 @@
             "until": { "$ref": "#/$defs/nullableDate" }
           }
         },
+        "source_license": {
+          "type": "string",
+          "pattern": "^(none \\(facts only\\)|[A-Za-z0-9][A-Za-z0-9.+-]*)$"
+        },
+        "source_url": {
+          "type": "string",
+          "pattern": "^https?://[^\\s]+$"
+        },
         "superseded_by": {
           "oneOf": [
             { "type": "string", "pattern": "^exp-[0-9]{4,}$" },
