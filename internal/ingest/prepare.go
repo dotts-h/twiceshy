@@ -21,6 +21,12 @@ type Draft struct {
 	Resolution *record.Resolution
 	Guard      *record.Guard
 	Body       string
+
+	// SourceLicense and SourceURL record where an imported fact came from
+	// (ADR-0003 §4); empty for agent-authored drafts. Prepare carries them into
+	// the record's provenance so the pack builder can keep packs license-clean.
+	SourceLicense string
+	SourceURL     string
 }
 
 // Meta is the caller-supplied identity/provenance the draft itself can't carry.
@@ -29,6 +35,11 @@ type Meta struct {
 	Author  string
 	Session *string
 	Now     string // "YYYY-MM-DD"
+	// IncludeQuarantined widens dedup to also match quarantined records, not
+	// only validated ones. The importer sets this so re-running it is
+	// idempotent (it must not re-import what it already quarantined); the agent
+	// write path leaves it false (a re-proposed draft is a fresh PR).
+	IncludeQuarantined bool
 }
 
 // Outcome is the ingest decision plus its evidence.
@@ -55,7 +66,7 @@ func Prepare(ctx context.Context, ix *index.Index, repo string, d Draft, m Meta)
 	novelty := index.NoveltyNovel
 	var candidates []index.Hit
 	for _, probe := range probes(d) {
-		a, err := ix.Assess(ctx, index.Query{Text: probe, Repo: repo})
+		a, err := ix.Assess(ctx, index.Query{Text: probe, Repo: repo, IncludeQuarantined: m.IncludeQuarantined})
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -91,8 +102,10 @@ func Prepare(ctx context.Context, ix *index.Index, repo string, d Draft, m Meta)
 				From:  m.Now,
 				Until: nil,
 			},
-			SupersededBy: nil,
-			Usage:        nil,
+			SourceLicense: d.SourceLicense,
+			SourceURL:     d.SourceURL,
+			SupersededBy:  nil,
+			Usage:         nil,
 		},
 		Path: buildPath(m.Now, m.ID, d.Title),
 	}
