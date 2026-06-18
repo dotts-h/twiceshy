@@ -33,7 +33,7 @@ NTFY_URL="${NTFY_URL:-}"
 notify() { [ -n "$NTFY_URL" ] && curl -fsS -d "$1" "$NTFY_URL" >/dev/null 2>&1 || true; }
 
 cd "$REPO"
-git fetch origin -q && git checkout main -q && git reset --hard origin/main -q
+git fetch origin -q && git checkout main -q && git reset --hard origin/main -q && git clean -fdq -- experience/
 
 bin="$(mktemp -d)/twiceshy"
 "$GO" build -o "$bin" ./cmd/twiceshy
@@ -47,10 +47,13 @@ if ! out="$("$bin" ingest "$SOURCE" -limit "$LIMIT" -corpus "$REPO" 2>&1)"; then
 fi
 echo "$out"
 
-if git diff --quiet -- experience/; then
+# git diff misses UNTRACKED files, and freshly-written records are untracked —
+# use status (porcelain) so new records are actually detected and committed.
+status="$(git status --porcelain -- experience/)"
+if [ -z "$status" ]; then
   echo "no new records"; git checkout main -q; git branch -D "$branch" -q; exit 0
 fi
-n="$(git status --porcelain -- experience/ | wc -l | tr -d ' ')"
+n="$(printf '%s\n' "$status" | wc -l | tr -d ' ')"
 git add experience/
 git commit -q \
   -m "corpus(${SOURCE}): ${n} new quarantined advisory record(s) [scheduled import]" \
