@@ -8,6 +8,7 @@ COVER_FLOOR ?= 80
 ci: lint cover-check
 
 lint:
+	golangci-lint fmt --diff ./...
 	golangci-lint run ./...
 
 test:
