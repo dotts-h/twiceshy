@@ -797,6 +797,108 @@ func TestSearchExperienceInjectionFramed(t *testing.T) {
 	}
 }
 
+// Guard #0012: record_experience candidates get the same transport sanitization
+// and length caps as search_experience hits.
+func TestRecordExperienceCandidatesSanitizedForTransport(t *testing.T) {
+	const sig = "dirty-candidate-sanitization-sig-unique-8844"
+	titleRaw := "visible\x00title" + strings.Repeat("T", 520)
+	summaryRaw := "line\x1fone\n\tkept" + strings.Repeat("S", 2100)
+
+	ts := newTestServerWith(t, mkDirtyCandidateRecord(t, 88, titleRaw, summaryRaw, sig))
+	session := connect(t, ts)
+
+	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "record_experience",
+		Arguments: map[string]any{
+			"kind":             "trap",
+			"title":            "Re-reporting the dirty candidate trap",
+			"summary":          "duplicate probe for transport sanitization",
+			"error_signatures": []string{sig},
+			"ecosystem":        "Go",
+			"root_cause":       "probe",
+			"fix":              "sanitize on egress",
+			"guarding_test":    "TestRecordExperienceCandidatesSanitizedForTransport",
+			"body":             "duplicate of a record with poisoned title/summary fields.",
+			"author":           "claude",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tool error: %s", toolText(res))
+	}
+
+	var got server.RecordResult
+	raw, err := json.Marshal(res.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Novelty != "known" {
+		t.Fatalf("want known duplicate, got novelty=%q", got.Novelty)
+	}
+	if len(got.Candidates) == 0 {
+		t.Fatal("known duplicate must return candidates")
+	}
+	c := got.Candidates[0]
+	if c.ID != "exp-0088" {
+		t.Errorf("id must pass through unchanged, got %q", c.ID)
+	}
+	if strings.ContainsRune(c.Title, '\x00') || strings.ContainsRune(c.Summary, '\x1f') {
+		t.Errorf("C0 controls must be stripped: title=%q summary=%q", c.Title, c.Summary)
+	}
+	for _, want := range []string{"visible", "title"} {
+		if !strings.Contains(c.Title, want) {
+			t.Errorf("title missing semantic content %q: %q", want, c.Title)
+		}
+	}
+	if !strings.Contains(c.Summary, "lineone") || !strings.Contains(c.Summary, "kept") {
+		t.Errorf("summary missing semantic content: %q", c.Summary)
+	}
+	if !strings.Contains(c.Summary, "\n") || !strings.Contains(c.Summary, "\t") {
+		t.Errorf("whitelisted controls must be kept in summary: %q", c.Summary)
+	}
+	if !strings.Contains(c.Title, "…[truncated") {
+		t.Errorf("over-long title must be capped with visible marker: %q", c.Title)
+	}
+	if !strings.Contains(c.Summary, "…[truncated") {
+		t.Errorf("over-long summary must be capped with visible marker: %q", c.Summary)
+	}
+}
+
+func mkDirtyCandidateRecord(t *testing.T, num int, title, summary, sig string) *record.Record {
+	t.Helper()
+	id := fmt.Sprintf("exp-%04d", num)
+	gt := "TestRecordExperienceCandidatesSanitizedForTransport"
+	return &record.Record{
+		ID:     id,
+		Kind:   "trap",
+		Status: "validated",
+		Title:  title,
+		Symptom: &record.Symptom{
+			Summary:         summary,
+			ErrorSignatures: []string{sig},
+		},
+		AppliesTo:  []record.AppliesTo{{Ecosystem: "Go"}},
+		Resolution: &record.Resolution{RootCause: "cause", Fix: "fix"},
+		Guard:      &record.Guard{GuardingTest: &gt},
+		Provenance: record.Provenance{
+			Source:      record.Source{Author: "test"},
+			RecordedAt:  "2026-06-18",
+			ValidatedAt: strPtr("2026-06-18"),
+			Valid:       record.Validity{From: "2026-06-18"},
+		},
+		Body: "Body.",
+		Raw:  []byte("---\n\n---\n\nBody."),
+		Path: fmt.Sprintf("experience/2026/%04d-dirty.md", num),
+	}
+}
+
+func strPtr(s string) *string { return &s }
+
 // Guard #0012: quarantined records label TRUST clearly when pulled.
 func TestGetExperienceQuarantinedTrustLabel(t *testing.T) {
 	ts := newTestServerWith(t, mkInjectionRecord(t, 98, "quarantined"))

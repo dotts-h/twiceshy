@@ -162,8 +162,8 @@ func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args Reco
 			ID:      c.ID,
 			Kind:    c.Kind,
 			Status:  c.Status,
-			Title:   c.Title,
-			Summary: c.Summary,
+			Title:   capText(sanitizeForTransport(c.Title), maxSearchTitleBytes),
+			Summary: capText(sanitizeForTransport(c.Summary), maxSearchSummaryBytes),
 			Score:   c.Score,
 			Matched: c.Matched,
 		}
