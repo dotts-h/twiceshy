@@ -19,10 +19,6 @@ import (
 //go:embed data/osv-advisories.yaml
 var osvAdvisoriesYAML []byte
 
-// ghsaLicense is the SPDX id GHSA content is published under; the pack builder
-// (later) treats CC-BY records as include-with-attribution.
-const ghsaLicense = "CC-BY-4.0"
-
 // osvAffected is the OSV affected[].ranges projection: one affected package and
 // the introduced/fixed version events, taken verbatim.
 type osvAffected struct {
@@ -78,35 +74,16 @@ func (osvSource) Drafts(_ context.Context) ([]Draft, error) {
 				Versions:  versionRange(af.Introduced, af.Fixed),
 			})
 		}
-		drafts = append(drafts, Draft{
-			Kind:  "trap",
-			Title: a.Title,
-			Symptom: &record.Symptom{
-				Summary:         a.Summary,
-				ErrorSignatures: sigs,
-			},
-			AppliesTo:     applies,
-			Resolution:    &record.Resolution{RootCause: a.RootCause, Fix: a.Fix},
-			Body:          a.Body,
-			SourceLicense: ghsaLicense,
-			SourceURL:     a.URL,
-		})
+		drafts = append(drafts, buildOSVDraft(osvDraftInput{
+			Signatures: sigs,
+			AppliesTo:  applies,
+			Title:      a.Title,
+			Summary:    a.Summary,
+			RootCause:  a.RootCause,
+			Fix:        a.Fix,
+			Body:       a.Body,
+			SourceURL:  a.URL,
+		}))
 	}
 	return drafts, nil
-}
-
-// versionRange builds an *record.VersionRange from optional introduced/fixed
-// strings, returning nil when both are empty.
-func versionRange(introduced, fixed string) *record.VersionRange {
-	if introduced == "" && fixed == "" {
-		return nil
-	}
-	vr := &record.VersionRange{}
-	if introduced != "" {
-		vr.Introduced = &introduced
-	}
-	if fixed != "" {
-		vr.Fixed = &fixed
-	}
-	return vr
 }
