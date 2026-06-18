@@ -27,7 +27,7 @@ never a cycle).
 | [0003](0003-write-path.md) | Phase 3 — write path + quarantine (record_experience) | closed | high | — | ADR-0008 |
 | [0004](0004-doctors.md) | Doctors — background store-hygiene jobs (D1–D5), delta-only | open | high | 0008 | ADR-0001 §7 |
 | [0005](0005-evals-trap-avoidance.md) | Trap-avoidance eval suite — memory on/off regression | open | medium | 0008 | ADR-0001 §8 |
-| [0006](0006-dense-retrieval-sqlite-vec-rrf.md) | Dense retrieval — sqlite-vec + RRF (pull channel only) | open | medium | 0008 | ADR-0006 |
+| [0006](0006-dense-retrieval-sqlite-vec-rrf.md) | Dense retrieval — pure-Go cosine + RRF (pull channel only) | closed | medium | 0008 | ADR-0006 |
 | [0007](0007-corpus-importer.md) | Corpus importer — license-clean version-knowledge bootstrap | closed | high | 0008 | ADR-0003 |
 | [0011](0011-ingestion-safety-gate.md) | Ingestion safety gate — secret/harmful-code/PII screening | open | high | 0009 | SEC §2 |
 | [0012](0012-injection-safe-rendering.md) | Injection-safe rendering — record content is data, not instructions | open | high | 0009 | SEC §1 |

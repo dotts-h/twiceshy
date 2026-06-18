@@ -1,7 +1,7 @@
 ---
 id: 0006
 title: Dense retrieval — sqlite-vec + reciprocal-rank fusion (pull channel only)
-status: open
+status: closed
 severity: medium
 group: 0008
 depends_on: []
@@ -34,3 +34,11 @@ corpus-coupled `DefaultFloor` (TECH_DEBT L6/L7) with a normalized/RRF band.
 Independent of #0007/#0004 — buildable in parallel. Unblocks ADR-0006, which is
 deferred pending this. Recommended sequence (NEXT_FEATURES.md) places it after
 the corpus exists, but there is no hard dependency.
+
+## Closeout (PR #35)
+Shipped as **pure-Go cosine + RRF**, not sqlite-vec — see **ADR-0009** (sqlite-vec
+is CGO, incompatible with the locked CGO-free cross-compiled build). Pull-only,
+graceful fallback to fingerprint+BM25 when no/failed embedder; hot path stays
+embedding-free (`Assess` never embeds — guarded by `TestAssessNeverEmbeds`).
+Embeddings via local Ollama `nomic-embed-text` (`-embed-url`), stored as BLOBs.
+**Score-banding stays deferred** (ADR-0006) — no consumer yet.

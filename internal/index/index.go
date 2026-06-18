@@ -131,6 +131,14 @@ CREATE TABLE IF NOT EXISTS applies_to (
 CREATE VIRTUAL TABLE IF NOT EXISTS records_fts USING fts5(
   id UNINDEXED, title, summary, signatures, body
 );
+CREATE TABLE IF NOT EXISTS embeddings (
+  record_id TEXT PRIMARY KEY,
+  vec       BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS embedding_cache (
+  hash TEXT PRIMARY KEY,
+  vec  BLOB NOT NULL
+);
 `
 
 // maxOpenConns bounds the SQLite connection pool to the documented
