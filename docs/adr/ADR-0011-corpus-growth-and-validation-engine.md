@@ -87,6 +87,45 @@ execution-validation engine that makes "validated" *mean* "we ran it and it hold
    justifies the investment and is the gate that decides whether the (currently deferred,
    dormant) push channel is ever worth re-enabling.
 
+7. **Organic growth via agent/user contributions — through the same gates, and a ToS.**
+   Consumers that hit a novel gotcha propose it via `record_experience` (propose-only,
+   ADR-0008 — returns a quarantined draft to PR, never a direct write). A contribution is
+   **never auto-trusted**: born quarantined, it passes the ingest **screen** (license +
+   safety) + the **validation harness** (execution) + human/PR review before `validated`.
+   It is also a contamination/poisoning vector → **the service must carry a ToS /
+   contributor license grant** (extends ADR-0002's CLA from repo contributors to the hosted
+   service): by submitting, the contributor (a) **grants twiceshy a permissive, sublicensable
+   license** to the contribution so it can enter commercial packs clean, and (b) **represents
+   they have the right to contribute it and that it contains no copied third-party
+   text/snippets** (the §5 facts-only/own-words rule applies to them too). Without this, agent
+   contributions are a licensing hole — it is a prerequisite for accepting outside contributions
+   into a commercial corpus.
+
+8. **Test-generation pipeline + the local-model role (under the execution gate).**
+   - Distill the **fact deterministically** from structured sources where possible (e.g.
+     OSV metadata → `applies_to` is near-1:1) — *minimize model-generated prose*, since
+     generated text carries the only real verbatim-reproduction risk (§5).
+   - **Draft tests** with a cheap model (local gpt-oss/qwen-coder, or a frontier executor for
+     hard ones) **from the spec + official docs only — never from SO text**, including the
+     negative/dead-end tests.
+   - The **execution harness is the deterministic gate** that makes a cheap drafter safe: a
+     draft that doesn't truly fail-pre / pass-post is auto-rejected. A frontier model + human
+     judge the survivors. **The test is the licensing firewall** — an executed, original test
+     is structurally ours.
+   - **Local LLM = drafter/flagger, never judge** (standing rule): it can draft tests/prose
+     and flag suspicious input as a *lead*, but cleanliness/correctness authority stays on
+     deterministic checks + execution + frontier/human review. Run Ollama **on-demand per
+     ingestion batch** (wake VM 101, then re-park), not 24/7.
+
+9. **Record lifecycle — staleness ≠ deletion.** Records are **version-anchored truths**
+   ("X removed in v5" stays true for v5); they lose *relevance*, not *correctness*, as
+   versions age. So: **mark + down-rank + supersede, never delete.** endoflife.date (D2)
+   marks records whose whole applicable range is EOL as `stale`/low-priority; retrieval
+   **ranks by version-match to the querying agent's context** (current queries surface
+   current records; an agent on an old version still benefits); the re-validation loop (D3)
+   catches genuine correctness drift; `provenance.superseded_by` (already in schema) replaces
+   without deleting. Continue building — version-anchoring does most of the work.
+
 ## Phasing
 
 1. **Validation harness** (the multiplier; preconditioned on the 3 must-haves) — gVisor
@@ -109,3 +148,16 @@ execution-validation engine that makes "validated" *mean* "we ran it and it hold
   to repro-script content.
 - Until §5 is accepted, SO-covered problems remain out of scope; the clause is inert.
 - New attack surface (executing untrusted code) is accepted **only** behind the 3 must-haves.
+- **Storage is unchanged (ADR-0001) and is the right optimization:** git-backed markdown files
+  = source of truth (PR = trust boundary, full provenance), SQLite (FTS5 + fingerprint + optional
+  dense BLOBs) = a *derived, disposable* index rebuilt from the files. For a small curated
+  corpus this is optimal — **no database-as-truth, no external vector DB** (would be unrequested
+  complexity; ADR-0009 already keeps dense pure-Go for the CGO-free build). Future levers
+  (premature): incremental rebuild, per-tenant scoping for Tier B.
+- **"Irreversible" clarified:** removing a record from the *live* corpus is trivial (delete the
+  git file). What's irreversible is having **shipped** dirty content in a *commercial pack* —
+  distributed copies can't be recalled and ShareAlike may have attached to the pack. So the
+  license gate is **pre-ship**, not post-hoc cleanup.
+- **Accepting outside contributions into a commercial corpus requires the Contribution Terms**
+  ([docs/legal/CONTRIBUTION_TERMS.md](../legal/CONTRIBUTION_TERMS.md), Decision 7) — a DRAFT
+  pending legal review.
