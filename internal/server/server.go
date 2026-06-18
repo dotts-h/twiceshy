@@ -12,8 +12,11 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -37,6 +40,8 @@ type Config struct {
 	// fused with fingerprint + BM25 via RRF (ADR-0009). nil = embedding-free
 	// retrieval only. The hot/push path never uses it.
 	Embedder index.Embedder
+	// Logger emits structured server logs. nil defaults to JSON on stderr.
+	Logger *slog.Logger
 }
 
 // Tool descriptions are load-bearing: description text alone produces
@@ -66,7 +71,12 @@ func New(cfg Config) (http.Handler, error) {
 		return nil, errors.New("server: a bearer token is required; there is no unauthenticated mode")
 	}
 
-	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder}
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	}
+
+	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger}
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "twiceshy",
 		Title:   "twiceshy experience service",
@@ -79,19 +89,20 @@ func New(cfg Config) (http.Handler, error) {
 	mcpHandler := mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return srv }, nil)
 
-	// Middleware chain (outermost first): reject unauthenticated requests before
-	// any work, then rate-limit, then bound the request's time and body size.
+	// Middleware chain (outermost first): access log, then reject unauthenticated
+	// requests before any work, then rate-limit, then bound time and body size.
 	limiter := newTokenBucket(defaultRatePerSec, defaultBurst)
-	hardened := withRateLimit(limiter,
+	hardened := withRateLimit(logger, limiter,
 		withTimeout(requestTimeout,
 			withMaxBytes(maxRequestBytes, mcpHandler)))
-	return bearerAuth(cfg.Token, hardened), nil
+	return withRequestLog(logger, bearerAuth(logger, cfg.Token, hardened)), nil
 }
 
 type handlers struct {
-	ix   *index.Index
-	repo string
-	emb  index.Embedder // optional; enables pull-channel dense retrieval
+	ix     *index.Index
+	repo   string
+	emb    index.Embedder // optional; enables pull-channel dense retrieval
+	logger *slog.Logger
 }
 
 // SearchArgs is the search_experience input.
@@ -126,11 +137,18 @@ type SearchResult struct {
 const maxQueryBytes = 16 << 10
 
 func (h *handlers) search(ctx context.Context, _ *mcp.CallToolRequest, args SearchArgs) (*mcp.CallToolResult, SearchResult, error) {
+	start := time.Now()
+	const tool = "search_experience"
+
 	if strings.TrimSpace(args.Query) == "" {
-		return nil, SearchResult{}, errors.New("query must be non-empty")
+		err := errors.New("query must be non-empty")
+		h.logToolError(tool, start, err)
+		return nil, SearchResult{}, err
 	}
 	if len(args.Query) > maxQueryBytes {
-		return nil, SearchResult{}, fmt.Errorf("query too large: %d bytes (max %d)", len(args.Query), maxQueryBytes)
+		err := fmt.Errorf("query too large: %d bytes (max %d)", len(args.Query), maxQueryBytes)
+		h.logToolError(tool, start, err)
+		return nil, SearchResult{}, err
 	}
 	// Pull channel: dense (cosine) retrieval fused with fingerprint + BM25 when
 	// an embedder is configured; falls back to the embedding-free path otherwise
@@ -144,7 +162,9 @@ func (h *handlers) search(ctx context.Context, _ *mcp.CallToolRequest, args Sear
 		IncludeQuarantined: args.IncludeQuarantined,
 	}, h.emb)
 	if err != nil {
-		return nil, SearchResult{}, fmt.Errorf("search failed: %w", err)
+		err = fmt.Errorf("search failed: %w", err)
+		h.logToolError(tool, start, err)
+		return nil, SearchResult{}, err
 	}
 	out := SearchResult{Hits: make([]SearchHit, 0, len(hits))}
 	for _, hit := range hits {
@@ -158,6 +178,12 @@ func (h *handlers) search(ctx context.Context, _ *mcp.CallToolRequest, args Sear
 			Matched: hit.Matched,
 		})
 	}
+	h.logger.Info("tool call",
+		slog.String("tool", tool),
+		slog.String("outcome", "ok"),
+		slog.Int64("duration_ms", time.Since(start).Milliseconds()),
+		slog.Int("hits", len(out.Hits)),
+	)
 	return nil, out, nil
 }
 
@@ -177,10 +203,24 @@ type GetResult struct {
 }
 
 func (h *handlers) get(ctx context.Context, _ *mcp.CallToolRequest, args GetArgs) (*mcp.CallToolResult, GetResult, error) {
+	start := time.Now()
+	const tool = "get_experience"
+
 	stored, err := h.ix.Get(ctx, args.ID)
 	if err != nil {
+		h.logToolError(tool, start, err,
+			slog.String("id", args.ID),
+			slog.Bool("found", false),
+		)
 		return nil, GetResult{}, err
 	}
+	h.logger.Info("tool call",
+		slog.String("tool", tool),
+		slog.String("outcome", "ok"),
+		slog.Int64("duration_ms", time.Since(start).Milliseconds()),
+		slog.String("id", args.ID),
+		slog.Bool("found", true),
+	)
 	return nil, GetResult{
 		ID:       stored.ID,
 		Kind:     stored.Kind,
@@ -191,19 +231,53 @@ func (h *handlers) get(ctx context.Context, _ *mcp.CallToolRequest, args GetArgs
 	}, nil
 }
 
+func (h *handlers) logToolError(tool string, start time.Time, err error, extra ...slog.Attr) {
+	class := errorClass(err)
+	attrs := []any{
+		slog.String("tool", tool),
+		slog.String("outcome", "error"),
+		slog.Int64("duration_ms", time.Since(start).Milliseconds()),
+		slog.String("error_class", class),
+	}
+	for _, a := range extra {
+		attrs = append(attrs, a)
+	}
+	if clientError(class) {
+		h.logger.Warn("tool call", attrs...)
+	} else {
+		h.logger.Error("tool call", attrs...)
+	}
+}
+
 // bearerAuth enforces a constant-time bearer-token check on every request.
 // The token is never logged.
-func bearerAuth(token string, next http.Handler) http.Handler {
+func bearerAuth(logger *slog.Logger, token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		const prefix = "Bearer "
 		got := r.Header.Get("Authorization")
-		if len(got) <= len(prefix) ||
-			!strings.EqualFold(got[:len(prefix)], prefix) ||
-			subtle.ConstantTimeCompare([]byte(got[len(prefix):]), []byte(token)) != 1 {
+		reason := bearerRejectReason(got, token, prefix)
+		if reason != "" {
+			logger.Warn("auth rejected",
+				slog.String("reason", reason),
+				slog.String("remote_addr", r.RemoteAddr),
+			)
 			w.Header().Set("WWW-Authenticate", `Bearer realm="twiceshy"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func bearerRejectReason(got, token, prefix string) string {
+	if got == "" {
+		return "missing_bearer"
+	}
+	if len(got) <= len(prefix) || !strings.EqualFold(got[:len(prefix)], prefix) {
+		return "wrong_scheme"
+	}
+	if subtle.ConstantTimeCompare([]byte(got[len(prefix):]), []byte(token)) != 1 {
+		return "bad_token"
+	}
+	return ""
 }

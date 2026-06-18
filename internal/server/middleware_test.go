@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -84,7 +85,7 @@ func TestWithRateLimit_Returns429WhenExhausted(t *testing.T) {
 	now := time.Unix(0, 0)
 	b := newTokenBucket(1, 1) // 1/s, burst 1
 	b.now = func() time.Time { return now }
-	h := withRateLimit(b, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := withRateLimit(slog.Default(), b, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
