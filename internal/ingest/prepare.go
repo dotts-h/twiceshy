@@ -155,6 +155,12 @@ func scanTexts(r *record.Record) []string {
 		if r.Guard.Repro != nil {
 			ts = append(ts, *r.Guard.Repro)
 		}
+		for _, repro := range r.Guard.Repros {
+			ts = append(ts, repro.Path)
+			if repro.Label != "" {
+				ts = append(ts, repro.Label)
+			}
+		}
 		if r.Guard.GuardingTest != nil {
 			ts = append(ts, *r.Guard.GuardingTest)
 		}

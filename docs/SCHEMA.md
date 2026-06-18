@@ -81,7 +81,8 @@ boosts retrieval and is what Doctor 2 cross-checks against the live world.
 
 | field | type | required | notes |
 |---|---|---|---|
-| `repro` | string\|null | recommended | repo-root-relative path to a script with **fail-to-pass discipline**: exits non-zero in the trap/pre-fix state, zero post-fix; exit `75` = environment can't run it (skip). Becomes **mandatory for promotion to `validated`** once Doctor 3 ships (Phase 4) |
+| `repro` | string\|null | recommended | repo-root-relative path to a script with **fail-to-pass discipline**: exits non-zero in the trap/pre-fix state, zero post-fix; exit `75` = environment can't run it (skip). Semantically a single **positive** repro; kept for back-compat. Becomes **mandatory for promotion to `validated`** once Doctor 3 ships (Phase 4) |
+| `repros` | array | no | optional test-set; each item: `{path, kind, label?}`. `kind`: `positive` (fail-to-pass — the fix holds) or `negative` (dead-end — must stay failing, proves "don't try Z"). `path` uses the same repro-script discipline as `repro`. A record may use `repro`, `repros`, or both; paths within one record's `repros` must be unique. The validation harness (#0020) runs the whole set |
 | `guarding_test` | string\|null | for validated `trap`/`fix` | the test name that keeps the fix fixed |
 
 ### `provenance`
@@ -154,8 +155,9 @@ is a hash-equality lookup. Reference implementation:
    (corpus-level check; skipped in single-file validation).
 5. Any explicit `symptom.fingerprints` entry must match
    `^sha256:[0-9a-f]{64}$`.
-6. `guard.repro`, when set, must point to an existing file (corpus-level
-   check).
+6. `guard.repro`, when set, and each `guard.repros[].path`, must point to an
+   existing file (corpus-level check; skipped in single-file validation).
+   Duplicate `path` values within one record's `repros` are rejected.
 
 ## Versioning
 
