@@ -4,6 +4,9 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -87,13 +90,83 @@ func (b *tokenBucket) allow() bool {
 }
 
 // withRateLimit rejects requests over the bucket's rate with 429 + Retry-After.
-func withRateLimit(b *tokenBucket, next http.Handler) http.Handler {
+func withRateLimit(logger *slog.Logger, b *tokenBucket, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !b.allow() {
+			logger.Warn("rate limit exceeded",
+				slog.String("remote_addr", r.RemoteAddr),
+			)
 			w.Header().Set("Retry-After", "1")
 			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// responseRecorder captures the status code while delegating Flush and Unwrap
+// so MCP streamable HTTP (SSE) keeps working.
+type responseRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *responseRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *responseRecorder) Write(b []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	return r.ResponseWriter.Write(b)
+}
+
+func (r *responseRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (r *responseRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
+func newRequestID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "0000000000000000"
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// withRequestLog emits one access-log line per request after the handler returns.
+func withRequestLog(logger *slog.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		reqID := newRequestID()
+		rec := &responseRecorder{ResponseWriter: w}
+		next.ServeHTTP(rec, r)
+
+		sessionID := r.Header.Get("Mcp-Session-Id")
+		if sessionID == "" {
+			sessionID = rec.Header().Get("Mcp-Session-Id")
+		}
+
+		status := rec.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+
+		logger.Info("http request",
+			slog.String("request_id", reqID),
+			slog.String("method", r.Method),
+			slog.String("path", r.URL.Path),
+			slog.Int("status", status),
+			slog.Int64("http_duration_ms", time.Since(start).Milliseconds()),
+			slog.String("remote_addr", r.RemoteAddr),
+			slog.String("mcp_session_id", sessionID),
+		)
 	})
 }

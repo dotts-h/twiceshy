@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -86,7 +87,11 @@ func validateRecordSize(args RecordArgs) error {
 // provided arguments, runs dedup-at-ingest, and returns either a known-duplicate
 // result or a quarantined draft ready to be PR'd. It does NOT write to disk.
 func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args RecordArgs) (*mcp.CallToolResult, RecordResult, error) {
+	start := time.Now()
+	const tool = "record_experience"
+
 	if err := validateRecordSize(args); err != nil {
+		h.logToolError(tool, start, err)
 		return nil, RecordResult{}, err
 	}
 
@@ -128,6 +133,7 @@ func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args Reco
 	// Allocate a new ID.
 	id, err := h.ix.NextID(ctx)
 	if err != nil {
+		h.logToolError(tool, start, err)
 		return nil, RecordResult{}, err
 	}
 
@@ -145,6 +151,7 @@ func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args Reco
 	// Run the ingest pipeline.
 	out, err := ingest.Prepare(ctx, h.ix, h.repo, draft, meta)
 	if err != nil {
+		h.logToolError(tool, start, err)
 		return nil, RecordResult{}, err
 	}
 
@@ -164,16 +171,19 @@ func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args Reco
 
 	// Handle known duplicates.
 	if out.Novelty == index.NoveltyKnown {
-		return nil, RecordResult{
+		result := RecordResult{
 			Novelty:    string(out.Novelty),
 			Candidates: cands,
 			Message:    "Already recorded — see the existing record in candidates; nothing was created.",
-		}, nil
+		}
+		h.logRecordOK(tool, start, result)
+		return nil, result, nil
 	}
 
 	// Marshal the record for similar/novel cases.
 	md, err := record.Marshal(out.Record)
 	if err != nil {
+		h.logToolError(tool, start, err)
 		return nil, RecordResult{}, err
 	}
 
@@ -183,11 +193,23 @@ func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args Reco
 			"); it cannot be promoted to validated until the hazard is resolved."
 	}
 
-	return nil, RecordResult{
+	result := RecordResult{
 		Novelty:    string(out.Novelty),
 		RecordID:   out.Record.ID,
 		Markdown:   string(md),
 		Candidates: cands,
 		Message:    msg,
-	}, nil
+	}
+	h.logRecordOK(tool, start, result)
+	return nil, result, nil
+}
+
+func (h *handlers) logRecordOK(tool string, start time.Time, result RecordResult) {
+	h.logger.Info("tool call",
+		slog.String("tool", tool),
+		slog.String("outcome", "ok"),
+		slog.Int64("duration_ms", time.Since(start).Milliseconds()),
+		slog.String("novelty", result.Novelty),
+		slog.String("record_id", result.RecordID),
+	)
 }
