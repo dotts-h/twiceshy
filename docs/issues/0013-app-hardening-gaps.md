@@ -1,7 +1,7 @@
 ---
 id: 0013
 title: App-hardening gaps — body cap, query timeouts, rate limit, path/error hygiene
-status: open
+status: closed
 severity: medium
 group: 0009
 depends_on: []
