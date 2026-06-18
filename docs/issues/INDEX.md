@@ -26,4 +26,4 @@ never a cycle).
 | [0004](0004-doctors.md) | Doctors — background store-hygiene jobs (D1–D5), delta-only | open | high | 0008 | ADR-0001 §7 |
 | [0005](0005-evals-trap-avoidance.md) | Trap-avoidance eval suite — memory on/off regression | open | medium | 0008 | ADR-0001 §8 |
 | [0006](0006-dense-retrieval-sqlite-vec-rrf.md) | Dense retrieval — sqlite-vec + RRF (pull channel only) | open | medium | 0008 | ADR-0006 |
-| [0007](0007-corpus-importer.md) | Corpus importer — license-clean version-knowledge bootstrap | open | high | 0008 | ADR-0003 |
+| [0007](0007-corpus-importer.md) | Corpus importer — license-clean version-knowledge bootstrap | closed | high | 0008 | ADR-0003 |

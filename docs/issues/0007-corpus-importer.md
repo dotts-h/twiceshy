@@ -1,7 +1,7 @@
 ---
 id: 0007
 title: Corpus importer — bootstrap quarantined records from license-clean version-knowledge
-status: open
+status: closed
 severity: high
 group: 0008
 depends_on: []
@@ -22,24 +22,26 @@ as the write path, #3). Precision-first. Design:
 the original issue draft); decision: ADR-0003.
 
 ## Scope (build in slices; first slice is the schema fields)
-- [ ] **Schema fields (first slice):** additive `provenance.source_license` (SPDX,
-      or `"none (facts only)"`) + `source_url`; extend
-      `schema/experience-record.v1.schema.json` (`provenance` is
-      `additionalProperties: false`) and `internal/record`. `make ci` asserts they
-      are optional and SPDX-shaped. Stays `schema_version: 1`. (ADR-0001 §2, ADR-0003 §4)
-- [ ] `twiceshy ingest <source>`: emit one quarantined record per
-      `(package, breaking-change)`, deduped by `fingerprint` + `applies_to`. (ADR-0001 §6)
-- [ ] **Codemod adapter** (highest yield): wrap a codemod before/after as a
-      fail-to-pass `guard.repro`; `kind=fix`/`convention`; derive `applies_to` from
-      source→target majors. Promotion still waits on D3 (#4).
-- [ ] **GitChameleon adapter:** map visible/hidden tests → `guard`/`guarding_test`.
-- [ ] **OSV/GHSA adapter:** `affected[].ranges` → `applies_to`; record per-source
-      license; quarantined unless a PoC/FIX yields a guard.
-- [ ] **endoflife.date** sidecar → `provenance.valid.until` (feeds D2).
-- [ ] **Pack-builder exclusion:** drop copyleft/contract-encumbered `source_license`
-      records from commercial packs; emit CC-BY attribution. (ADR-0002 §4)
-- [ ] **Near-miss guard:** imported prose/string-match records stay pull-only and
-      below the relevance floor — never trade precision for volume.
+- [x] **Schema fields (first slice):** additive `provenance.source_license` +
+      `source_url`. (PR #27)
+- [x] `twiceshy ingest <source>`: emit one quarantined record per
+      `(package, breaking-change)`, deduped by `fingerprint` + `applies_to`. (PR #28)
+- [x] **Codemod adapter** (data-driven; live tool execution deferred): Go stdlib
+      deprecations via embedded curated facts, `staticcheck SA1019` as the
+      fingerprintable signature, `kind=fix`. (PR #28)
+- [x] **GitChameleon adapter** → shipped as a **Python version-breaking** source
+      (`py`): curated, license-clean facts (numpy/pandas/setuptools) keyed on the
+      runtime AttributeError/DeprecationWarning. Literal GitChameleon dataset
+      ingestion (its tests → guards) is deferred pending its license review + D3. (PR #31)
+- [x] **OSV/GHSA adapter:** `affected[].ranges` → `applies_to`; GHSA = CC-BY-4.0
+      with attribution; seeded across Maven/npm/PyPI. (PR #29)
+- [ ] **endoflife.date** sidecar → `provenance.valid.until` — **deferred to #4
+      (doctors)**: it only feeds D2 staleness, so it has no consumer until D2
+      exists. Building it now would be machinery with no reader (phase discipline).
+- [x] **Pack-builder exclusion:** fail-closed `internal/pack.Classify`; drops
+      copyleft/share-alike/NC/ND from commercial packs, emits CC-BY attribution. (PR #30)
+- [x] **Near-miss guard:** imported records born quarantined (pull-only) + one
+      record per primary signature; guarded by tests. (PR #30)
 
 ## Notes
 Stack Overflow (option B) is excluded (ADR-0003 §3). Everything imported is born

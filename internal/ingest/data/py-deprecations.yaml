@@ -1,0 +1,45 @@
+# License-clean (distilled facts only, authored in twiceshy's own words — no
+# third-party prose; ADR-0003 §4). Python ecosystem version-breaking changes
+# (the GitChameleon problem class: code that worked on one library version
+# breaks on a later one). The runtime AttributeError / DeprecationWarning is the
+# fingerprintable error signature. Sources: the libraries' own release notes /
+# migration guides (facts only). Ranges should be spot-checked before a record
+# is promoted past quarantine.
+- title: "numpy removed the np.int / np.float / np.bool aliases in NumPy 1.24"
+  summary: "Code using np.int (and the np.float/np.bool aliases) raises AttributeError on NumPy 1.24+."
+  diagnostic: "AttributeError: module 'numpy' has no attribute 'int'"
+  package: "numpy"
+  introduced: "1.24.0"
+  root_cause: "The np.int/np.float/np.bool aliases for the Python builtins were deprecated in NumPy 1.20 and removed in 1.24; they only ever aliased the builtins and added no value."
+  fix: "Use the Python builtins int/float/bool, or an explicit sized dtype such as np.int64/np.float64 where width matters."
+  body: |
+    np.int, np.float and np.bool were deprecated aliases removed in NumPy 1.24,
+    so any code referencing them raises AttributeError. Replace them with the
+    plain builtins (int, float, bool) or an explicit NumPy dtype (np.int64,
+    np.float64) when a specific width is required.
+  source_url: "https://numpy.org/devdocs/release/1.24.0-notes.html#expired-deprecations"
+- title: "pandas removed DataFrame.append / Series.append in pandas 2.0"
+  summary: "DataFrame.append and Series.append were removed in pandas 2.0; calls raise AttributeError."
+  diagnostic: "AttributeError: 'DataFrame' object has no attribute 'append'"
+  package: "pandas"
+  introduced: "2.0.0"
+  root_cause: "append was deprecated in pandas 1.4 and removed in 2.0 because it reallocated on every call; concat is the supported, more efficient API."
+  fix: "Build a list of frames and call pd.concat(frames) once instead of repeated df.append calls."
+  body: |
+    pandas 2.0 removed DataFrame.append and Series.append (deprecated since
+    1.4), so calls now raise AttributeError. Collect the pieces and call
+    pd.concat once — repeated append was quadratic anyway.
+  source_url: "https://pandas.pydata.org/docs/whatsnew/v2.0.0.html#removal-of-prior-version-deprecations-changes"
+- title: "setuptools deprecated pkg_resources in favor of importlib"
+  summary: "pkg_resources emits a DeprecationWarning and is slated for removal; use importlib.metadata/resources."
+  diagnostic: "DeprecationWarning: pkg_resources is deprecated as an API"
+  package: "setuptools"
+  introduced: "67.5.0"
+  root_cause: "pkg_resources is a slow, import-time-heavy runtime API that setuptools deprecated once the stdlib gained importlib.metadata (3.8+) and importlib.resources (3.9+)."
+  fix: "Use importlib.metadata for version/entry-point lookups and importlib.resources for packaged data files instead of pkg_resources."
+  body: |
+    setuptools deprecated pkg_resources: importing it warns and it is scheduled
+    for removal. Migrate version and entry-point queries to
+    importlib.metadata, and packaged-data access to importlib.resources (both in
+    the standard library on supported Pythons).
+  source_url: "https://setuptools.pypa.io/en/latest/pkg_resources.html"
