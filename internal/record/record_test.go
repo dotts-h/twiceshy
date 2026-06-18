@@ -63,12 +63,28 @@ func TestLoadCorpusLoadsAllExamples(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
 	}
-	if len(recs) != 3 {
-		t.Fatalf("want the 3 worked examples, got %d", len(recs))
+	if len(recs) < 3 {
+		t.Fatalf("want at least the 3 worked examples, got %d", len(recs))
 	}
-	for i, want := range []string{"exp-0001", "exp-0002", "exp-0003"} {
-		if recs[i].ID != want {
-			t.Errorf("recs[%d].ID = %s, want %s (sorted by id)", i, recs[i].ID, want)
+	// Structural invariants that must hold as the corpus grows: ids are
+	// non-empty, unique, and returned sorted ascending.
+	seen := make(map[string]bool, len(recs))
+	for i, r := range recs {
+		if r.ID == "" {
+			t.Errorf("recs[%d] has empty id", i)
+		}
+		if seen[r.ID] {
+			t.Errorf("duplicate id %s", r.ID)
+		}
+		seen[r.ID] = true
+		if i > 0 && recs[i-1].ID > r.ID {
+			t.Errorf("not sorted ascending: %s before %s", recs[i-1].ID, r.ID)
+		}
+	}
+	// The original worked examples must remain present.
+	for _, want := range []string{"exp-0001", "exp-0002", "exp-0003"} {
+		if !seen[want] {
+			t.Errorf("missing worked example %s", want)
 		}
 	}
 }

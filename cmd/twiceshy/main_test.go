@@ -183,7 +183,7 @@ func TestRunIndexBuildsTheIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run index: %v", err)
 	}
-	if !strings.Contains(out.String(), "indexed 3 records") {
+	if !strings.Contains(out.String(), "indexed ") || !strings.Contains(out.String(), " records into ") {
 		t.Errorf("output = %q", out.String())
 	}
 }
