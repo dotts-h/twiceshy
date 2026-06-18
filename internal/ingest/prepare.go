@@ -112,7 +112,7 @@ func Prepare(ctx context.Context, ix *index.Index, repo string, d Draft, m Meta)
 			SupersededBy:  nil,
 			Usage:         nil,
 		},
-		Path: buildPath(m.Now, m.ID, d.Title),
+		Path: BuildPath(m.Now, m.ID, d.Title),
 	}
 
 	// Safety gate (#0011): scan the record's text for secrets / harmful code /
@@ -203,10 +203,10 @@ func probes(d Draft) []string {
 	return ps
 }
 
-// buildPath constructs the file path for a record:
+// BuildPath constructs the on-disk path for a record:
 // experience/<year>/<num>-<slug>.md. It is total — a malformed now/id/title
 // yields an invalid path that record.Validate rejects, never a panic.
-func buildPath(now, id, title string) string {
+func BuildPath(now, id, title string) string {
 	year := now
 	if len(now) >= 4 {
 		year = now[:4]
