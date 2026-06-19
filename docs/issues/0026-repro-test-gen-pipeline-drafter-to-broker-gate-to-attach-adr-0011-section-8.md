@@ -89,3 +89,14 @@ behavioural records.
 
 Depends on #0018 (broker) + #0020 (revalidator), both shipped. Pairs with #0023
 (deprecation importer) — that supplies the records, this makes them validatable.
+
+**First real-corpus run (2026-06-19):** slices 1+2 were run against the live
+corpus for the first time. `twiceshy ingest go` seeded three quarantined
+stdlib-deprecation records (exp-0043 io/ioutil, exp-0044 strings.Title, exp-0045
+math/rand); the new `twiceshy draft` CLI then ran `drafter.Pipeline` over them on
+the brain (docker+runsc). It drafted → gated → attached **proven** repros into
+exp-0043 (io/ioutil) and exp-0045 (math/rand); strings.Title (exp-0044) was
+correctly left unsupported (its fix needs `golang.org/x/text`, out of the
+deterministic catalog). The records stay **quarantined** — promotion is the human
+PR step (#0020). This is the first drafter-generated corpus growth: the engine has
+now produced validatable records, which is the epic's whole point.
