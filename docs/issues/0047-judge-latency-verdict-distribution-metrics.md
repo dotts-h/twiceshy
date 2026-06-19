@@ -1,14 +1,14 @@
 ---
 id: 0047
 title: "Judge latency + verdict-distribution metrics"
-status: open
+status: closed
 severity: medium
 group: 0034
 depends_on: [0036]
 forgejo: 137
 links:
   adr: ADR-0013
-  prs: []
+  prs: [162]
   issues: []
   regression:
 assets: []
@@ -26,8 +26,8 @@ Plan ref: `docs/GO_LIVE_HARDENING_PLAN.md` §B6.
 
 ## Acceptance
 
-- [ ] The run summary reports judge p50/p95 latency and the approve/reject/held ratio.
-- [ ] Test-first; `make ci` green.
+- [x] The run summary reports judge p50/p95 latency and the approve/reject/held ratio.
+- [x] Test-first; `make ci` green.
 
 ## Notes
 
