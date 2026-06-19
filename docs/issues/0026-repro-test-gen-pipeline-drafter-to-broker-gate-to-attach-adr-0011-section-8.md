@@ -63,9 +63,25 @@ behavioural records.
   Authoring gotcha banked: `staticcheck .` resolves a self-contained module per
   package — a parent module with sub-packages / trailing-slash patterns fails
   offline; the drafter emits one module per trap/fix package.
-- [ ] **2 — deterministic drafter** for Go stdlib deprecations: from the curated
+- [x] **2 — deterministic drafter** for Go stdlib deprecations: from the curated
   fact, emit the candidate module + `prepare.sh`/`repro.sh`, gate it, attach on
-  pass.
+  pass. **Done 2026-06-19:** new `internal/drafter` seam — `Drafter` interface +
+  `GoDeprecationDrafter`, a template drafter driven by a *catalog* keyed by
+  `applies_to` package (the generalization, not per-package special-casing). Each
+  entry holds twiceshy's own minimal trap (uses the deprecated symbol) + fix (uses
+  the stdlib replacement) Go source — the executed original test is the licensing
+  firewall. It emits two self-contained modules (slice-1 gotcha) + `prepare.sh`
+  (installs pinned `staticcheck`) + a `repro.sh` keyed on the SA-code, all with
+  `TMPDIR=/work` (exp-0017). A `Pipeline` composes draft → broker-gate → attach:
+  a holding attestation attaches `Repro{kind:"positive"}` into `guard.repros`
+  (record stays **quarantined** — promotion is the human PR step, #0020); a
+  rejected draft is detached and its orphan files removed. Catalog covers the
+  cleanest class only (stdlib→stdlib: `io/ioutil`, `math/rand`); a drifted
+  diagnostic or uncataloged package is refused (`ErrUnsupported` → skipped, left
+  for the model drafter). Integration-proven on real runsc: a drafter-*generated*
+  `io/ioutil` repro installs staticcheck in prepare and holds offline, attaching
+  into the guard. Fixes needing a third-party module (e.g. `strings.Title` →
+  `golang.org/x/text`) are deliberately out of scope here.
 - [ ] **3 — model drafter** (Ollama on-demand) for cases templates can't cover;
   same execution gate; frontier/human judge survivors.
 
