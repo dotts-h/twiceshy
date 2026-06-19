@@ -65,7 +65,7 @@ func TestPromoteCorpus_PromotesEligiblePersistsFlip(t *testing.T) {
 	}
 	var buf bytes.Buffer
 
-	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, nil, &buf)
+	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, nil, nil, &buf)
 	if err != nil {
 		t.Fatalf("promoteCorpus: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestPromoteCorpus_AbortsOnPromoterError(t *testing.T) {
 	var persisted []string
 	persist := func(_ string, rec *record.Record) error { persisted = append(persisted, rec.ID); return nil }
 
-	_, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, nil, &bytes.Buffer{})
+	_, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, nil, nil, &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("a promoter error must abort the run")
 	}
