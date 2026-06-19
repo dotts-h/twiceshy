@@ -60,7 +60,7 @@ never a cycle).
 | [0039](0039-single-flight-lock-around-promote-adapt.md) | Single-flight lock around promote/adapt | closed | high | 0034 | ADR-0013, PR#154 |
 | [0040](0040-preflight-healthcheck-docker-runsc-judge-liveness.md) | Preflight healthcheck (docker/runsc + judge liveness) | closed | medium | 0034 | ADR-0013, PR#155 |
 | [0041](0041-production-majority-voting-in-promote.md) | Production majority voting in promote | closed | high | 0034 | ADR-0013, PR#156 |
-| [0042](0042-report-outcome-corpus-intake-so-adapt-has-nightly-input.md) | report_outcome → corpus intake (so adapt has nightly input) | open | high | 0034 | ADR-0013; deps — |
+| [0042](0042-report-outcome-corpus-intake-so-adapt-has-nightly-input.md) | report_outcome → corpus intake (so adapt has nightly input) | closed | high | 0034 | ADR-0013, PR#157 |
 | [0043](0043-nightly-validate-driver-adr-0013-2-veto-window-pr.md) | Nightly validate driver + ADR-0013 §2 veto-window PR | open | high | 0034 | ADR-0013; deps [#0036, #0037, #0038, #0039, #0040, #0041, #0042] |
 | [0044](0044-daily-opus-4-8-audit-routine-auto-demote-disagreements.md) | Daily Opus-4.8 audit routine (auto-demote disagreements) | open | high | 0034 | ADR-0013; deps [#0043, #0036] |
 | [0045](0045-success-heartbeat-uptime-kuma-push.md) | Success heartbeat (Uptime-Kuma push) | open | medium | 0034 | ADR-0013; deps [#0043] |
