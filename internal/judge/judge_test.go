@@ -116,6 +116,16 @@ func TestNewModelJudgeAcceptsDiverseFrontier(t *testing.T) {
 	}
 }
 
+func TestNewModelJudgeRejectsUnrecognizableFamily(t *testing.T) {
+	// A model id with no leading letter has family "" — it would slip past both
+	// the local-model denylist and the diversity check, so it is rejected.
+	for _, m := range []string{"-qwen", "2bmodel", "  ", "7b-instruct"} {
+		if _, err := judge.NewModelJudge(judge.Config{Endpoint: "http://judge.local", Model: m}); err == nil {
+			t.Fatalf("NewModelJudge(%q): a model with no recognizable family must be rejected", m)
+		}
+	}
+}
+
 func TestNewModelJudgeRequiresEndpointAndModel(t *testing.T) {
 	if _, err := judge.NewModelJudge(judge.Config{Model: "gemini-2.5-pro"}); err == nil {
 		t.Fatal("missing endpoint must error")
@@ -189,6 +199,9 @@ func TestModelJudgeFailSafe(t *testing.T) {
 		{"approve missing a check", http.StatusOK, `{"decision":"approve","checks":[
 			{"check":"meaning","pass":true},{"check":"scope","pass":true},{"check":"license","pass":true}]}`},
 		{"garbled approve (no checks)", http.StatusOK, `{"decision":"approve"}`},
+		{"duplicate check (malformed)", http.StatusOK, `{"decision":"approve","checks":[
+			{"check":"meaning","pass":true},{"check":"meaning","pass":true},
+			{"check":"scope","pass":true},{"check":"license","pass":true},{"check":"poison","pass":true}]}`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

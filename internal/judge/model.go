@@ -85,6 +85,9 @@ func NewModelJudge(cfg Config) (*ModelJudge, error) {
 		return nil, errors.New("judge: model required")
 	}
 	fam := familyOf(cfg.Model)
+	if fam == "" {
+		return nil, fmt.Errorf("judge: model %q has no recognizable family (must start with a letter) — diversity cannot be proven, so it is rejected", cfg.Model)
+	}
 	if localFamilies[fam] {
 		return nil, fmt.Errorf("judge: %q (family %q) is the cheap local model — forbidden as judge (ADR-0013 standing rule: local = drafter/flagger, never judge)", cfg.Model, fam)
 	}
@@ -160,6 +163,9 @@ func toVerdict(wv wireVerdict, model string) (Verdict, error) {
 	present := make(map[CheckName]bool, len(wv.Checks))
 	for _, c := range wv.Checks {
 		name := CheckName(strings.ToLower(strings.TrimSpace(c.Check)))
+		if present[name] {
+			return Verdict{}, fmt.Errorf("judge: duplicate %q check in verdict (fail-safe: no verdict)", name)
+		}
 		v.Checks = append(v.Checks, Check{Name: name, Pass: c.Pass, Reason: c.Reason})
 		present[name] = true
 	}
@@ -186,6 +192,14 @@ func buildPrompt(req Request) string {
 	if r := req.Record; r != nil {
 		fmt.Fprintf(&b, "RECORD id=%s kind=%s status=%s\n", r.ID, r.Kind, r.Status)
 		fmt.Fprintf(&b, "title: %s\n", r.Title)
+		if r.Symptom != nil {
+			if r.Symptom.Summary != "" {
+				fmt.Fprintf(&b, "symptom: %s\n", r.Symptom.Summary)
+			}
+			for _, sig := range r.Symptom.ErrorSignatures {
+				fmt.Fprintf(&b, "error_signature: %s\n", sig)
+			}
+		}
 		for _, at := range r.AppliesTo {
 			fmt.Fprintf(&b, "applies_to: ecosystem=%s package=%s\n", at.Ecosystem, at.Package)
 		}
@@ -199,7 +213,7 @@ func buildPrompt(req Request) string {
 	fmt.Fprintf(&b, "\nATTESTATION holds=%t inconclusive=%t reproduced_under=%s\n",
 		req.Attestation.Holds, req.Attestation.Inconclusive, strings.Join(req.Attestation.ReproducedUnder, ","))
 	for _, rp := range req.Repros {
-		fmt.Fprintf(&b, "\nREPRO path=%s kind=%s\n<<<\n%s\n>>>\n", rp.Path, rp.Kind, rp.Content)
+		fmt.Fprintf(&b, "\nREPRO path=%s kind=%s label=%s\n<<<\n%s\n>>>\n", rp.Path, rp.Kind, rp.Label, rp.Content)
 	}
 
 	b.WriteString("\nDecide these four checks:\n")

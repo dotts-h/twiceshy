@@ -104,20 +104,6 @@ func ApproveVerdict(model string) Verdict {
 	return Verdict{Decision: Approve, Checks: checks, Model: model}
 }
 
-// RejectVerdict is a verdict that fails one named check — a convenience for
-// tests and stubs of the negative path.
-func RejectVerdict(model string, failed CheckName, reason string) Verdict {
-	checks := make([]Check, len(Checks))
-	for i, name := range Checks {
-		c := Check{Name: name, Pass: true, Reason: "ok"}
-		if name == failed {
-			c.Pass, c.Reason = false, reason
-		}
-		checks[i] = c
-	}
-	return Verdict{Decision: Reject, Checks: checks, Model: model}
-}
-
 // ReproArtifact is one repro script the judge reads to check meaning and scope:
 // the proof's executable body, not just the attestation's pass/fail result. The
 // caller resolves guard.repro / guard.repros to their contents.
