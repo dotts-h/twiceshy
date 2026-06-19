@@ -12,6 +12,7 @@
 //	twiceshy pack   -corpus <dir> -out <dir>          build a distributable pack
 //	twiceshy doctor <name> -corpus <dir>              run a doctor (staleness | revalidate)
 //	twiceshy eval   -corpus <dir> -db <file>          report retrieval recall@k / MRR
+//	twiceshy judge-eval                               A/B the judge prompt vs the gold set (needs judge)
 //
 // serve requires the bearer token in TWICESHY_TOKEN. index and serve accept an
 // optional -embed-url (Ollama) to enable dense, pull-only retrieval (ADR-0009);
@@ -42,6 +43,7 @@ import (
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/ingest"
 	"github.com/dotts-h/twiceshy/internal/judge"
+	"github.com/dotts-h/twiceshy/internal/judgeeval"
 	"github.com/dotts-h/twiceshy/internal/pack"
 	"github.com/dotts-h/twiceshy/internal/promote"
 	"github.com/dotts-h/twiceshy/internal/record"
@@ -82,7 +84,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|ingest|draft|promote|adapt|pack|doctor|eval> [flags]")
+		return errors.New("usage: twiceshy <index|serve|ingest|draft|promote|adapt|pack|doctor|eval|judge-eval> [flags]")
 	}
 	switch args[0] {
 	case "index":
@@ -103,8 +105,10 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runDoctor(ctx, args[1:], out)
 	case "eval":
 		return runEval(ctx, args[1:], out)
+	case "judge-eval":
+		return runJudgeEval(ctx, args[1:], out, getenv)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, draft, promote, adapt, pack, doctor, or eval)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, draft, promote, adapt, pack, doctor, eval, or judge-eval)", args[0])
 	}
 }
 
@@ -602,7 +606,14 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	if judgeURL == "" {
 		return errors.New("TWICESHY_JUDGE_URL must be set: auto-promotion requires a diverse-model judge (it is never bypassed)")
 	}
-	j, err := judge.NewModelJudge(judge.Config{Endpoint: judgeURL, Model: *judgeModel, DrafterModel: *drafterModel})
+	// System + think are the measured A/B winner (internal/judgeeval, repeat=5):
+	// the prose prompt at think=false had 0 false-approve / 0 false-reject, beating
+	// the rubric (over-rejects) and think=true (adds false-approves, slower). Pinned
+	// here so the validated prompt lives in version control, not the untracked shim.
+	j, err := judge.NewModelJudge(judge.Config{
+		Endpoint: judgeURL, Model: *judgeModel, DrafterModel: *drafterModel,
+		System: judge.ProseSystemV1, Think: false,
+	})
 	if err != nil {
 		return fmt.Errorf("configuring judge: %w", err)
 	}
@@ -737,7 +748,14 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 	if judgeURL == "" {
 		return errors.New("TWICESHY_JUDGE_URL must be set: the counter-evidence gate requires a diverse-model judge")
 	}
-	j, err := judge.NewModelJudge(judge.Config{Endpoint: judgeURL, Model: *judgeModel, DrafterModel: *drafterModel})
+	// System + think are the measured A/B winner (internal/judgeeval, repeat=5):
+	// the prose prompt at think=false had 0 false-approve / 0 false-reject, beating
+	// the rubric (over-rejects) and think=true (adds false-approves, slower). Pinned
+	// here so the validated prompt lives in version control, not the untracked shim.
+	j, err := judge.NewModelJudge(judge.Config{
+		Endpoint: judgeURL, Model: *judgeModel, DrafterModel: *drafterModel,
+		System: judge.ProseSystemV1, Think: false,
+	})
 	if err != nil {
 		return fmt.Errorf("configuring judge: %w", err)
 	}
@@ -1107,6 +1125,186 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// judgeEvalConfig is one prompt×reasoning combination the A/B sweeps.
+type judgeEvalConfig struct {
+	name   string
+	system string
+	think  bool
+}
+
+var judgeEvalConfigs = []judgeEvalConfig{
+	{"prose-nothink", judge.ProseSystemV1, false},
+	{"prose-think", judge.ProseSystemV1, true},
+	{"rubric-nothink", judge.RubricSystemV1, false},
+	{"rubric-think", judge.RubricSystemV1, true},
+}
+
+// judgeEvalNamedResult pairs a config name with its scored result (for the report
+// table and the JSON payload).
+type judgeEvalNamedResult struct {
+	Name   string           `json:"config"`
+	Result judgeeval.Result `json:"result"`
+}
+
+// runJudgeEval drives the diverse-model judge against the labelled gold set
+// (internal/judgeeval) and A/Bs the prose vs rubric system prompt at think
+// off/on, scoring the fail-UNSAFE direction (false-approve rate) so the operator
+// can install the winning prompt. It hits the live shim (TWICESHY_JUDGE_URL) — it
+// is an offline tuning tool, never part of CI (no network there).
+func runJudgeEval(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
+	fs := flag.NewFlagSet("judge-eval", flag.ContinueOnError)
+	model := fs.String("model", "gpt-oss:20b", "judge model id (the shim's upstream model)")
+	drafterModel := fs.String("drafter-model", "", "drafter model for the anti-monoculture check; empty skips it")
+	repeat := fs.Int("repeat", 1, "samples per case; the majority decision is scored (smooths boundary cases)")
+	timeout := fs.Int("timeout", 90, "per-call HTTP timeout in seconds (raise for think=true)")
+	configs := fs.String("configs", "all", "comma list of configs to run, or all: "+configNames())
+	asJSON := fs.Bool("json", false, "emit the full report as JSON")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	url := getenv("TWICESHY_JUDGE_URL")
+	if url == "" {
+		return errors.New("TWICESHY_JUDGE_URL must be set: judge-eval drives the live judge shim")
+	}
+	selected, err := selectConfigs(*configs)
+	if err != nil {
+		return err
+	}
+	cases, err := judgeeval.LoadGold()
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: time.Duration(*timeout) * time.Second}
+
+	var results []judgeEvalNamedResult
+	for _, cf := range selected {
+		j, err := judge.NewModelJudge(judge.Config{
+			Endpoint: url, Model: *model, DrafterModel: *drafterModel,
+			System: cf.system, Think: cf.think, Client: client,
+		})
+		if err != nil {
+			return fmt.Errorf("configuring judge for %s: %w", cf.name, err)
+		}
+		if !*asJSON {
+			_, _ = fmt.Fprintf(out, "running %s (%d cases × %d) …\n", cf.name, len(cases), *repeat)
+		}
+		rep, err := judgeeval.Run(ctx, j, cases, *repeat)
+		if err != nil {
+			return fmt.Errorf("running %s: %w", cf.name, err)
+		}
+		results = append(results, judgeEvalNamedResult{Name: cf.name, Result: rep})
+	}
+
+	winner := -1
+	for i := range results {
+		if winner < 0 || judgeEvalBetter(results[i].Result, results[winner].Result) {
+			winner = i
+		}
+	}
+
+	if *asJSON {
+		payload := struct {
+			Configs []judgeEvalNamedResult `json:"configs"`
+			Winner  string                 `json:"winner"`
+		}{results, names(results, winner)}
+		b, err := json.MarshalIndent(payload, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(out, string(b))
+		return nil
+	}
+
+	_, _ = fmt.Fprintf(out, "\njudge-eval: %d gold cases, repeat=%d, model=%s\n", len(cases), *repeat, *model)
+	_, _ = fmt.Fprintf(out, "%-16s %12s %12s %8s %9s  %s %6s\n", "config", "false-appr", "false-rej", "errors", "accuracy", "check-recall", "flips")
+	for i, nr := range results {
+		r := nr.Result
+		mark := "  "
+		if i == winner {
+			mark = "★ "
+		}
+		_, _ = fmt.Fprintf(out, "%s%-14s %5d %5.0f%% %5d %5.0f%% %8d %8.0f%% %10.0f%% %6d\n",
+			mark, nr.Name,
+			r.FalseApproves, r.FalseApproveRate*100,
+			r.FalseRejects, r.FalseRejectRate*100,
+			r.Errors, r.Accuracy*100, r.CheckRecall*100, r.Flips)
+	}
+	_, _ = fmt.Fprintf(out, "\nwinner: %s (lowest false-approve, then false-reject, then errors)\n", names(results, winner))
+
+	// Detail for the winner: which gold cases slipped, so the failure is legible.
+	w := results[winner].Result
+	printJudgeEvalMisses(out, "FALSE-APPROVE (fail-unsafe — would auto-promote)", w.Outcomes, func(o judgeeval.Outcome) bool { return o.FalseApprove })
+	printJudgeEvalMisses(out, "false-reject (over-conservative — good record blocked)", w.Outcomes, func(o judgeeval.Outcome) bool { return o.FalseReject })
+	printJudgeEvalMisses(out, "errors (no verdict)", w.Outcomes, func(o judgeeval.Outcome) bool { return o.Errored })
+	printJudgeEvalMisses(out, "flipped (judge disagreed with itself across samples)", w.Outcomes, func(o judgeeval.Outcome) bool { return o.Flipped })
+	return nil
+}
+
+func configNames() string {
+	ns := make([]string, len(judgeEvalConfigs))
+	for i, c := range judgeEvalConfigs {
+		ns[i] = c.name
+	}
+	return strings.Join(ns, ",")
+}
+
+func selectConfigs(spec string) ([]judgeEvalConfig, error) {
+	if spec == "" || spec == "all" {
+		return judgeEvalConfigs, nil
+	}
+	want := strings.Split(spec, ",")
+	var out []judgeEvalConfig
+	for _, w := range want {
+		w = strings.TrimSpace(w)
+		found := false
+		for _, c := range judgeEvalConfigs {
+			if c.name == w {
+				out = append(out, c)
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("unknown config %q (want one of %s, or all)", w, configNames())
+		}
+	}
+	return out, nil
+}
+
+// judgeEvalBetter ranks results: fewest false-approves (fail-unsafe) first, then
+// fewest false-rejects, then fewest errors, then highest accuracy.
+func judgeEvalBetter(a, b judgeeval.Result) bool {
+	if a.FalseApproves != b.FalseApproves {
+		return a.FalseApproves < b.FalseApproves
+	}
+	if a.FalseRejects != b.FalseRejects {
+		return a.FalseRejects < b.FalseRejects
+	}
+	if a.Errors != b.Errors {
+		return a.Errors < b.Errors
+	}
+	return a.Accuracy > b.Accuracy
+}
+
+func names(results []judgeEvalNamedResult, i int) string {
+	if i < 0 || i >= len(results) {
+		return "(none)"
+	}
+	return results[i].Name
+}
+
+func printJudgeEvalMisses(out io.Writer, title string, os []judgeeval.Outcome, pred func(judgeeval.Outcome) bool) {
+	var ids []string
+	for _, o := range os {
+		if pred(o) {
+			ids = append(ids, fmt.Sprintf("%s(%s)", o.CaseID, o.Mode))
+		}
+	}
+	if len(ids) > 0 {
+		_, _ = fmt.Fprintf(out, "  %s: %s\n", title, strings.Join(ids, " "))
+	}
 }
 
 func printReport(out io.Writer, rep doctor.Report) {
