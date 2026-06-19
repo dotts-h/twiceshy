@@ -34,7 +34,7 @@ func (f *fakePromoter) Promote(_ context.Context, rec *record.Record) (promote.O
 		rec.Status = "validated"
 		return promote.Outcome{
 			Promoted:    true,
-			Verdict:     judge.Verdict{Model: "gemini-2.5-pro"},
+			Verdict:     judge.Verdict{Model: "gemini-2.5-pro", Decision: judge.Approve},
 			Attestation: repro.Attestation{ReproducedUnder: []string{"go1.25"}},
 		}, nil
 	}
@@ -65,7 +65,7 @@ func TestPromoteCorpus_PromotesEligiblePersistsFlip(t *testing.T) {
 	}
 	var buf bytes.Buffer
 
-	st, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, &buf)
+	st, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, nil, &buf)
 	if err != nil {
 		t.Fatalf("promoteCorpus: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestPromoteCorpus_AbortsOnPromoterError(t *testing.T) {
 	var persisted []string
 	persist := func(_ string, rec *record.Record) error { persisted = append(persisted, rec.ID); return nil }
 
-	_, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, &bytes.Buffer{})
+	_, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, nil, &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("a promoter error must abort the run")
 	}

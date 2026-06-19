@@ -22,7 +22,7 @@ func TestPromoteCorpus_EmergencyStopHalts(t *testing.T) {
 	persist := func(_ string, r *record.Record) error { persisted = append(persisted, r.ID); return nil }
 	var buf bytes.Buffer
 
-	st, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{Paused: true}, &buf)
+	st, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{Paused: true}, nil, &buf)
 	if err != nil {
 		t.Fatalf("promoteCorpus: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestPromoteCorpus_BudgetCapStops(t *testing.T) {
 	persist := func(_ string, _ *record.Record) error { return nil }
 	var buf bytes.Buffer
 
-	st, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxRuns: 1}, &buf)
+	st, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxRuns: 1}, nil, &buf)
 	if err != nil {
 		t.Fatalf("promoteCorpus: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestPromoteCorpus_AnomalyAlerts(t *testing.T) {
 
 	// MaxActions 1: the 2nd promotion crosses the threshold and alerts (but still
 	// completes — the alert is a notification, not a halt).
-	st, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxActions: 1}, &buf)
+	st, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxActions: 1}, nil, &buf)
 	if err != nil {
 		t.Fatalf("promoteCorpus: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestAdaptCorpus_EmergencyStopHalts(t *testing.T) {
 	persist := func(_ string, r *record.Record) error { persisted = append(persisted, r.ID); return nil }
 	var buf bytes.Buffer
 
-	st, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{Paused: true}, &buf)
+	st, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{Paused: true}, nil, &buf)
 	if err != nil {
 		t.Fatalf("adaptCorpus: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestAdaptCorpus_BudgetCapStops(t *testing.T) {
 	persist := func(_ string, _ *record.Record) error { return nil }
 	var buf bytes.Buffer
 
-	st, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxRuns: 1}, &buf)
+	st, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxRuns: 1}, nil, &buf)
 	if err != nil {
 		t.Fatalf("adaptCorpus: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestAdaptCorpus_AnomalyAlerts(t *testing.T) {
 	persist := func(_ string, _ *record.Record) error { return nil }
 	var buf bytes.Buffer
 
-	st, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxActions: 1}, &buf)
+	st, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxActions: 1}, nil, &buf)
 	if err != nil {
 		t.Fatalf("adaptCorpus: %v", err)
 	}

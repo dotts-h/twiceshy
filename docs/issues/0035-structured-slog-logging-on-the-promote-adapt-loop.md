@@ -1,14 +1,14 @@
 ---
 id: 0035
 title: "Structured slog logging on the promote/adapt loop"
-status: open
+status: closed
 severity: high
 group: 0034
 depends_on: []
 forgejo: 125
 links:
   adr: ADR-0013
-  prs: []
+  prs: [150]
   issues: []
   regression:
 assets: []
@@ -26,9 +26,9 @@ Plan ref: `docs/GO_LIVE_HARDENING_PLAN.md` §B1.
 
 ## Acceptance
 
-- [ ] A run produces a parseable JSON line per record + one summary line.
-- [ ] held/ineligible/error outcomes all appear (today adapt `held` emits nothing).
-- [ ] Test-first; `make ci` green.
+- [x] A run produces a parseable JSON line per record + one summary line.
+- [x] held/ineligible/error outcomes all appear (today adapt `held` emits nothing).
+- [x] Test-first; `make ci` green.
 
 ## Notes
 
