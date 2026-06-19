@@ -1,14 +1,14 @@
 ---
 id: 0043
 title: "Nightly validate driver + ADR-0013 §2 veto-window PR"
-status: open
+status: closed
 severity: high
 group: 0034
 depends_on: [0036, 0037, 0038, 0039, 0040, 0041, 0042]
 forgejo: 133
 links:
   adr: ADR-0013
-  prs: []
+  prs: [158]
   issues: []
   regression:
 assets: []
@@ -26,10 +26,10 @@ new `scripts/scheduled-validate.sh` + a systemd unit/timer; reuse forgejo-ci-mer
 
 ## Acceptance
 
-- [ ] A weeknight run opens a single PR (one commit, the run id) that self-merges only after the cooldown.
-- [ ] Closing the PR vetoes the batch; `TWICESHY_PAUSE=1` short-circuits before any mutation.
-- [ ] OPERATOR STEP: enable the timer (like `twiceshy-import.timer`).
-- [ ] Test-first; `make ci` green.
+- [x] A weeknight run opens a single PR (one commit, the run id) that self-merges only after the cooldown.
+- [x] Closing the PR vetoes the batch; `TWICESHY_PAUSE=1` short-circuits before any mutation.
+- [x] OPERATOR STEP: enable the timer (like `twiceshy-import.timer`).
+- [x] Test-first; `make ci` green.
 
 ## Notes
 
