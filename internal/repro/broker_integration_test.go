@@ -210,3 +210,61 @@ cat out; exit 1
 		t.Errorf("expected a promotion proposal, got %+v", rep.Findings)
 	}
 }
+
+// End-to-end test-gen GATE (#0026 slice 1): a DIRECTORY repro that carries its
+// own dependency. The prepare phase (networked) installs staticcheck into the
+// work volume; the execute phase (offline) runs it and proves a real Go stdlib
+// deprecation is flagged (trap) while its replacement is clean (fix). This is the
+// gate a generated deprecation repro will pass through.
+func TestIntegration_DirectoryReproWithPreparePhase(t *testing.T) {
+	requireIntegration(t)
+	root := t.TempDir()
+	dir := filepath.Join("experience", "repro", "dep-ioutil")
+	abs := filepath.Join(root, dir)
+	if err := os.MkdirAll(filepath.Join(abs, "trap"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(abs, "fix"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(p, body string) {
+		if err := os.WriteFile(filepath.Join(abs, p), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// trap and fix are each self-contained modules (a parent module with
+	// sub-packages doesn't resolve cleanly for `staticcheck .` offline).
+	write("trap/go.mod", "module deptrap\n\ngo 1.25\n")
+	write("trap/a.go", "package main\nimport \"io/ioutil\"\nfunc main() { _, _ = ioutil.ReadFile(\"x\") }\n")
+	write("fix/go.mod", "module depfix\n\ngo 1.25\n")
+	write("fix/a.go", "package main\nimport \"os\"\nfunc main() { _, _ = os.ReadFile(\"x\") }\n")
+	env := "export GOTOOLCHAIN=local GOCACHE=/work/.gocache GOPATH=/work/.gopath GOBIN=/work/bin\n"
+	write("prepare.sh", "#!/bin/sh\nset -e\n"+env+"go install honnef.co/go/tools/cmd/staticcheck@2025.1\n")
+	// staticcheck exits non-zero when it finds issues, so grep its output rather
+	// than its exit code. trap must be flagged SA1019; fix must be clean.
+	write("repro.sh", "#!/bin/sh\nset -u\n"+env+
+		"command -v go >/dev/null 2>&1 || { echo SKIP; exit 75; }\n"+
+		"[ -x /work/bin/staticcheck ] || { echo 'SKIP: staticcheck not warmed'; exit 75; }\n"+
+		"if ! (cd /work/trap && /work/bin/staticcheck .) 2>&1 | grep -q SA1019; then echo 'NOT REPRODUCED: trap not flagged'; exit 1; fi\n"+
+		"if (cd /work/fix && /work/bin/staticcheck .) 2>&1 | grep -q SA1019; then echo 'FIX BROKEN: replacement still flagged'; exit 1; fi\n"+
+		"echo OK; exit 0\n")
+
+	b := repro.NewBroker([]string{repro.PinnedGoImage},
+		repro.WithLimits(repro.Limits{
+			Memory: "1g", CPUs: "2.0", PidsLimit: 256, TmpfsSize: "128m",
+			Timeout: 5 * time.Minute,
+		}))
+	rec := &record.Record{
+		ID: "exp-9002", Status: "quarantined", Path: "experience/2026/9002-x.md",
+		AppliesTo: []record.AppliesTo{{Ecosystem: "Go", Package: "io/ioutil"}},
+		Guard:     &record.Guard{Repros: []record.Repro{{Path: filepath.ToSlash(dir), Kind: "positive"}}},
+	}
+	rv := repro.NewRevalidator(b, root)
+	_, atts, err := rv.RunWithAttestations(context.Background(), []*record.Record{rec})
+	if err != nil {
+		t.Fatalf("RunWithAttestations: %v", err)
+	}
+	if !atts[0].Holds {
+		t.Fatalf("deprecation repro should hold via prepare+execute; attestation=%+v", atts[0])
+	}
+}

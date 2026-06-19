@@ -189,6 +189,104 @@ func TestRevalidate_LegacySingleReproTreatedAsPositive(t *testing.T) {
 	}
 }
 
+func TestRevalidate_DirectoryReproDrivesPrepareAndExecute(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join("experience", "repro", "0007-dep")
+	abs := filepath.Join(root, dir)
+	if err := os.MkdirAll(abs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"prepare.sh": "#!/bin/sh\ngo install example/tool\n",
+		"repro.sh":   "#!/bin/sh\ntool ./...\n",
+		"go.mod":     "module dep\ngo 1.25\n",
+		"a.go":       "package dep\n",
+	} {
+		if err := os.WriteFile(filepath.Join(abs, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b := &fakeBroker{run: func(Job) (Result, error) {
+		return Result{Prepare: PhaseResult{ExitCode: 0}, Execute: PhaseResult{ExitCode: 0}}, nil
+	}}
+	rv := newReval(b, root)
+	rec := recWithRepro("exp-0007", "quarantined", filepath.ToSlash(dir), "positive")
+	if _, atts, err := rv.RunWithAttestations(context.Background(), []*record.Record{rec}); err != nil {
+		t.Fatalf("Run: %v", err)
+	} else if !atts[0].Holds {
+		t.Fatalf("directory repro should hold: %+v", atts[0])
+	}
+	if len(b.jobs) != 1 {
+		t.Fatalf("want 1 job, got %d", len(b.jobs))
+	}
+	job := b.jobs[0]
+	// prepare.sh present → the networked prepare phase is driven.
+	if len(job.Prepare) == 0 || job.Prepare[len(job.Prepare)-1] != workDir+"/prepare.sh" {
+		t.Errorf("prepare phase not wired from prepare.sh: %v", job.Prepare)
+	}
+	if job.Execute[len(job.Execute)-1] != workDir+"/repro.sh" {
+		t.Errorf("execute phase not wired from repro.sh: %v", job.Execute)
+	}
+	// All directory files are staged for the sandbox.
+	for _, f := range []string{"repro.sh", "prepare.sh", "go.mod", "a.go"} {
+		if _, ok := job.Files[f]; !ok {
+			t.Errorf("staged files missing %q; got %v", f, keysOf(job.Files))
+		}
+	}
+}
+
+func TestRevalidate_DirectoryReproWithoutReproShIsError(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join("experience", "repro", "0008-bad")
+	if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, dir, "notes.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := &fakeBroker{run: func(Job) (Result, error) { return exit(0), nil }}
+	rv := newReval(b, root)
+	rec := recWithRepro("exp-0008", "quarantined", filepath.ToSlash(dir), "positive")
+	_, atts, _ := rv.RunWithAttestations(context.Background(), []*record.Record{rec})
+	if atts[0].Holds {
+		t.Error("a directory repro without repro.sh must not hold")
+	}
+	if len(b.jobs) != 0 {
+		t.Error("a malformed directory repro must never reach the broker")
+	}
+}
+
+func TestRevalidate_PrepareFailureIsBrokenNotHolds(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join("experience", "repro", "0009-dep")
+	if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"prepare.sh", "repro.sh"} {
+		if err := os.WriteFile(filepath.Join(root, dir, n), []byte("#!/bin/sh\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Prepare fails; execute would be meaningless — must report broken, not holds.
+	b := &fakeBroker{run: func(Job) (Result, error) {
+		return Result{Prepare: PhaseResult{ExitCode: 1}, Execute: PhaseResult{ExitCode: 0}}, nil
+	}}
+	rv := newReval(b, root)
+	rec := recWithRepro("exp-0009", "quarantined", filepath.ToSlash(dir), "positive")
+	_, atts, _ := rv.RunWithAttestations(context.Background(), []*record.Record{rec})
+	if atts[0].Holds {
+		t.Error("a failed prepare must not produce holds")
+	}
+}
+
+func keysOf(m map[string][]byte) []string {
+	ks := make([]string, 0, len(m))
+	for k := range m {
+		ks = append(ks, k)
+	}
+	return ks
+}
+
 func contains2(s, sub string) bool {
 	return len(sub) == 0 || (len(s) >= len(sub) && indexOf(s, sub) >= 0)
 }
