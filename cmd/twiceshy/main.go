@@ -82,7 +82,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|ingest|draft|promote|pack|doctor|eval> [flags]")
+		return errors.New("usage: twiceshy <index|serve|ingest|draft|promote|adapt|pack|doctor|eval> [flags]")
 	}
 	switch args[0] {
 	case "index":
