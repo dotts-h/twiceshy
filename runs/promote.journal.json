@@ -1,0 +1,329 @@
+{
+  "run_id": "",
+  "stage": "promote",
+  "complete": true,
+  "actions": [
+    {
+      "id": "exp-0001",
+      "outcome": "ineligible",
+      "from_status": "validated",
+      "to_status": "validated",
+      "reason": "not quarantined"
+    },
+    {
+      "id": "exp-0002",
+      "outcome": "ineligible",
+      "from_status": "validated",
+      "to_status": "validated",
+      "reason": "not quarantined"
+    },
+    {
+      "id": "exp-0003",
+      "outcome": "ineligible",
+      "from_status": "validated",
+      "to_status": "validated",
+      "reason": "not quarantined"
+    },
+    {
+      "id": "exp-0004",
+      "outcome": "ineligible",
+      "from_status": "validated",
+      "to_status": "validated",
+      "reason": "not quarantined"
+    },
+    {
+      "id": "exp-0005",
+      "outcome": "ineligible",
+      "from_status": "validated",
+      "to_status": "validated",
+      "reason": "not quarantined"
+    },
+    {
+      "id": "exp-0006",
+      "outcome": "ineligible",
+      "from_status": "validated",
+      "to_status": "validated",
+      "reason": "not quarantined"
+    },
+    {
+      "id": "exp-0007",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0008",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0009",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0010",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0011",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0012",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0013",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0014",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0015",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0016",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0017",
+      "outcome": "ineligible",
+      "from_status": "validated",
+      "to_status": "validated",
+      "reason": "not quarantined"
+    },
+    {
+      "id": "exp-0018",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0019",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0020",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0021",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0022",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0023",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0024",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0025",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0026",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0027",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0028",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0029",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0030",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0031",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0032",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0033",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0034",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0035",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0036",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0037",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0038",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0039",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0040",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0041",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0042",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0043",
+      "outcome": "ineligible",
+      "from_status": "validated",
+      "to_status": "validated",
+      "reason": "not quarantined"
+    },
+    {
+      "id": "exp-0044",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    },
+    {
+      "id": "exp-0045",
+      "outcome": "ineligible",
+      "from_status": "validated",
+      "to_status": "validated",
+      "reason": "not quarantined"
+    },
+    {
+      "id": "exp-0046",
+      "outcome": "ineligible",
+      "from_status": "quarantined",
+      "to_status": "quarantined",
+      "reason": "no executable proof — left for a human (ADR-0013 §5)"
+    }
+  ]
+}
