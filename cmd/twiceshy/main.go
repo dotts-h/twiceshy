@@ -1855,8 +1855,7 @@ func runUsageFlush(ctx context.Context, args []string, out io.Writer) error {
 		if !ok {
 			continue
 		}
-		desired := &u
-		if usageEqual(r.Provenance.Usage, desired) {
+		if usageEqual(r.Provenance.Usage, &u) {
 			continue
 		}
 		r.Provenance.Usage = &u
