@@ -12,6 +12,7 @@ import (
 
 	"github.com/dotts-h/twiceshy/internal/ingest"
 	"github.com/dotts-h/twiceshy/internal/record"
+	"github.com/dotts-h/twiceshy/internal/spool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -101,8 +102,36 @@ func (h *handlers) reportOutcome(ctx context.Context, _ *mcp.CallToolRequest, ar
 		return nil, ReportResult{}, err
 	}
 
-	msg := fmt.Sprintf("Quarantined counter-record %s created disputing %s — open it as a PR; it does NOT change %s. "+
-		"The validation gate (#0032) will turn it into a repro and adjudicate.", rec.ID, args.RecordID, args.RecordID)
+	// Automatic intake (ADR-0013 §E1): when a queue is configured, enqueue the
+	// report so `intake-reports` materializes it into experience/ — no human
+	// paste-PR. The queue stores the request, not this preview record: the final
+	// id is allocated against the live corpus at intake (never colliding with
+	// another report queued before the next drain). With no queue, the legacy
+	// markdown-to-PR behavior is unchanged.
+	queued := false
+	if h.reportQueue != "" {
+		if _, err := spool.Enqueue(h.reportQueue, spool.Report{
+			RecordID:   args.RecordID,
+			Outcome:    args.Outcome,
+			Evidence:   args.Evidence,
+			Author:     args.Author,
+			Session:    args.Session,
+			ReportedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		}); err != nil {
+			h.logToolError(tool, start, err, slog.String("record_id", args.RecordID))
+			return nil, ReportResult{}, fmt.Errorf("queueing report against %s for intake: %w", args.RecordID, err)
+		}
+		queued = true
+	}
+
+	var msg string
+	if queued {
+		msg = fmt.Sprintf("Outcome report against %s queued for automatic intake — no PR needed. The nightly intake materializes it "+
+			"as a quarantined counter-record (a fresh id is assigned then) that the validation gate (#0032) adjudicates; it does NOT change %s.", args.RecordID, args.RecordID)
+	} else {
+		msg = fmt.Sprintf("Quarantined counter-record %s created disputing %s — open it as a PR; it does NOT change %s. "+
+			"The validation gate (#0032) will turn it into a repro and adjudicate.", rec.ID, args.RecordID, args.RecordID)
+	}
 	if flags := rec.Provenance.SecurityFlags; len(flags) > 0 {
 		msg += " SECURITY: the safety gate flagged the evidence (" + strings.Join(flags, ", ") + ")."
 	}

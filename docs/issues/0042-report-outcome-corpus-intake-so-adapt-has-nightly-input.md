@@ -1,14 +1,14 @@
 ---
 id: 0042
 title: "report_outcome → corpus intake (so adapt has nightly input)"
-status: open
+status: closed
 severity: high
 group: 0034
 depends_on: []
 forgejo: 132
 links:
   adr: ADR-0013
-  prs: []
+  prs: [157]
   issues: []
   regression:
 assets: []
@@ -26,9 +26,9 @@ Plan ref: `docs/GO_LIVE_HARDENING_PLAN.md` §E1.
 
 ## Acceptance
 
-- [ ] A reported outcome appears as a quarantined counter-record the next run's `adapt` processes.
-- [ ] No human paste step is required.
-- [ ] Test-first; `make ci` green.
+- [x] A reported outcome appears as a quarantined counter-record the next run's `adapt` processes.
+- [x] No human paste step is required.
+- [x] Test-first; `make ci` green.
 
 ## Notes
 

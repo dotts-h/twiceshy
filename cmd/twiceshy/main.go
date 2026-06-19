@@ -52,6 +52,7 @@ import (
 	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/repro"
 	"github.com/dotts-h/twiceshy/internal/server"
+	"github.com/dotts-h/twiceshy/internal/spool"
 )
 
 // errUsage marks a flag parse error whose specifics the flag package already
@@ -141,7 +142,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|ingest|draft|promote|adapt|pack|doctor|eval|judge-eval> [flags]")
+		return errors.New("usage: twiceshy <index|serve|ingest|draft|promote|adapt|intake-reports|pack|doctor|eval|judge-eval> [flags]")
 	}
 	switch args[0] {
 	case "index":
@@ -158,6 +159,8 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runPromote(ctx, args[1:], out, getenv)
 	case "adapt":
 		return runAdapt(ctx, args[1:], out, getenv)
+	case "intake-reports":
+		return runIntakeReports(args[1:], out)
 	case "doctor":
 		return runDoctor(ctx, args[1:], out)
 	case "eval":
@@ -165,7 +168,7 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	case "judge-eval":
 		return runJudgeEval(ctx, args[1:], out, getenv)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, draft, promote, adapt, pack, doctor, eval, or judge-eval)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, draft, promote, adapt, intake-reports, pack, doctor, eval, or judge-eval)", args[0])
 	}
 }
 
@@ -242,6 +245,7 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	c := addCommonFlags(fs)
 	addr := fs.String("addr", ":8722", "listen address")
+	reportQueue := fs.String("report-queue", "", "directory report_outcome enqueues outcome reports into for `intake-reports` to materialize (ADR-0013 §E1); empty = legacy markdown-to-PR")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -256,7 +260,7 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 	}
 	defer func() { _ = ix.Close() }()
 
-	handler, err := server.New(server.Config{Index: ix, Token: token, Repo: c.repo, Embedder: embedderFor(c)})
+	handler, err := server.New(server.Config{Index: ix, Token: token, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue})
 	if err != nil {
 		return err
 	}
@@ -1160,6 +1164,81 @@ func reportEvidence(report *record.Record) string {
 		return report.Resolution.DeadEnds[0].WhyItFailed
 	}
 	return report.Body
+}
+
+// maxRecordNum returns the highest numeric suffix among exp-NNNN record ids, or 0
+// for an empty corpus — the base for allocating fresh intake ids.
+func maxRecordNum(recs []*record.Record) int {
+	max := 0
+	for _, r := range recs {
+		if n, err := strconv.Atoi(strings.TrimPrefix(r.ID, "exp-")); err == nil && n > max {
+			max = n
+		}
+	}
+	return max
+}
+
+// runIntakeReports drains the report queue (ADR-0013 §E1, #0042): each queued
+// outcome report becomes a quarantined counter-record written under experience/,
+// so the next `adapt` adjudicates it with no human paste-PR step. Ids are
+// allocated against the live corpus sequentially within the batch, so reports
+// queued before this drain never collide. A malformed queue entry is logged and
+// removed (it cannot wedge the nightly drain); a write failure aborts so the
+// entry is retried next run.
+func runIntakeReports(args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("intake-reports", flag.ContinueOnError)
+	corpus := fs.String("corpus", ".", "corpus root (the directory containing experience/)")
+	queue := fs.String("queue", "", "report queue directory written by `serve -report-queue` (required)")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if *queue == "" {
+		return errors.New("intake-reports requires -queue <dir> (the directory serve enqueues reports into)")
+	}
+
+	recs, err := record.LoadCorpus(*corpus)
+	if err != nil {
+		return fmt.Errorf("loading corpus: %w", err)
+	}
+	files, err := spool.List(*queue)
+	if err != nil {
+		return fmt.Errorf("listing report queue: %w", err)
+	}
+
+	next := maxRecordNum(recs)
+	today := time.Now().UTC().Format("2006-01-02")
+	intaken, skipped := 0, 0
+	for _, f := range files {
+		rep, err := spool.Read(f)
+		if err != nil {
+			_, _ = fmt.Fprintf(out, "  skip %s: unreadable queue entry (%v)\n", filepath.Base(f), err)
+			_ = spool.Remove(f)
+			skipped++
+			continue
+		}
+		meta := ingest.Meta{ID: fmt.Sprintf("exp-%04d", next+1), Author: rep.Author, Now: today}
+		if rep.Session != "" {
+			s := rep.Session
+			meta.Session = &s
+		}
+		rec, err := ingest.BuildReport(ingest.ReportInput{RecordID: rep.RecordID, Outcome: rep.Outcome, Evidence: rep.Evidence}, meta)
+		if err != nil {
+			_, _ = fmt.Fprintf(out, "  skip %s: invalid report (%v)\n", filepath.Base(f), err)
+			_ = spool.Remove(f)
+			skipped++
+			continue
+		}
+		if err := writeRecord(*corpus, rec); err != nil {
+			// A write failure is environmental — leave the entry queued for retry.
+			return fmt.Errorf("writing counter-record for %s: %w", rep.RecordID, err)
+		}
+		_ = spool.Remove(f)
+		next++
+		intaken++
+		_, _ = fmt.Fprintf(out, "  intake %s -> %s (disputes %s)\n", filepath.Base(f), rec.ID, rep.RecordID)
+	}
+	_, _ = fmt.Fprintf(out, "intake-reports: materialized %d report(s) into experience/, %d skipped\n", intaken, skipped)
+	return nil
 }
 
 // runPack builds a distributable experience pack (#0007, ADR-0002 §4). It
