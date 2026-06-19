@@ -17,6 +17,7 @@ never a cycle).
 | [0008](0008-epic-deployable-twiceshy-remaining-phases.md) | Epic: Deployable twiceshy — the remaining phases | open | 0007, 0006, 0004, 0002, 0005 |
 | [0009](0009-epic-pre-deploy-security.md) | Epic: Pre-deploy security hardening (Tier A) | open | 0011, 0012, 0013, 0014 |
 | [0010](0010-epic-public-release.md) | Epic: Public release (Tier B) — multi-tenant, trial, anti-abuse | open | — |
+| [0027](0027-epic-closed-loop-autonomous-validation-no-human-in-the-provable-loop.md) | Epic: Closed-loop autonomous validation — no human in the provable loop | open | 0028, 0029, 0030, 0031, 0032 |
 
 ## Issues
 
@@ -45,3 +46,8 @@ never a cycle).
 | [0024](0024-llm-wrong-canon-so-reframe-authoring-gated-on-adr-0011-section-5-sign-off.md) | LLM-wrong canon + SO-reframe authoring (GATED on ADR-0011 section 5 sign-off) | open | medium | 0015 | |
 | [0025](0025-hard-disk-size-cap-on-the-repro-work-volume-multi-tenant-precondition.md) | Hard disk-size cap on the repro work volume (multi-tenant precondition) | open | medium | 0015 | |
 | [0026](0026-repro-test-gen-pipeline-drafter-to-broker-gate-to-attach-adr-0011-section-8.md) | Repro test-gen pipeline — drafter to broker-gate to attach (ADR-0011 section 8) | in-progress | high | 0015 | |
+| [0028](0028-judge-seam-diverse-model-verdict-on-proven-records.md) | Judge seam — diverse-model verdict on a proven record (meaning/scope/license/poison) | open | high | 0027 | ADR-0013 |
+| [0029](0029-auto-promotion-attestation-plus-judge-promotes-quarantined-to-validated.md) | Auto-promotion — attestation + judge PASS promotes quarantined to validated | open | high | 0027 | ADR-0013 |
+| [0030](0030-usage-signal-retrieval-increments-provenance-usage.md) | Usage signal — retrieval increments provenance.usage (unblocks D4) | open | medium | 0027 | ADR-0013 |
+| [0031](0031-outcome-report-intake-mcp-report-outcome-gated-counter-evidence.md) | Outcome-report intake — MCP report_outcome, quarantined counter-evidence | open | medium | 0027 | ADR-0013 |
+| [0032](0032-counter-evidence-gate-and-adapt-demote-or-supersede-on-reproduced-failure.md) | Counter-evidence gate + adapt — demote/supersede on reproduced failure | open | high | 0027 | ADR-0013 |
