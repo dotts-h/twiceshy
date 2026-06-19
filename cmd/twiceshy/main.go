@@ -784,10 +784,16 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 		}).WriteJSON(out); werr != nil {
 			return werr
 		}
+		if err == nil {
+			notify.Heartbeat(ctx, getenv("TWICESHY_HEARTBEAT_URL"), runLog)
+		}
 		return err
 	}
 	_, _ = fmt.Fprintf(out, "promote: promoted %d, held %d (attestation/judge declined), ineligible %d\n",
 		st.promoted, st.held, st.ineligible)
+	if err == nil {
+		notify.Heartbeat(ctx, getenv("TWICESHY_HEARTBEAT_URL"), runLog)
+	}
 	return err
 }
 
@@ -1005,9 +1011,15 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 		}).WriteJSON(out); werr != nil {
 			return werr
 		}
+		if err == nil {
+			notify.Heartbeat(ctx, getenv("TWICESHY_HEARTBEAT_URL"), runLog)
+		}
 		return err
 	}
 	_, _ = fmt.Fprintf(out, "adapt: demoted %d, disputed %d, held %d, orphan %d\n", st.demoted, st.disputed, st.held, st.orphan)
+	if err == nil {
+		notify.Heartbeat(ctx, getenv("TWICESHY_HEARTBEAT_URL"), runLog)
+	}
 	return err
 }
 
