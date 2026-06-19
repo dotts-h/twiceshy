@@ -1956,6 +1956,7 @@ func runJudgeEval(ctx context.Context, args []string, out io.Writer, getenv func
 	model := fs.String("model", "gpt-oss:20b", "judge model id (the shim's upstream model)")
 	drafterModel := fs.String("drafter-model", "", "drafter model for the anti-monoculture check; empty skips it")
 	repeat := fs.Int("repeat", 1, "samples per case; the majority decision is scored (smooths boundary cases)")
+	confirm := fs.Bool("confirm", false, "adaptive sampling: sample every case -repeat times, then re-sample only the boundary (flipped) cases up to 3×-repeat — same headline at ~3× fewer judge calls (#0057)")
 	timeout := fs.Int("timeout", 90, "per-call HTTP timeout in seconds (raise for think=true)")
 	configs := fs.String("configs", "all", "comma list of configs to run, or all: "+configNames())
 	asJSON := fs.Bool("json", false, "emit the full report as JSON")
@@ -1986,9 +1987,18 @@ func runJudgeEval(ctx context.Context, args []string, out io.Writer, getenv func
 			return fmt.Errorf("configuring judge for %s: %w", cf.name, err)
 		}
 		if !*asJSON {
-			_, _ = fmt.Fprintf(out, "running %s (%d cases × %d) …\n", cf.name, len(cases), *repeat)
+			if *confirm {
+				_, _ = fmt.Fprintf(out, "running %s (%d cases × %d confirm, up to %d) …\n", cf.name, len(cases), *repeat, 3*(*repeat))
+			} else {
+				_, _ = fmt.Fprintf(out, "running %s (%d cases × %d) …\n", cf.name, len(cases), *repeat)
+			}
 		}
-		rep, err := judgeeval.Run(ctx, j, cases, *repeat)
+		var rep judgeeval.Result
+		if *confirm {
+			rep, err = judgeeval.RunConfirm(ctx, j, cases, *repeat, 3*(*repeat))
+		} else {
+			rep, err = judgeeval.Run(ctx, j, cases, *repeat)
+		}
 		if err != nil {
 			return fmt.Errorf("running %s: %w", cf.name, err)
 		}
@@ -2016,6 +2026,12 @@ func runJudgeEval(ctx context.Context, args []string, out io.Writer, getenv func
 	}
 
 	_, _ = fmt.Fprintf(out, "\njudge-eval: %d gold cases, repeat=%d, model=%s\n", len(cases), *repeat, *model)
+	if *confirm {
+		uniform := 3 * (*repeat) * len(cases)
+		for _, nr := range results {
+			_, _ = fmt.Fprintf(out, "  %s: %d judge calls (confirm) vs %d uniform\n", nr.Name, nr.Result.JudgeCalls, uniform)
+		}
+	}
 	_, _ = fmt.Fprintf(out, "%-16s %12s %12s %8s %9s  %s %6s\n", "config", "false-appr", "false-rej", "errors", "accuracy", "check-recall", "flips")
 	for i, nr := range results {
 		r := nr.Result
