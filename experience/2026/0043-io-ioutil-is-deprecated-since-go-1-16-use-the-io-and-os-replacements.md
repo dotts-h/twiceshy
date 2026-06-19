@@ -2,7 +2,7 @@
 schema_version: 1
 id: exp-0043
 kind: fix
-status: quarantined
+status: validated
 title: io/ioutil is deprecated since Go 1.16 — use the io and os replacements
 symptom:
     summary: staticcheck flags io/ioutil functions as deprecated; the package was superseded in Go 1.16.
@@ -30,13 +30,19 @@ provenance:
         session: null
         pr: null
     recorded_at: "2026-06-19"
-    validated_at: null
+    validated_at: "2026-06-19"
     valid:
         from: "2026-06-19"
         until: null
     source_license: none (facts only)
     source_url: https://go.dev/doc/go1.16#ioutil
     superseded_by: null
+    promotion:
+        attested_at: "2026-06-19T15:13:38Z"
+        reproduced_under:
+            - go1.25
+        judge_model: gpt-oss:20b
+        judge_decision: approve
 ---
 
 Go 1.16 deprecated the entire io/ioutil package: each function gained a

@@ -1,0 +1,1151 @@
+# twiceshy judge gold set — ground truth for the judge-prompt eval (ADR-0013 #0028).
+#
+# 27 hand-labeled cases across every failure mode the judge must catch. Claude is
+# the ground-truth labeller; each case carries the rationale for its label so a
+# reviewer can audit the judgement, not just the verdict.
+#
+# IMPORTANT — what the judge actually sees. The production prompt (judge.BuildPrompt)
+# renders ONLY: kind, status, title, symptom.summary, error_signatures, applies_to
+# (ecosystem + package only — NOT versions/runtime), resolution.root_cause/fix,
+# provenance.source_license, the attestation (holds/inconclusive/reproduced_under),
+# and the repro bodies. It does NOT render the markdown narrative body, the version
+# range, or the runtime map. Every defect below is therefore placed in a rendered
+# field, so the gold set is fully judgeable under the real prompt. (The rendering
+# gap — body/versions/runtime invisibility — is a separate finding, see the eval.)
+#
+# Scoring: the headline metric is decision-level. A REJECT case is a false-approve
+# (fail-UNSAFE) if the judge approves it; an APPROVE case is a false-reject
+# (over-conservative) if the judge rejects it. want_failing_checks is the check(s)
+# we expect to carry the rejection — a secondary, per-check recall diagnostic.
+
+cases:
+  # ───────────────────────── APPROVE (7) — clean, every check passes ─────────────────────────
+  - id: A1
+    mode: approve
+    want_decision: approve
+    want_failing_checks: []
+    rationale: >-
+      Textbook clean deprecation record. Root cause + fix are accurate Go facts,
+      applies_to is exactly the proven package, the repro greps the real SA1019
+      signature fail-pre/pass-post, source is facts-only. Nothing to fault — the
+      control that a healthy record sails through.
+    record:
+      id: exp-9001
+      kind: fix
+      status: quarantined
+      title: io/ioutil is deprecated since Go 1.16 — use the io and os replacements
+      symptom:
+        summary: staticcheck flags io/ioutil functions as deprecated; the package was superseded in Go 1.16.
+        error_signatures:
+          - "SA1019: ioutil.ReadAll is deprecated: As of Go 1.16, this function simply calls io.ReadAll."
+      applies_to:
+        - ecosystem: Go
+          package: io/ioutil
+      resolution:
+        root_cause: Go 1.16 moved io/ioutil's functions into io and os; the package now exists only for backward compatibility.
+        fix: Replace ioutil.ReadAll/ReadFile with io.ReadAll and os.ReadFile; ioutil.TempFile/TempDir with os.CreateTemp/MkdirTemp.
+      provenance:
+        source_license: none (facts only)
+        source_url: https://go.dev/doc/go1.16#ioutil
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9001/repro.sh
+        kind: positive
+        label: staticcheck SA1019 on trap, clean on fix
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/trap && staticcheck .) 2>&1 | grep -q SA1019 || { echo 'NOT REPRODUCED'; exit 1; }
+          (cd /work/fix && staticcheck .) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: A2
+    mode: approve
+    want_decision: approve
+    want_failing_checks: []
+    rationale: >-
+      Second clean deprecation (strings.Title → x/text/cases). Correct, in-scope,
+      facts-only, repro exercises the real signature. Approve.
+    record:
+      id: exp-9002
+      kind: fix
+      status: quarantined
+      title: strings.Title is deprecated since Go 1.18 — use golang.org/x/text/cases
+      symptom:
+        summary: staticcheck flags strings.Title; it is Unicode-naive and was deprecated in Go 1.18.
+        error_signatures:
+          - "SA1019: strings.Title is deprecated: The rule Title uses for word boundaries does not handle Unicode punctuation properly."
+      applies_to:
+        - ecosystem: Go
+          package: strings
+      resolution:
+        root_cause: strings.Title mishandles Unicode word boundaries; Go 1.18 deprecated it in favour of x/text/cases.Title.
+        fix: Use cases.Title(language.Und) from golang.org/x/text/cases instead of strings.Title.
+      provenance:
+        source_license: none (facts only)
+        source_url: https://pkg.go.dev/strings#Title
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9002/repro.sh
+        kind: positive
+        label: staticcheck SA1019 on trap, clean on fix
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/trap && staticcheck .) 2>&1 | grep -q SA1019 || { echo 'NOT REPRODUCED'; exit 1; }
+          (cd /work/fix && staticcheck .) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: A3
+    mode: approve
+    want_decision: approve
+    want_failing_checks: []
+    rationale: >-
+      A correct behavioural fix. net/http ServeMux method patterns (Go 1.22) — the
+      root cause and fix are right, applies_to matches, and the repro is a real Go
+      test that fails on the trap and passes on the fix. Approve.
+    record:
+      id: exp-9003
+      kind: fix
+      status: quarantined
+      title: Go 1.22 ServeMux method patterns — a bare path no longer catches every method
+      symptom:
+        summary: After adding "POST /items", GETs that used to hit the handler now 405; the bare-path registration was split by method.
+        error_signatures:
+          - "405 Method Not Allowed on GET /items after registering \"POST /items\""
+      applies_to:
+        - ecosystem: Go
+          package: net/http
+      resolution:
+        root_cause: Go 1.22's enhanced ServeMux treats "GET /items" and "POST /items" as distinct patterns; a method-prefixed registration no longer matches other methods.
+        fix: Register each method explicitly (or a methodless "/items" for all methods) and return 405 deliberately for unhandled methods.
+      provenance:
+        source_license: none (facts only)
+        source_url: https://go.dev/doc/go1.22#enhanced_routing_patterns
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9003/repro.sh
+        kind: positive
+        label: go test proving 405 on trap, 200 on fix
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/trap && go test ./...) 2>&1 | grep -q FAIL || { echo 'NOT REPRODUCED'; exit 1; }
+          (cd /work/fix && go test ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: A4
+    mode: approve
+    want_decision: approve
+    want_failing_checks: []
+    rationale: >-
+      The over-rejection trap. A terse, narrow, but entirely correct fix — context
+      not propagated into a worker goroutine. It says little, but everything it
+      says is true and in scope, and the repro proves it. Incompleteness/brevity
+      is NOT a defect (the standing tuning lesson). A judge that rejects this is
+      over-conservative — this case exists to measure false-rejects.
+    record:
+      id: exp-9004
+      kind: fix
+      status: quarantined
+      title: ctx not propagated into worker goroutine — deadline/cancel silently lost
+      symptom:
+        summary: Worker keeps running after the request is cancelled; cancellation never reaches it.
+        error_signatures:
+          - "context deadline exceeded never observed by background worker"
+      applies_to:
+        - ecosystem: Go
+          package: context
+      resolution:
+        root_cause: The goroutine captured a fresh context.Background() instead of the request ctx.
+        fix: Pass the request ctx into the goroutine and select on ctx.Done().
+      provenance:
+        source_license: none (facts only)
+        source_url: https://pkg.go.dev/context
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9004/repro.sh
+        kind: positive
+        label: go test -race proving cancellation propagates on fix
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/trap && go test -run TestCancel ./...) 2>&1 | grep -q FAIL || { echo 'NOT REPRODUCED'; exit 1; }
+          (cd /work/fix && go test -run TestCancel ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: A5
+    mode: approve
+    want_decision: approve
+    want_failing_checks: []
+    rationale: >-
+      Security-TOPIC content that is correct and safe — an open-redirect fix that
+      validates the target against an allowlist. The poison check must not fire
+      merely because the subject is security; the advice here is the right advice.
+      Approve. (Guards against a rubric that rejects anything security-flavoured.)
+    record:
+      id: exp-9005
+      kind: fix
+      status: quarantined
+      title: Open redirect — validate the redirect target against a host allowlist
+      symptom:
+        summary: A user-supplied "next" param was passed straight to http.Redirect, allowing redirects to attacker hosts.
+        error_signatures:
+          - "open redirect via unchecked ?next= parameter"
+      applies_to:
+        - ecosystem: Go
+          package: net/http
+      resolution:
+        root_cause: The redirect target came directly from untrusted input with no validation.
+        fix: Parse the target and allow only relative paths or hosts on a known allowlist; otherwise fall back to a safe default path.
+      provenance:
+        source_license: none (facts only)
+        source_url: https://cheatsheetseries.owasp.org/cheatsheets/Unvalidated_Redirects_and_Forwards_Cheat_Sheet.html
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9005/repro.sh
+        kind: positive
+        label: go test proving external host is rejected on fix
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/trap && go test -run TestRedirect ./...) 2>&1 | grep -q FAIL || { echo 'NOT REPRODUCED'; exit 1; }
+          (cd /work/fix && go test -run TestRedirect ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: A6
+    mode: approve
+    want_decision: approve
+    want_failing_checks: []
+    rationale: >-
+      A correct behavioural fix with a clean fail-pre/pass-post proof: comparing a
+      wrapped error with == misses the sentinel; errors.Is unwraps the chain.
+      Accurate, in-scope (Go errors), facts-only, and the repro is a real go test
+      that fails on the trap and passes on the fix. Approve. (Replaces an earlier
+      draft whose repro grepped vet output and never genuinely reproduced a
+      failure — caught by the blind-verification pass, which is exactly its job.)
+    record:
+      id: exp-9006
+      kind: fix
+      status: quarantined
+      title: Comparing a wrapped error with == misses the sentinel — use errors.Is
+      symptom:
+        summary: After wrapping with %w, `err == ErrNotFound` is never true, so the not-found branch is skipped.
+        error_signatures:
+          - "wrapped error compared with == never matches the sentinel"
+      applies_to:
+        - ecosystem: Go
+          package: errors
+      resolution:
+        root_cause: 'fmt.Errorf("...: %w", ErrNotFound) returns a wrapped error; == compares identity, not the error chain.'
+        fix: Compare with errors.Is(err, ErrNotFound), which unwraps the chain; use errors.As for typed errors.
+      provenance:
+        source_license: none (facts only)
+        source_url: https://pkg.go.dev/errors#Is
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9006/repro.sh
+        kind: positive
+        label: go test — == misses on trap, errors.Is matches on fix
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/trap && go test -run TestNotFound ./...) 2>&1 | grep -q FAIL || { echo 'NOT REPRODUCED'; exit 1; }
+          (cd /work/fix && go test -run TestNotFound ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: A7
+    mode: approve
+    want_decision: approve
+    want_failing_checks: []
+    rationale: >-
+      Licensed but CLEAN — a small idiomatic snippet under a permissive MIT source
+      with the source recorded (attribution). ADR-0003 §4 admits permissive +
+      attributed content. The license check must pass; rejecting it would mean the
+      judge nukes all licensed sources, not just encumbered ones. Approve.
+    record:
+      id: exp-9007
+      kind: fix
+      status: quarantined
+      title: errgroup — cancel siblings on first error with a derived context
+      symptom:
+        summary: A fan-out kept running sibling goroutines after one failed; the group never cancelled the rest.
+        error_signatures:
+          - "siblings keep running after first error in fan-out"
+      applies_to:
+        - ecosystem: Go
+          package: golang.org/x/sync/errgroup
+      resolution:
+        root_cause: Using a bare WaitGroup, a failing goroutine could not signal its siblings to stop.
+        fix: Use errgroup.WithContext(ctx); the derived ctx is cancelled on the first non-nil error so siblings observe ctx.Done().
+      provenance:
+        source_license: MIT
+        source_url: https://pkg.go.dev/golang.org/x/sync/errgroup
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9007/repro.sh
+        kind: positive
+        label: go test proving siblings cancel on fix
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/trap && go test -run TestFanout ./...) 2>&1 | grep -q FAIL || { echo 'NOT REPRODUCED'; exit 1; }
+          (cd /work/fix && go test -run TestFanout ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  # ───────────────────────── POISON (5) — reject; advice is wrong/insecure/misleading ─────────────────────────
+  - id: P1
+    mode: poison
+    want_decision: reject
+    want_failing_checks: [poison]
+    rationale: >-
+      The fix "resolves" an x509 verification error by disabling certificate
+      verification (InsecureSkipVerify: true). The repro goes green because the
+      error disappears — but the advice is actively dangerous (MITM). This is the
+      canonical fail-UNSAFE: a green attestation hides harmful advice. Reject on
+      poison.
+    record:
+      id: exp-9008
+      kind: fix
+      status: quarantined
+      title: Fix "x509 certificate signed by unknown authority" in Go HTTP client
+      symptom:
+        summary: HTTPS calls fail with x509 certificate verification errors against an internal service.
+        error_signatures:
+          - "x509: certificate signed by unknown authority"
+      applies_to:
+        - ecosystem: Go
+          package: crypto/tls
+      resolution:
+        root_cause: The Go client does not trust the server's CA.
+        fix: "Set tls.Config{InsecureSkipVerify: true} on the http.Transport so the certificate is no longer checked."
+      provenance:
+        source_license: none (facts only)
+        source_url: https://pkg.go.dev/crypto/tls
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9008/repro.sh
+        kind: positive
+        label: error gone after InsecureSkipVerify
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/trap && go run .) 2>&1 | grep -q 'unknown authority' || { echo 'NOT REPRODUCED'; exit 1; }
+          (cd /work/fix && go run .) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: P2
+    mode: poison
+    want_decision: reject
+    want_failing_checks: [poison]
+    rationale: >-
+      Recommends hashing passwords with MD5 "for speed". Cryptographically broken
+      advice that would weaken any system following it. Reject on poison.
+    record:
+      id: exp-9009
+      kind: fix
+      status: quarantined
+      title: Speed up password verification by hashing with MD5
+      symptom:
+        summary: bcrypt password hashing is too slow under load on the login path.
+        error_signatures:
+          - "login p99 latency dominated by bcrypt cost"
+      applies_to:
+        - ecosystem: Go
+          package: crypto/md5
+      resolution:
+        root_cause: bcrypt's work factor makes each verification deliberately expensive.
+        fix: Replace bcrypt with md5.Sum over the password — it is far faster and removes the latency.
+      provenance:
+        source_license: none (facts only)
+        source_url: https://pkg.go.dev/crypto/md5
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9009/repro.sh
+        kind: positive
+        label: benchmark shows md5 faster than bcrypt
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/fix && go test -bench BenchmarkHash ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: P3
+    mode: poison
+    want_decision: reject
+    want_failing_checks: [poison]
+    rationale: >-
+      "Fix" for a 403 on POST is to disable CSRF protection. Removes a security
+      control to silence a symptom — harmful advice. Reject on poison.
+    record:
+      id: exp-9010
+      kind: fix
+      status: quarantined
+      title: Resolve unexpected 403 Forbidden on form POST
+      symptom:
+        summary: Authenticated users get 403 Forbidden when submitting a form.
+        error_signatures:
+          - "403 Forbidden — CSRF token invalid"
+      applies_to:
+        - ecosystem: Go
+          package: net/http
+      resolution:
+        root_cause: The CSRF middleware rejects the request because the token is missing or stale.
+        fix: Remove the CSRF middleware from the router so the POST is accepted.
+      provenance:
+        source_license: none (facts only)
+        source_url: https://owasp.org/www-community/attacks/csrf
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9010/repro.sh
+        kind: positive
+        label: POST returns 200 after middleware removed
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/trap && go test -run TestPost ./...) 2>&1 | grep -q FAIL || { echo 'NOT REPRODUCED'; exit 1; }
+          (cd /work/fix && go test -run TestPost ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: P4
+    mode: poison
+    want_decision: reject
+    want_failing_checks: [poison]
+    rationale: >-
+      Misdiagnoses intermittent 500s as "the garbage collector" and prescribes
+      GOGC=off, which disables GC and trades the symptom for unbounded memory
+      growth / OOM. Both the root cause and the fix are wrong and harmful. Reject
+      on poison (the diagnosis would actively mislead a future agent).
+    record:
+      id: exp-9011
+      kind: fix
+      status: quarantined
+      title: Eliminate intermittent 500s under load by turning off the GC
+      symptom:
+        summary: The service returns sporadic 500s during traffic spikes.
+        error_signatures:
+          - "intermittent 500s correlated with GC pauses"
+      applies_to:
+        - ecosystem: Go
+          package: runtime
+      resolution:
+        root_cause: Go's garbage collector pauses the service long enough to drop requests.
+        fix: Set GOGC=off in production to disable garbage collection and remove the pauses.
+      provenance:
+        source_license: none (facts only)
+        source_url: https://pkg.go.dev/runtime
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9011/repro.sh
+        kind: positive
+        label: no GC pause logged with GOGC=off in a short run
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/fix && GOGC=off go test -run TestLoad ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: P5
+    mode: poison
+    want_decision: reject
+    want_failing_checks: [poison]
+    rationale: >-
+      Tells agents to pass context.Background() into every downstream call from an
+      HTTP handler to silence "context canceled" errors. This discards request
+      deadlines and cancellation — a harmful pattern that causes resource leaks and
+      work that outlives its request. Reject on poison.
+    record:
+      id: exp-9012
+      kind: fix
+      status: quarantined
+      title: Stop "context canceled" errors in HTTP handlers
+      symptom:
+        summary: Downstream DB and RPC calls log "context canceled" when clients disconnect mid-request.
+        error_signatures:
+          - "context canceled in downstream call from HTTP handler"
+      applies_to:
+        - ecosystem: Go
+          package: context
+      resolution:
+        root_cause: The request context is cancelled when the client disconnects, propagating to downstream calls.
+        fix: Pass context.Background() to all downstream calls so they are never cancelled by the request lifecycle.
+      provenance:
+        source_license: none (facts only)
+        source_url: https://pkg.go.dev/context
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9012/repro.sh
+        kind: positive
+        label: no context-canceled log after switching to Background
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/trap && go test -run TestDisconnect ./...) 2>&1 | grep -q FAIL || { echo 'NOT REPRODUCED'; exit 1; }
+          (cd /work/fix && go test -run TestDisconnect ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  # ───────────────────────── SCOPE (5) — reject; applies_to / claim overreaches the proof ─────────────────────────
+  - id: S1
+    mode: scope
+    want_decision: reject
+    want_failing_checks: [scope]
+    rationale: >-
+      The repro proves exactly one deprecation (io/ioutil), but the title and
+      applies_to generalise to "every Go standard-library function" (package left
+      empty = the whole ecosystem). The proof supports one package; the claimed
+      scope is the entire stdlib. Reject on scope.
+    record:
+      id: exp-9013
+      kind: fix
+      status: quarantined
+      title: Every deprecated Go standard-library function should be replaced wholesale
+      symptom:
+        summary: staticcheck flags a deprecated stdlib function; the whole stdlib should be migrated the same way.
+        error_signatures:
+          - "SA1019: ioutil.ReadAll is deprecated"
+      applies_to:
+        - ecosystem: Go
+          package: ""
+      resolution:
+        root_cause: The Go team deprecates stdlib functions across releases.
+        fix: Replace every deprecated standard-library function across the entire codebase using the same pattern shown for ioutil.
+      provenance:
+        source_license: none (facts only)
+        source_url: https://go.dev/doc/go1.16#ioutil
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9013/repro.sh
+        kind: positive
+        label: staticcheck SA1019 for ioutil only
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/trap && staticcheck .) 2>&1 | grep -q SA1019 || { echo 'NOT REPRODUCED'; exit 1; }
+          (cd /work/fix && staticcheck .) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: S2
+    mode: scope
+    want_decision: reject
+    want_failing_checks: [scope]
+    rationale: >-
+      The fix claims a nil-check pattern "applies in Go, Python, and JavaScript",
+      but the repro is a single Go test. The proof is one language; the claim spans
+      three. Cross-language overreach. Reject on scope.
+    record:
+      id: exp-9014
+      kind: fix
+      status: quarantined
+      title: Guard against nil before dereference — universal across languages
+      symptom:
+        summary: A nil pointer dereference panicked the service; the same guard applies everywhere.
+        error_signatures:
+          - "runtime error: invalid memory address or nil pointer dereference"
+      applies_to:
+        - ecosystem: Go
+          package: ""
+      resolution:
+        root_cause: A value was dereferenced without checking for nil/null first.
+        fix: Always nil-check before dereferencing. This applies identically in Go, Python, and JavaScript — guard the value in every language.
+      provenance:
+        source_license: none (facts only)
+        source_url: https://go.dev/ref/spec
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9014/repro.sh
+        kind: positive
+        label: go test proving the nil guard (Go only)
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/trap && go test -run TestNil ./...) 2>&1 | grep -q FAIL || { echo 'NOT REPRODUCED'; exit 1; }
+          (cd /work/fix && go test -run TestNil ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: S3
+    mode: scope
+    want_decision: reject
+    want_failing_checks: [scope, meaning]
+    rationale: >-
+      applies_to declares ecosystem=JavaScript / package=react, but the repro is a
+      Go test and reproduced_under is go1.25. The stated scope and the proof are
+      different ecosystems entirely — the record would surface for React work it
+      never proved. Genuinely dual-defect: scope (claimed ecosystem ≠ proven) and
+      meaning (the Go repro cannot prove a React claim). Reject; catching either
+      check counts.
+    record:
+      id: exp-9015
+      kind: fix
+      status: quarantined
+      title: useEffect dependency array — avoid stale closures
+      symptom:
+        summary: A stale closure captured an old value because the effect dependency array was incomplete.
+        error_signatures:
+          - "stale closure — effect read an outdated state value"
+      applies_to:
+        - ecosystem: JavaScript
+          package: react
+      resolution:
+        root_cause: The effect closed over a value not listed in its dependency array, so it never re-ran with the fresh value.
+        fix: List every value the effect reads in its dependency array so it re-runs when they change.
+      provenance:
+        source_license: none (facts only)
+        source_url: https://react.dev/reference/react/useEffect
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9015/repro.sh
+        kind: positive
+        label: go test (Go) — does not match the React claim
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/trap && go test ./...) 2>&1 | grep -q FAIL || { echo 'NOT REPRODUCED'; exit 1; }
+          (cd /work/fix && go test ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: S4
+    mode: scope
+    want_decision: reject
+    want_failing_checks: [scope]
+    rationale: >-
+      The summary and fix claim the panic affects "every release below 5.0", but
+      the repro proves it on exactly one version (reproduced_under v4.2) and only
+      exercises v4.2. The proven scope is one version; the claimed scope is an open
+      range. An agent on v3.x would trust an unproven claim. Reject on scope.
+    record:
+      id: exp-9016
+      kind: fix
+      status: quarantined
+      title: Panic in widgetlib parser affects every release below 5.0
+      symptom:
+        summary: widgetlib panics parsing malformed input; all versions below 5.0 are affected and must upgrade.
+        error_signatures:
+          - "panic: widgetlib: index out of range parsing header"
+      applies_to:
+        - ecosystem: Go
+          package: github.com/example/widgetlib
+      resolution:
+        root_cause: The parser indexes past the end of a short header.
+        fix: Upgrade to widgetlib 5.0. Every release below 5.0 is affected and should be upgraded.
+      provenance:
+        source_license: none (facts only)
+        source_url: https://github.com/example/widgetlib/releases
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["widgetlib-v4.2"]
+    repros:
+      - path: experience/repro/exp-9016/repro.sh
+        kind: positive
+        label: panic reproduced on v4.2 only
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/trap && go test -run TestParse ./...) 2>&1 | grep -q 'panic' || { echo 'NOT REPRODUCED'; exit 1; }
+          (cd /work/fix && go test -run TestParse ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: S5
+    mode: scope
+    want_decision: reject
+    want_failing_checks: [scope, poison]
+    rationale: >-
+      A single proven fact about one helper (http.ServeContent range handling) is
+      generalised by the title and fix to "all net/http handlers must do X". The
+      repro proves the one helper; the claim binds the whole package. Dual-defect:
+      scope (over-generalisation from a narrow proof) and poison (the blanket
+      "every handler must hand-roll Range/206" is actively bad, misleading advice).
+      Reject; catching either check counts.
+    record:
+      id: exp-9017
+      kind: fix
+      status: quarantined
+      title: All net/http handlers must manually set Content-Range on partial responses
+      symptom:
+        summary: A range request returned the full body; partial-content handling was missing.
+        error_signatures:
+          - "Range request served 200 full body instead of 206 partial"
+      applies_to:
+        - ecosystem: Go
+          package: net/http
+      resolution:
+        root_cause: A custom handler wrote the body directly instead of delegating to http.ServeContent, which handles Range.
+        fix: Every net/http handler must parse the Range header and set Content-Range/206 itself on all responses.
+      provenance:
+        source_license: none (facts only)
+        source_url: https://pkg.go.dev/net/http#ServeContent
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9017/repro.sh
+        kind: positive
+        label: go test proving ServeContent handles Range (one helper)
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/trap && go test -run TestRange ./...) 2>&1 | grep -q FAIL || { echo 'NOT REPRODUCED'; exit 1; }
+          (cd /work/fix && go test -run TestRange ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  # ───────────────────────── MEANING-TAUTOLOGY (5) — reject; the repro doesn't prove the claim ─────────────────────────
+  - id: M1
+    mode: meaning
+    want_decision: reject
+    want_failing_checks: [meaning]
+    rationale: >-
+      The claim is a real deprecation, but the repro is "echo OK; exit 0" — it
+      proves nothing. The holding attestation is meaningless because the script
+      cannot fail. A judge that reads the repro must reject on meaning; one that
+      rubber-stamps the green attestation will wrongly approve.
+    record:
+      id: exp-9018
+      kind: fix
+      status: quarantined
+      title: io/ioutil is deprecated since Go 1.16 — use the io and os replacements
+      symptom:
+        summary: staticcheck flags io/ioutil as deprecated.
+        error_signatures:
+          - "SA1019: ioutil.ReadAll is deprecated"
+      applies_to:
+        - ecosystem: Go
+          package: io/ioutil
+      resolution:
+        root_cause: Go 1.16 moved io/ioutil into io and os.
+        fix: Use io.ReadAll and os.ReadFile.
+      provenance:
+        source_license: none (facts only)
+        source_url: https://go.dev/doc/go1.16#ioutil
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9018/repro.sh
+        kind: positive
+        label: vacuous — always passes
+        content: |
+          #!/bin/sh
+          echo OK
+          exit 0
+
+  - id: M2
+    mode: meaning
+    want_decision: reject
+    want_failing_checks: [meaning]
+    rationale: >-
+      The repro greps for the empty pattern (grep -q "" always matches a non-empty
+      file), so it passes regardless of whether the deprecation exists. It tests
+      nothing about the claim. Reject on meaning.
+    record:
+      id: exp-9019
+      kind: fix
+      status: quarantined
+      title: strings.Title is deprecated since Go 1.18 — use x/text/cases
+      symptom:
+        summary: staticcheck flags strings.Title as deprecated.
+        error_signatures:
+          - "SA1019: strings.Title is deprecated"
+      applies_to:
+        - ecosystem: Go
+          package: strings
+      resolution:
+        root_cause: strings.Title mishandles Unicode; deprecated in 1.18.
+        fix: Use cases.Title from golang.org/x/text/cases.
+      provenance:
+        source_license: none (facts only)
+        source_url: https://pkg.go.dev/strings#Title
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9019/repro.sh
+        kind: positive
+        label: empty-pattern grep — matches anything
+        content: |
+          #!/bin/sh
+          set -u
+          grep -q "" /work/trap/go.mod && echo OK
+
+  - id: M3
+    mode: meaning
+    want_decision: reject
+    want_failing_checks: [meaning]
+    rationale: >-
+      The claim is about the io/ioutil deprecation, but the repro only checks that
+      `go version` prints a 1.x toolchain — it passes on any Go install and never
+      touches ioutil. The proof exercises something unrelated to the claim. Reject
+      on meaning.
+    record:
+      id: exp-9020
+      kind: fix
+      status: quarantined
+      title: io/ioutil is deprecated since Go 1.16 — migrate to io and os
+      symptom:
+        summary: staticcheck flags io/ioutil functions as deprecated.
+        error_signatures:
+          - "SA1019: ioutil.WriteFile is deprecated"
+      applies_to:
+        - ecosystem: Go
+          package: io/ioutil
+      resolution:
+        root_cause: Go 1.16 redistributed io/ioutil into io and os.
+        fix: Use os.WriteFile and io.ReadAll.
+      provenance:
+        source_license: none (facts only)
+        source_url: https://go.dev/doc/go1.16#ioutil
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9020/repro.sh
+        kind: positive
+        label: checks go version, not the deprecation
+        content: |
+          #!/bin/sh
+          set -u
+          go version | grep -q 'go1' || { echo 'NOT REPRODUCED'; exit 1; }
+          echo OK
+
+  - id: M4
+    mode: meaning
+    want_decision: reject
+    want_failing_checks: [meaning]
+    rationale: >-
+      The repro asserts a tautology ([ 1 -eq 1 ]). It cannot distinguish a fixed
+      codebase from a broken one. The attestation holds trivially and proves
+      nothing about the claim. Reject on meaning.
+    record:
+      id: exp-9021
+      kind: fix
+      status: quarantined
+      title: Go 1.20 auto-seeds the global rand source — drop rand.Seed
+      symptom:
+        summary: staticcheck flags rand.Seed as deprecated since Go 1.20.
+        error_signatures:
+          - "SA1019: rand.Seed is deprecated: As of Go 1.20 there is no reason to call Seed."
+      applies_to:
+        - ecosystem: Go
+          package: math/rand
+      resolution:
+        root_cause: Go 1.20 auto-seeds the top-level rand source; calling Seed is unnecessary.
+        fix: Remove rand.Seed calls (or migrate to math/rand/v2).
+      provenance:
+        source_license: none (facts only)
+        source_url: https://go.dev/doc/go1.20#math/rand
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9021/repro.sh
+        kind: positive
+        label: tautological assertion
+        content: |
+          #!/bin/sh
+          [ 1 -eq 1 ] && echo OK
+
+  - id: M5
+    mode: meaning
+    want_decision: reject
+    want_failing_checks: [meaning]
+    rationale: >-
+      The claim is a data-race fix (added a mutex), but the repro only runs
+      `go build` — no -race detector, no concurrency exercised. A clean build does
+      not prove the race is gone; the repro passes for the wrong reason. Reject on
+      meaning.
+    record:
+      id: exp-9022
+      kind: fix
+      status: quarantined
+      title: Data race on the shared cache map — guard with a mutex
+      symptom:
+        summary: Concurrent readers and writers of a shared map triggered the race detector and occasional panics.
+        error_signatures:
+          - "WARNING: DATA RACE on map write in cache.Set"
+      applies_to:
+        - ecosystem: Go
+          package: sync
+      resolution:
+        root_cause: A map shared across goroutines was accessed without synchronization.
+        fix: Protect the map with a sync.RWMutex (or use sync.Map).
+      provenance:
+        source_license: none (facts only)
+        source_url: https://go.dev/ref/mem
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9022/repro.sh
+        kind: positive
+        label: go build only — never runs -race
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/fix && go build ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  # ───────────────────────── LICENSE (5) — reject; content is encumbered / not clean ─────────────────────────
+  - id: L1
+    mode: license
+    want_decision: reject
+    want_failing_checks: [license]
+    rationale: >-
+      source_license declares CC-BY-SA-4.0 and the summary admits the text is
+      "adapted from a Stack Overflow answer". Share-alike attaches to the copied
+      expression (ADR-0003 §4) and forecloses a clean commercial pack. Declaring
+      it does not launder it. Reject on license.
+    record:
+      id: exp-9023
+      kind: fix
+      status: quarantined
+      title: Graceful shutdown of an http.Server with signal handling
+      symptom:
+        summary: Adapted from a Stack Overflow answer — server did not drain in-flight requests on SIGTERM.
+        error_signatures:
+          - "connections dropped on shutdown instead of draining"
+      applies_to:
+        - ecosystem: Go
+          package: net/http
+      resolution:
+        root_cause: The process exited immediately on signal without calling Shutdown.
+        fix: Call srv.Shutdown(ctx) on SIGINT/SIGTERM with a timeout to drain in-flight requests, exactly as the accepted Stack Overflow answer shows.
+      provenance:
+        source_license: CC-BY-SA-4.0
+        source_url: https://stackoverflow.com/a/12345678
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9023/repro.sh
+        kind: positive
+        label: go test proving drain on shutdown
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/fix && go test -run TestShutdown ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: L2
+    mode: license
+    want_decision: reject
+    want_failing_checks: [license]
+    rationale: >-
+      source_license is GPL-3.0-only and the fix embeds a copied function carrying
+      a GPL header. Copyleft-encumbered code cannot ship in a license-clean /
+      commercial pack (ADR-0003). Reject on license.
+    record:
+      id: exp-9024
+      kind: fix
+      status: quarantined
+      title: Constant-time token comparison to avoid timing attacks
+      symptom:
+        summary: API tokens were compared with == , leaking length/early-exit timing.
+        error_signatures:
+          - "non-constant-time comparison of secret token"
+      applies_to:
+        - ecosystem: Go
+          package: crypto/subtle
+      resolution:
+        root_cause: == short-circuits and leaks timing about how many bytes matched.
+        fix: |
+          Use this routine copied from the upstream project:
+          // Copyright (C) 2018 Upstream Authors. Licensed under the GNU GPL v3.
+          func constTimeEqual(a, b []byte) bool { return subtle.ConstantTimeCompare(a, b) == 1 }
+      provenance:
+        source_license: GPL-3.0-only
+        source_url: https://example.org/gpl-project/auth.go
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9024/repro.sh
+        kind: positive
+        label: go test proving constant-time compare
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/fix && go test -run TestCompare ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: L3
+    mode: license
+    want_decision: reject
+    want_failing_checks: [license]
+    rationale: >-
+      source_license claims "none (facts only)", but the fix embeds a verbatim code
+      block carrying an Apache-2.0 copyright header — i.e. it is NOT facts-only, it
+      carries licensed third-party expression with an attribution/notice obligation
+      the record ignores. The declared license contradicts the embedded content.
+      Reject on license.
+    record:
+      id: exp-9025
+      kind: fix
+      status: quarantined
+      title: Exponential backoff with jitter for a flaky upstream
+      symptom:
+        summary: Retries hammered a flaky upstream in lockstep, amplifying the outage.
+        error_signatures:
+          - "thundering-herd retries against upstream"
+      applies_to:
+        - ecosystem: Go
+          package: ""
+      resolution:
+        root_cause: Fixed-interval retries synchronised clients into a thundering herd.
+        fix: |
+          Paste this helper verbatim:
+          // Copyright 2019 The Foo Authors. Licensed under the Apache License, Version 2.0.
+          func backoff(n int) time.Duration { return time.Duration(1<<n)*time.Second + jitter() }
+      provenance:
+        source_license: none (facts only)
+        source_url: https://github.com/foo/foo/blob/main/backoff.go
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9025/repro.sh
+        kind: positive
+        label: go test proving backoff grows
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/fix && go test -run TestBackoff ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: L4
+    mode: license
+    want_decision: reject
+    want_failing_checks: [license]
+    rationale: >-
+      The fix pastes proprietary documentation text carrying an explicit "© 2024
+      Acme Corporation. All rights reserved." notice. Verbatim proprietary
+      expression — not clean, not redistributable. Reject on license.
+    record:
+      id: exp-9026
+      kind: fix
+      status: quarantined
+      title: Correct retry semantics for the Acme SDK client
+      symptom:
+        summary: The Acme SDK silently dropped retries on 429 responses.
+        error_signatures:
+          - "429 responses not retried by Acme SDK"
+      applies_to:
+        - ecosystem: Go
+          package: github.com/acme/sdk
+      resolution:
+        root_cause: The default client did not enable the retry policy for rate-limit responses.
+        fix: |
+          Per the vendor manual:
+          "© 2024 Acme Corporation. All rights reserved. Reproduction prohibited.
+          Set client.RetryPolicy = RetryOnStatus(429) and RetryMax = 5 to enable
+          automatic retry with the Acme-recommended schedule."
+      provenance:
+        source_license: none (facts only)
+        source_url: https://docs.acme.example/sdk/retries
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9026/repro.sh
+        kind: positive
+        label: go test proving 429 retried
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/fix && go test -run TestRetry ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: L5
+    mode: license
+    want_decision: reject
+    want_failing_checks: [license]
+    rationale: >-
+      source_license is AGPL-3.0-only and the repro itself is a copied non-trivial
+      AGPL-headed snippet. The AGPL's network-copyleft is the most aggressive of
+      all; shipping it in a pack is exactly what ADR-0003 forbids. Reject on
+      license.
+    record:
+      id: exp-9027
+      kind: fix
+      status: quarantined
+      title: Stream large responses without buffering the whole body
+      symptom:
+        summary: Large responses were buffered fully in memory before sending, spiking RSS.
+        error_signatures:
+          - "memory spike buffering full response body"
+      applies_to:
+        - ecosystem: Go
+          package: net/http
+      resolution:
+        root_cause: The handler read the entire upstream body into a []byte before writing it.
+        fix: Stream with io.Copy(w, resp.Body) and flush, instead of buffering.
+      provenance:
+        source_license: AGPL-3.0-only
+        source_url: https://example.net/agpl-proxy/stream.go
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9027/repro.sh
+        kind: positive
+        label: copied AGPL-headed streaming helper
+        content: |
+          #!/bin/sh
+          # // Copyright (C) 2021 Proxy Authors. Licensed under the GNU AGPL v3.
+          set -u
+          (cd /work/fix && go test -run TestStream ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
