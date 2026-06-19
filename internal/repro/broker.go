@@ -37,7 +37,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log"
+	"io"
+	"log/slog"
+	"os"
 	"path"
 	"sort"
 	"strconv"
@@ -152,6 +154,7 @@ type dockerBroker struct {
 	allowed map[string]bool
 	limits  Limits
 	newID   func() (string, error)
+	logger  *slog.Logger
 }
 
 // Option configures a dockerBroker.
@@ -169,6 +172,16 @@ func withRunner(r commandRunner) Option { return func(b *dockerBroker) { b.runne
 // withIDFunc injects a deterministic id generator (tests only).
 func withIDFunc(f func() (string, error)) Option { return func(b *dockerBroker) { b.newID = f } }
 
+// WithLogger overrides the structured logger (tests capture JSON; prod logs to stderr).
+func WithLogger(l *slog.Logger) Option {
+	return func(b *dockerBroker) {
+		if l == nil {
+			l = slog.New(slog.NewTextHandler(io.Discard, nil))
+		}
+		b.logger = l
+	}
+}
+
 // NewBroker returns a Broker that runs allowed images under gVisor. allowedImages
 // is the hardcoded set of digest-pinned images a job may use; an image outside it
 // is refused. Defaults: runsc runtime, DefaultLimits, crypto-random run ids.
@@ -183,6 +196,7 @@ func NewBroker(allowedImages []string, opts ...Option) Broker {
 		allowed: allowed,
 		limits:  DefaultLimits,
 		newID:   randomID,
+		logger:  slog.New(slog.NewJSONHandler(os.Stderr, nil)),
 	}
 	for _, o := range opts {
 		o(b)
@@ -425,7 +439,12 @@ func (b *dockerBroker) cleanup(id, vol string) {
 	defer cancel()
 	b.removeContainersByLabel(ctx, labelKey+"="+id)
 	if _, err := b.runner.run(ctx, nil, 30*time.Second, "docker", "volume", "rm", "-f", vol); err != nil {
-		log.Printf("repro: WARNING: could not remove volume %s (run %s): %v — reaper will retry", vol, id, err)
+		b.logger.Warn("reaper: volume remove failed",
+			"volume", vol,
+			"run", id,
+			"error", err.Error(),
+			"retry", true,
+		)
 	}
 }
 
@@ -434,12 +453,21 @@ func (b *dockerBroker) cleanup(id, vol string) {
 func (b *dockerBroker) removeContainersByLabel(ctx context.Context, label string) {
 	r, err := b.runner.run(ctx, nil, 30*time.Second, "docker", "ps", "-aq", "--filter", "label="+label)
 	if err != nil {
-		log.Printf("repro: WARNING: could not list containers for %s: %v — reaper will retry", label, err)
+		b.logger.Warn("reaper: list containers failed",
+			"label", label,
+			"error", err.Error(),
+			"retry", true,
+		)
 		return
 	}
 	for _, cid := range strings.Fields(r.stdout) {
 		if _, err := b.runner.run(ctx, nil, 30*time.Second, "docker", "rm", "-f", cid); err != nil {
-			log.Printf("repro: WARNING: could not remove container %s (%s): %v — reaper will retry", cid, label, err)
+			b.logger.Warn("reaper: container remove failed",
+				"container", cid,
+				"label", label,
+				"error", err.Error(),
+				"retry", true,
+			)
 		}
 	}
 }
