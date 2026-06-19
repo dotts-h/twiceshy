@@ -193,20 +193,33 @@ func (r *Revalidator) revalidateOne(ctx context.Context, rec *record.Record, rep
 // runRepro runs a single repro on a single matrix entry through the broker.
 func (r *Revalidator) runRepro(ctx context.Context, entry MatrixEntry, rp reproRef) ReproOutcome {
 	out := ReproOutcome{Path: rp.path, Kind: rp.kind}
-	body, err := r.readRepro(rp.path)
+	job, err := r.stage(rp.path)
 	if err != nil {
 		out.Status, out.Detail = "error", err.Error()
 		return out
 	}
-	base := path.Base(filepath.ToSlash(rp.path))
-	res, err := r.broker.Run(ctx, Job{
-		Image:   entry.Image,
-		Files:   map[string][]byte{base: body},
-		Execute: []string{"sh", workDir + "/" + base},
-		Env:     map[string]string{"TWICESHY_MATRIX_LABEL": entry.Label},
-	})
+	job.Image = entry.Image
+	job.Env = map[string]string{
+		// A writable HOME so toolchains (e.g. `go install`) have somewhere to
+		// write; repros set GOCACHE/GOPATH etc. themselves.
+		"HOME": workDir,
+		// TMPDIR must be writable AND exec-able: /tmp is mounted noexec, and the
+		// Go toolchain compiles+execs binaries from TMPDIR (exp-0017). Point it at
+		// the work volume so no repro re-hits that trap. (/work already exists.)
+		"TMPDIR":                workDir,
+		"TWICESHY_MATRIX_LABEL": entry.Label,
+	}
+	res, err := r.broker.Run(ctx, job)
 	if err != nil {
 		out.Status, out.Detail = "error", err.Error()
+		return out
+	}
+	// A failed prepare (deps couldn't be warmed) is reported as broken, not a
+	// false "holds" — the offline execute would be meaningless.
+	if len(job.Prepare) > 0 && (res.Prepare.TimedOut || res.Prepare.ExitCode != 0) {
+		out.ExitCode = res.Prepare.ExitCode
+		out.Status = "broken"
+		out.Detail = "prepare failed: " + strings.TrimSpace(firstLine(res.Prepare.Stdout, res.Prepare.Stderr))
 		return out
 	}
 	out.ExitCode = res.Execute.ExitCode
@@ -226,13 +239,91 @@ func (r *Revalidator) runRepro(ctx context.Context, entry MatrixEntry, rp reproR
 	return out
 }
 
-// readRepro reads a repro script confined to under the corpus root.
-func (r *Revalidator) readRepro(p string) ([]byte, error) {
+// stage builds the broker Job's files + phase commands for a repro path, which
+// may be either a single script or a DIRECTORY. A directory repro carries its
+// own dependencies: every file under it is staged into the work dir, `repro.sh`
+// (required) is the offline execute phase, and an optional `prepare.sh` is the
+// networked prepare phase (e.g. to `go install` a linter / warm a module cache).
+// This is how a generated, dependency-bearing repro (#0026) runs in the gate.
+func (r *Revalidator) stage(p string) (Job, error) {
+	abs, err := r.resolve(p)
+	if err != nil {
+		return Job{}, err
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return Job{}, err
+	}
+	if !info.IsDir() {
+		body, err := os.ReadFile(abs)
+		if err != nil {
+			return Job{}, err
+		}
+		base := path.Base(filepath.ToSlash(p))
+		return Job{
+			Files:   map[string][]byte{base: body},
+			Execute: []string{"sh", workDir + "/" + base},
+		}, nil
+	}
+	files, err := readDirFiles(abs)
+	if err != nil {
+		return Job{}, err
+	}
+	if _, ok := files["repro.sh"]; !ok {
+		return Job{}, fmt.Errorf("directory repro %q has no repro.sh", p)
+	}
+	job := Job{
+		Files:   files,
+		Execute: []string{"sh", workDir + "/repro.sh"},
+	}
+	if _, ok := files["prepare.sh"]; ok {
+		job.Prepare = []string{"sh", workDir + "/prepare.sh"}
+	}
+	return job, nil
+}
+
+// resolve returns the absolute path of a corpus-relative repro path, refusing
+// anything that escapes the corpus root.
+func (r *Revalidator) resolve(p string) (string, error) {
 	clean := filepath.Clean(filepath.FromSlash(p))
 	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return nil, fmt.Errorf("repro path %q escapes the corpus root", p)
+		return "", fmt.Errorf("repro path %q escapes the corpus root", p)
 	}
-	return os.ReadFile(filepath.Join(r.root, clean))
+	return filepath.Join(r.root, clean), nil
+}
+
+// readDirFiles reads every regular file under dir into a slash-relative map,
+// capped so a runaway directory can't blow up the broker's staging.
+func readDirFiles(dir string) (map[string][]byte, error) {
+	const maxReproDirBytes = 4 << 20
+	files := make(map[string][]byte)
+	total := 0
+	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !d.Type().IsRegular() {
+			return nil
+		}
+		body, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		total += len(body)
+		if total > maxReproDirBytes {
+			return fmt.Errorf("repro directory exceeds %d bytes", maxReproDirBytes)
+		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(rel)] = body
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
 }
 
 // toFinding turns an attestation into the proposed delta for human review.

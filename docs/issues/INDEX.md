@@ -44,3 +44,4 @@ never a cycle).
 | [0023](0023-live-deprecation-importer-deps-dev-endoflife-to-deprecation-codemod-records-quarantined.md) | Live deprecation importer — deps.dev/endoflife to deprecation+codemod records, quarantined | open | medium | 0015 | |
 | [0024](0024-llm-wrong-canon-so-reframe-authoring-gated-on-adr-0011-section-5-sign-off.md) | LLM-wrong canon + SO-reframe authoring (GATED on ADR-0011 section 5 sign-off) | open | medium | 0015 | |
 | [0025](0025-hard-disk-size-cap-on-the-repro-work-volume-multi-tenant-precondition.md) | Hard disk-size cap on the repro work volume (multi-tenant precondition) | open | medium | 0015 | |
+| [0026](0026-repro-test-gen-pipeline-drafter-to-broker-gate-to-attach-adr-0011-section-8.md) | Repro test-gen pipeline — drafter to broker-gate to attach (ADR-0011 section 8) | in-progress | high | 0015 | |
