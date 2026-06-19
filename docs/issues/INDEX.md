@@ -18,6 +18,7 @@ never a cycle).
 | [0009](0009-epic-pre-deploy-security.md) | Epic: Pre-deploy security hardening (Tier A) | open | 0011, 0012, 0013, 0014 |
 | [0010](0010-epic-public-release.md) | Epic: Public release (Tier B) — multi-tenant, trial, anti-abuse | open | — |
 | [0027](0027-epic-closed-loop-autonomous-validation-no-human-in-the-provable-loop.md) | Epic: Closed-loop autonomous validation — no human in the provable loop | closed | 0028, 0029, 0030, 0031, 0032, 0033 |
+| [0034](0034-epic-go-live-hardening-bulletproof-the-autonomous-loop-single-tenant.md) | Epic: Go-live hardening — bulletproof the autonomous loop (single-tenant) | open | 0035, 0036, 0037, 0038, 0039, 0040, 0041, 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049, 0050, 0051, 0052, 0053, 0054, 0055, 0056, 0057, 0058 |
 
 ## Issues
 
@@ -52,3 +53,27 @@ never a cycle).
 | [0031](0031-outcome-report-intake-mcp-report-outcome-gated-counter-evidence.md) | Outcome-report intake — MCP report_outcome, quarantined counter-evidence | closed | medium | 0027 | ADR-0013, PR#83 |
 | [0032](0032-counter-evidence-gate-and-adapt-demote-or-supersede-on-reproduced-failure.md) | Counter-evidence gate + adapt — demote/supersede on reproduced failure | closed | high | 0027 | ADR-0013, PR#85 |
 | [0033](0033-guardrails-anomaly-monitoring-emergency-stop-budget-caps.md) | Guardrails — anomaly monitoring, emergency stop, budget caps | closed | high | 0027 | ADR-0013, PR#86 |
+| [0035](0035-structured-slog-logging-on-the-promote-adapt-loop.md) | Structured slog logging on the promote/adapt loop | open | high | 0034 | ADR-0013; deps — |
+| [0036](0036-json-run-manifest-for-promote-adapt.md) | `-json` run manifest for promote/adapt | open | high | 0034 | ADR-0013; deps [#0035] |
+| [0037](0037-anomaly-halt-non-zero-exit-checked-before-persist.md) | Anomaly = HALT + non-zero exit, checked before persist | open | high | 0034 | ADR-0013; deps [#0036] |
+| [0038](0038-route-guardrail-trips-to-a-channel-ntfy-notify-seam.md) | Route guardrail trips to a channel (ntfy notify seam) | open | high | 0034 | ADR-0013; deps [#0037] |
+| [0039](0039-single-flight-lock-around-promote-adapt.md) | Single-flight lock around promote/adapt | open | high | 0034 | ADR-0013; deps — |
+| [0040](0040-preflight-healthcheck-docker-runsc-judge-liveness.md) | Preflight healthcheck (docker/runsc + judge liveness) | open | medium | 0034 | ADR-0013; deps — |
+| [0041](0041-production-majority-voting-in-promote.md) | Production majority voting in promote | open | high | 0034 | ADR-0013; deps — |
+| [0042](0042-report-outcome-corpus-intake-so-adapt-has-nightly-input.md) | report_outcome → corpus intake (so adapt has nightly input) | open | high | 0034 | ADR-0013; deps — |
+| [0043](0043-nightly-validate-driver-adr-0013-2-veto-window-pr.md) | Nightly validate driver + ADR-0013 §2 veto-window PR | open | high | 0034 | ADR-0013; deps [#0036, #0037, #0038, #0039, #0040, #0041, #0042] |
+| [0044](0044-daily-opus-4-8-audit-routine-auto-demote-disagreements.md) | Daily Opus-4.8 audit routine (auto-demote disagreements) | open | high | 0034 | ADR-0013; deps [#0043, #0036] |
+| [0045](0045-success-heartbeat-uptime-kuma-push.md) | Success heartbeat (Uptime-Kuma push) | open | medium | 0034 | ADR-0013; deps [#0043] |
+| [0046](0046-unify-broker-reaper-logging-to-slog.md) | Unify broker reaper logging to slog | open | low | 0034 | ADR-0013; deps [#0035] |
+| [0047](0047-judge-latency-verdict-distribution-metrics.md) | Judge latency + verdict-distribution metrics | open | medium | 0034 | ADR-0013; deps [#0036] |
+| [0048](0048-re-promote-un-demote-path.md) | Re-promote / un-demote path | open | high | 0034 | ADR-0013; deps — |
+| [0049](0049-true-effect-preview-dry-run.md) | True effect-preview dry-run | open | medium | 0034 | ADR-0013; deps — |
+| [0050](0050-validator-desync-guards-valid-until-demotion.md) | Validator desync guards (valid.until / demotion) | open | medium | 0034 | ADR-0013; deps — |
+| [0051](0051-rollback-runbook.md) | Rollback runbook | open | medium | 0034 | ADR-0013; deps [#0043, #0048] |
+| [0052](0052-wire-the-reaper-at-promote-adapt-startup.md) | Wire the Reaper at promote/adapt startup | open | medium | 0034 | ADR-0013; deps — |
+| [0053](0053-fail-safe-verification-tests-broker-outage-poison-record.md) | Fail-safe verification tests (broker outage / poison record) | open | high | 0034 | ADR-0013; deps — |
+| [0054](0054-run-journal-resume-cursor.md) | Run journal / resume cursor | open | medium | 0034 | ADR-0013; deps [#0036] |
+| [0055](0055-materialize-the-usage-signal-into-provenance-usage.md) | Materialize the usage signal into provenance.usage | open | medium | 0034 | ADR-0013; deps — |
+| [0056](0056-positive-outcome-mcp-path-confirmed-helpful.md) | Positive-outcome MCP path (confirmed_helpful) | open | medium | 0034 | ADR-0013; deps — |
+| [0057](0057-adaptive-confirm-mode-in-judge-eval.md) | Adaptive `-confirm` mode in judge-eval | open | low | 0034 | ADR-0013; deps — |
+| [0058](0058-grow-the-gold-set-from-daily-audit-misses-ongoing.md) | Grow the gold set from daily-audit misses (ongoing) | open | low | 0034 | ADR-0013; deps [#0044] |

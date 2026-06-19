@@ -5,7 +5,7 @@ status: in-progress
 severity: medium
 group: 0008
 depends_on: []
-forgejo:
+forgejo: 95
 links:
   adr: docs/adr/ADR-0001-architecture.md
   prs: []

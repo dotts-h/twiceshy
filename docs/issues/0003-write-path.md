@@ -5,7 +5,7 @@ status: closed
 severity: high
 group:
 depends_on: []
-forgejo:
+forgejo: 93
 links:
   adr: docs/adr/ADR-0008-write-path-persistence-is-a-cli-concern.md
   prs: []
