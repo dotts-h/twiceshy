@@ -44,7 +44,7 @@ func TestPromoteCorpus_AlertsOnAnomaly(t *testing.T) {
 	persist := func(string, *record.Record) error { return nil }
 	al := &recordingAlerter{}
 
-	_, _, _ = promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxActions: 1}, nil, al, &bytes.Buffer{})
+	_, _, _ = promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxActions: 1}, nil, al, &bytes.Buffer{}, "")
 	if !al.has("anomaly") {
 		t.Fatalf("an anomalous run must fire an anomaly alert; got %v", al.events)
 	}
@@ -56,7 +56,7 @@ func TestPromoteCorpus_AlertsOnEmergencyStop(t *testing.T) {
 	persist := func(string, *record.Record) error { return nil }
 	al := &recordingAlerter{}
 
-	_, _, _ = promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{Paused: true}, nil, al, &bytes.Buffer{})
+	_, _, _ = promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{Paused: true}, nil, al, &bytes.Buffer{}, "")
 	if !al.has("emergency_stop") {
 		t.Fatalf("an emergency stop must fire an alert; got %v", al.events)
 	}
@@ -68,7 +68,7 @@ func TestPromoteCorpus_AlertsOnBudgetCap(t *testing.T) {
 	persist := func(string, *record.Record) error { return nil }
 	al := &recordingAlerter{}
 
-	_, _, _ = promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxRuns: 1}, nil, al, &bytes.Buffer{})
+	_, _, _ = promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxRuns: 1}, nil, al, &bytes.Buffer{}, "")
 	if !al.has("budget_cap") {
 		t.Fatalf("a budget cap must fire an alert; got %v", al.events)
 	}
@@ -81,7 +81,7 @@ func TestPromoteCorpus_NoAlertOnCleanRun(t *testing.T) {
 	persist := func(string, *record.Record) error { return nil }
 	al := &recordingAlerter{}
 
-	_, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, nil, al, &bytes.Buffer{})
+	_, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, nil, al, &bytes.Buffer{}, "")
 	if err != nil {
 		t.Fatalf("promoteCorpus: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestAdaptCorpus_AlertsOnAnomaly(t *testing.T) {
 	persist := func(string, *record.Record) error { return nil }
 	al := &recordingAlerter{}
 
-	_, _, _ = adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxActions: 1}, nil, al, &bytes.Buffer{})
+	_, _, _ = adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxActions: 1}, nil, al, &bytes.Buffer{}, "")
 	if !al.has("anomaly") {
 		t.Fatalf("an anomalous adapt run must fire an anomaly alert; got %v", al.events)
 	}

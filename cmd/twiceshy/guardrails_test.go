@@ -23,7 +23,7 @@ func TestPromoteCorpus_EmergencyStopHalts(t *testing.T) {
 	persist := func(_ string, r *record.Record) error { persisted = append(persisted, r.ID); return nil }
 	var buf bytes.Buffer
 
-	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{Paused: true}, nil, nil, &buf)
+	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{Paused: true}, nil, nil, &buf, "")
 	if err != nil {
 		t.Fatalf("promoteCorpus: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestPromoteCorpus_BudgetCapStops(t *testing.T) {
 	persist := func(_ string, _ *record.Record) error { return nil }
 	var buf bytes.Buffer
 
-	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxRuns: 1}, nil, nil, &buf)
+	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxRuns: 1}, nil, nil, &buf, "")
 	if err != nil {
 		t.Fatalf("promoteCorpus: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestPromoteCorpus_AnomalyOnFinalActionStillHalts(t *testing.T) {
 	// there is no further record to halt before. The run must STILL report the
 	// anomaly (errAnomalyHalt → non-zero exit) so a spike on the last action can't
 	// slip through with exit 0 (#0037, ADR-0013 §D1).
-	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxActions: 1}, nil, nil, &buf)
+	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxActions: 1}, nil, nil, &buf, "")
 	if !errors.Is(err, errAnomalyHalt) {
 		t.Fatalf("a threshold-tripping run must return errAnomalyHalt, got %v", err)
 	}
@@ -84,7 +84,7 @@ func TestAdaptCorpus_EmergencyStopHalts(t *testing.T) {
 	persist := func(_ string, r *record.Record) error { persisted = append(persisted, r.ID); return nil }
 	var buf bytes.Buffer
 
-	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{Paused: true}, nil, nil, &buf)
+	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{Paused: true}, nil, nil, &buf, "")
 	if err != nil {
 		t.Fatalf("adaptCorpus: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestAdaptCorpus_BudgetCapStops(t *testing.T) {
 	persist := func(_ string, _ *record.Record) error { return nil }
 	var buf bytes.Buffer
 
-	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxRuns: 1}, nil, nil, &buf)
+	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxRuns: 1}, nil, nil, &buf, "")
 	if err != nil {
 		t.Fatalf("adaptCorpus: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestAdaptCorpus_AnomalyOnFinalActionStillHalts(t *testing.T) {
 
 	// MaxActions 1, 2 demotes: the 2nd trips the threshold with nothing after to
 	// halt — the run must still return errAnomalyHalt (non-zero exit).
-	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxActions: 1}, nil, nil, &buf)
+	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxActions: 1}, nil, nil, &buf, "")
 	if !errors.Is(err, errAnomalyHalt) {
 		t.Fatalf("a threshold-tripping adapt run must return errAnomalyHalt, got %v", err)
 	}

@@ -47,7 +47,7 @@ func TestPromoteCorpus_NoOpPersist_ProducesTransitionActions(t *testing.T) {
 		return nil
 	}
 
-	_, actions, err := promoteCorpus(context.Background(), ".", recs, fp, noopPersist, guard.Guardrails{}, nil, nil, &bytes.Buffer{})
+	_, actions, err := promoteCorpus(context.Background(), ".", recs, fp, noopPersist, guard.Guardrails{}, nil, nil, &bytes.Buffer{}, "")
 	if err != nil {
 		t.Fatalf("promoteCorpus: %v", err)
 	}

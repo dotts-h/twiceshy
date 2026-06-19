@@ -72,7 +72,7 @@ never a cycle).
 | [0051](0051-rollback-runbook.md) | Rollback runbook | closed | medium | 0034 | ADR-0013; deps [#0043, #0048] |
 | [0052](0052-wire-the-reaper-at-promote-adapt-startup.md) | Wire the Reaper at promote/adapt startup | closed | medium | 0034 | ADR-0013; deps — |
 | [0053](0053-fail-safe-verification-tests-broker-outage-poison-record.md) | Fail-safe verification tests (broker outage / poison record) | closed | high | 0034 | ADR-0013; deps — |
-| [0054](0054-run-journal-resume-cursor.md) | Run journal / resume cursor | open | medium | 0034 | ADR-0013; deps [#0036] |
+| [0054](0054-run-journal-resume-cursor.md) | Run journal / resume cursor | closed | medium | 0034 | ADR-0013; deps [#0036] |
 | [0055](0055-materialize-the-usage-signal-into-provenance-usage.md) | Materialize the usage signal into provenance.usage | open | medium | 0034 | ADR-0013; deps — |
 | [0056](0056-positive-outcome-mcp-path-confirmed-helpful.md) | Positive-outcome MCP path (confirmed_helpful) | open | medium | 0034 | ADR-0013; deps — |
 | [0057](0057-adaptive-confirm-mode-in-judge-eval.md) | Adaptive `-confirm` mode in judge-eval | open | low | 0034 | ADR-0013; deps — |
