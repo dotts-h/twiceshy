@@ -95,3 +95,50 @@ draft — propose-only, ADR-0008).
 - [ ] An authenticated MCP `search_experience` returns hits; an unauthenticated
       request gets 401.
 - [ ] Oversized / abusive requests are bounded (rate limit, body cap — #0013).
+
+## Nightly validation driver (issue 0043, ADR-0013 §A1/§2)
+
+`scripts/scheduled-validate.sh` runs the autonomous loop on the **brain**: it
+intakes queued outcome reports, runs `promote` + `adapt` (judge-gated), batches
+the whole night into ONE commit, and opens ONE PR — the **held queue / veto
+window**. A later nightly run auto-merges that PR once the soak
+(`TWICESHY_SOAK_SECONDS`, default 48h) has elapsed and the PR is still open
+(**closing the PR vetoes the batch**) and green. An anomaly halt (promote/adapt
+exit 3, #0037) is held for review, never auto-merged. `TWICESHY_PAUSE=1`
+short-circuits the whole run before any mutation.
+
+**Dedicated clone (not a working checkout):** the script `git reset --hard`s, so
+point `TWICESHY_REPO` at a clone used only by the driver (default
+`/home/ori/twiceshy-validate`), exactly like the importer's
+`/home/ori/twiceshy-import`.
+
+**Queue wiring (#0042):** set the SAME directory for both sides, or intake is a
+no-op — `serve -report-queue <dir>` (the server enqueues there) and
+`TWICESHY_REPORT_QUEUE=<dir>` for the driver (it drains there). e.g.
+`/home/ori/.local/share/twiceshy/report-queue`.
+
+**Operator step — enable the timer** (like `twiceshy-import.timer`):
+
+```sh
+# 1. dedicated clone
+git clone <forgejo>/claude/twiceshy.git /home/ori/twiceshy-validate
+# 2. secrets + knobs (0600; NOT in the repo)
+install -Dm600 /dev/stdin /home/ori/.config/twiceshy/validate.env <<'ENV'
+TWICESHY_JUDGE_URL=http://localhost:8723
+TWICESHY_JUDGE_MODEL=gpt-oss:20b
+TWICESHY_DRAFTER_MODEL=qwen2.5-coder
+TWICESHY_REPORT_QUEUE=/home/ori/.local/share/twiceshy/report-queue
+TWICESHY_ALERT_URL=https://ntfy.example/twiceshy-alerts
+NTFY_URL=https://ntfy.example/twiceshy
+# TWICESHY_SOAK_SECONDS=172800   # 48h veto window (default)
+# TWICESHY_PAUSE=1               # emergency stop
+ENV
+# 3. dry-run first (builds + runs locally, never pushes/merges)
+TWICESHY_VALIDATE_DRYRUN=1 scripts/scheduled-validate.sh
+# 4. install + enable the timer
+sudo cp scripts/twiceshy-validate.service scripts/twiceshy-validate.timer /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now twiceshy-validate.timer
+```
+
+Pause: `TWICESHY_PAUSE=1` in `validate.env`, or
+`sudo systemctl disable --now twiceshy-validate.timer`.

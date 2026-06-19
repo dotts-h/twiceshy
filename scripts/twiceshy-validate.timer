@@ -1,0 +1,15 @@
+# twiceshy-validate.timer — fire the nightly validation driver (issue 0043).
+# Runs after the import timer's window so fresh advisories are in the corpus
+# first. Daily; each run also merges any prior batch PR whose soak has elapsed
+# (so a 48h soak needs no long-running service — a later run does the merge).
+[Unit]
+Description=Nightly twiceshy validation (promote/adapt + veto-window PR)
+
+[Timer]
+# 03:30 UTC — after the importer's nightly window. Adjust to taste.
+OnCalendar=*-*-* 03:30:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
