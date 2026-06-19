@@ -48,6 +48,7 @@ func New(url string, logger *slog.Logger) Alerter {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
+	// 5s: long enough for a LAN ntfy POST, short enough never to stall a nightly run.
 	return &HTTPNotifier{url: url, client: &http.Client{Timeout: 5 * time.Second}, logger: logger}
 }
 
