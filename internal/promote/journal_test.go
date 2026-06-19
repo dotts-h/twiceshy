@@ -91,3 +91,32 @@ func TestJournal_SaveCreatesParentDir(t *testing.T) {
 		t.Fatalf("journal file not created: %v", err)
 	}
 }
+
+// A corrupt/unparseable journal must surface as an error, not a silent nil —
+// otherwise a half-written or hand-mangled journal would be treated as "no
+// journal" and a mid-run abort would re-walk from scratch instead of resuming.
+func TestLoadJournal_CorruptFileErrors(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "promote.journal.json")
+	if err := os.WriteFile(path, []byte("{not valid json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	j, err := promote.LoadJournal(path)
+	if err == nil {
+		t.Fatal("a corrupt journal must error, not be silently treated as absent")
+	}
+	if j != nil {
+		t.Fatalf("a corrupt journal must not return a partial journal; got %+v", j)
+	}
+}
+
+// A genuinely-absent journal is the one case that is NOT an error (fresh run).
+func TestLoadJournal_AbsentIsNotAnError(t *testing.T) {
+	j, err := promote.LoadJournal(filepath.Join(t.TempDir(), "nope.json"))
+	if err != nil {
+		t.Fatalf("an absent journal must be (nil,nil), not an error: %v", err)
+	}
+	if j != nil {
+		t.Fatalf("an absent journal must return nil; got %+v", j)
+	}
+}
