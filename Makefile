@@ -3,7 +3,7 @@
 GO          ?= go
 COVER_FLOOR ?= 80
 
-.PHONY: ci lint test cover cover-check build tidy doctor sec vuln secret-scan
+.PHONY: ci lint test cover cover-check build tidy doctor sec vuln secret-scan eval
 
 ci: lint cover-check sec
 
@@ -32,6 +32,12 @@ secret-scan:
 lint:
 	golangci-lint fmt --diff ./...
 	golangci-lint run ./...
+
+# Retrieval-effectiveness eval (#0005): does the validated corpus surface the
+# right trap for realistic queries? Report-only (not a blocking gate — recall
+# shifts as the corpus grows); run it to see the store's health.
+eval: build
+	$(GO) run ./cmd/twiceshy eval -corpus . -db $${TMPDIR:-/tmp}/twiceshy-eval.db
 
 test:
 	$(GO) test -race ./...

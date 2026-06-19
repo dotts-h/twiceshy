@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/dotts-h/twiceshy/internal/doctor"
+	"github.com/dotts-h/twiceshy/internal/eval"
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/ingest"
 	"github.com/dotts-h/twiceshy/internal/pack"
@@ -86,8 +87,10 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runIngest(ctx, args[1:], out)
 	case "doctor":
 		return runDoctor(ctx, args[1:], out)
+	case "eval":
+		return runEval(ctx, args[1:], out)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, pack, or doctor)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, pack, doctor, or eval)", args[0])
 	}
 }
 
@@ -540,6 +543,65 @@ func runRevalidate(ctx context.Context, corpus string, recs []*record.Record, as
 		_, _ = fmt.Fprintf(out, "\nattestations:\n%s\n", string(b))
 	}
 	return nil
+}
+
+// runEval runs the retrieval-effectiveness eval (#0005) over the corpus: it
+// drives the validated-only pull path with queries taken from each behavioral
+// record's error signatures + summary, and reports recall@k / MRR / near-miss.
+// It is the store's evidence gate — does the corpus surface the right trap?
+func runEval(ctx context.Context, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("eval", flag.ContinueOnError)
+	c := addCommonFlags(fs)
+	asJSON := fs.Bool("json", false, "emit the report as JSON")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	recs, err := record.LoadCorpus(c.corpus)
+	if err != nil {
+		return fmt.Errorf("loading corpus: %w", err)
+	}
+	ix, err := index.Open(c.db)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = ix.Close() }()
+	if err := ix.Rebuild(ctx, recs, c.repo); err != nil {
+		return err
+	}
+	cases := eval.Cases(recs)
+	rep, err := eval.Run(ctx, ix, cases, index.MaxK)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		b, err := json.MarshalIndent(rep, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(out, string(b))
+		return nil
+	}
+	_, _ = fmt.Fprintf(out, "eval: %d cases over the validated corpus (k=%d)\n", rep.Cases, rep.K)
+	_, _ = fmt.Fprintf(out, "  recall@k:      %.1f%% (%d/%d found)\n", rep.RecallAtK*100, rep.Found, rep.Cases)
+	_, _ = fmt.Fprintf(out, "  MRR:           %.3f\n", rep.MRR)
+	_, _ = fmt.Fprintf(out, "  near-miss:     %.1f%% (wrong card on top)\n", rep.NearMissRate*100)
+	for _, r := range rep.Results {
+		if !r.Found || r.NearMiss() {
+			status := "MISS"
+			if r.Found {
+				status = fmt.Sprintf("rank %d", r.Rank)
+			}
+			_, _ = fmt.Fprintf(out, "    [%s] %s (%s) %q -> %v\n", status, r.RecordID, r.Source, truncate(r.Query, 50), r.Returned)
+		}
+	}
+	return nil
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 func printReport(out io.Writer, rep doctor.Report) {
