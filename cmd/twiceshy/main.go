@@ -13,6 +13,7 @@
 //	twiceshy pack   -corpus <dir> -out <dir>          build a distributable pack
 //	twiceshy doctor <name> -corpus <dir>              run a doctor (staleness | revalidate)
 //	twiceshy eval   -corpus <dir> -db <file>          report retrieval recall@k / MRR
+//	twiceshy usage-flush -corpus <dir> -db <file>  materialize usage counters into provenance.usage
 //	twiceshy judge-eval                               A/B the judge prompt vs the gold set (needs judge)
 //
 // serve requires the bearer token in TWICESHY_TOKEN. index and serve accept an
@@ -188,7 +189,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|ingest|draft|promote|repromote|adapt|intake-reports|report|pack|doctor|eval|judge-eval> [flags]")
+		return errors.New("usage: twiceshy <index|serve|ingest|draft|promote|repromote|adapt|intake-reports|report|pack|doctor|eval|usage-flush|judge-eval> [flags]")
 	}
 	switch args[0] {
 	case "index":
@@ -215,10 +216,12 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runDoctor(ctx, args[1:], out)
 	case "eval":
 		return runEval(ctx, args[1:], out)
+	case "usage-flush":
+		return runUsageFlush(ctx, args[1:], out)
 	case "judge-eval":
 		return runJudgeEval(ctx, args[1:], out, getenv)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, draft, promote, repromote, adapt, intake-reports, report, pack, doctor, eval, or judge-eval)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, draft, promote, repromote, adapt, intake-reports, report, pack, doctor, eval, usage-flush, or judge-eval)", args[0])
 	}
 }
 
@@ -1796,6 +1799,70 @@ func runRevalidate(ctx context.Context, corpus string, recs []*record.Record, as
 		}
 		_, _ = fmt.Fprintf(out, "\nattestations:\n%s\n", string(b))
 	}
+	return nil
+}
+
+// usageEqual compares two usage pointers for value equality.
+func usageEqual(a, b *record.Usage) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	if a.Retrieved != b.Retrieved || a.ConfirmedHelpful != b.ConfirmedHelpful {
+		return false
+	}
+	switch {
+	case a.LastHit == nil && b.LastHit == nil:
+		return true
+	case a.LastHit == nil || b.LastHit == nil:
+		return false
+	default:
+		return *a.LastHit == *b.LastHit
+	}
+}
+
+// runUsageFlush materializes SQLite usage counters into each record's
+// provenance.usage in the markdown corpus (delta-only, idempotent).
+func runUsageFlush(ctx context.Context, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("usage-flush", flag.ContinueOnError)
+	c := addCommonFlags(fs)
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	ix, err := index.Open(c.db)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = ix.Close() }()
+
+	recs, err := record.LoadCorpus(c.corpus)
+	if err != nil {
+		return fmt.Errorf("loading corpus: %w", err)
+	}
+	usage, err := ix.AllUsage(ctx)
+	if err != nil {
+		return err
+	}
+
+	updated := 0
+	for _, r := range recs {
+		u, ok := usage[r.ID]
+		if !ok {
+			continue
+		}
+		desired := &u
+		if usageEqual(r.Provenance.Usage, desired) {
+			continue
+		}
+		r.Provenance.Usage = &u
+		if err := writeRecord(c.corpus, r); err != nil {
+			return err
+		}
+		updated++
+	}
+	_, _ = fmt.Fprintf(out, "usage-flush: updated %d of %d record(s) from %s\n", updated, len(recs), c.db)
 	return nil
 }
 

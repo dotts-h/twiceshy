@@ -119,6 +119,60 @@ func TestUsageSurvivesRebuild(t *testing.T) {
 	}
 }
 
+func TestAllUsage(t *testing.T) {
+	ix := usageIndex(t, usageRec("exp-0100"), usageRec("exp-0101"))
+	ctx := context.Background()
+
+	if err := ix.RecordHits(ctx, []string{"exp-0100"}, "2026-06-19"); err != nil {
+		t.Fatalf("RecordHits: %v", err)
+	}
+	if err := ix.RecordHits(ctx, []string{"exp-0100"}, "2026-06-19"); err != nil {
+		t.Fatalf("RecordHits 2nd: %v", err)
+	}
+	if err := ix.ConfirmHelpful(ctx, "exp-0100"); err != nil {
+		t.Fatalf("ConfirmHelpful: %v", err)
+	}
+
+	got, err := ix.AllUsage(ctx)
+	if err != nil {
+		t.Fatalf("AllUsage: %v", err)
+	}
+	want := map[string]record.Usage{
+		"exp-0100": {Retrieved: 2, ConfirmedHelpful: 1, LastHit: strPtr("2026-06-19")},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("AllUsage len = %d, want %d; got %+v", len(got), len(want), got)
+	}
+	for id, w := range want {
+		u, ok := got[id]
+		if !ok {
+			t.Fatalf("AllUsage missing %s", id)
+		}
+		if u.Retrieved != w.Retrieved || u.ConfirmedHelpful != w.ConfirmedHelpful {
+			t.Fatalf("%s: %+v, want %+v", id, u, w)
+		}
+		if u.LastHit == nil || *u.LastHit != *w.LastHit {
+			t.Fatalf("%s: last_hit = %v, want %v", id, u.LastHit, w.LastHit)
+		}
+	}
+	if _, ok := got["exp-0101"]; ok {
+		t.Fatalf("exp-0101 should be absent (no usage row), got %+v", got["exp-0101"])
+	}
+}
+
+func TestAllUsageEmptyTable(t *testing.T) {
+	ix := usageIndex(t, usageRec("exp-0100"))
+	got, err := ix.AllUsage(context.Background())
+	if err != nil {
+		t.Fatalf("AllUsage: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("empty usage table: got %+v, want empty map", got)
+	}
+}
+
+func strPtr(s string) *string { return &s }
+
 func TestRecordHitsConcurrentMonotonic(t *testing.T) {
 	ix := usageIndex(t, usageRec("exp-0100"))
 	ctx := context.Background()

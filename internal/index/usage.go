@@ -84,3 +84,34 @@ func (ix *Index) Usage(ctx context.Context, id string) (record.Usage, error) {
 	}
 	return u, nil
 }
+
+// AllUsage returns every record's accumulated usage, keyed by record id. Records
+// with no usage row are simply absent from the map.
+func (ix *Index) AllUsage(ctx context.Context) (map[string]record.Usage, error) {
+	rows, err := ix.db.QueryContext(ctx,
+		`SELECT record_id, retrieved, confirmed_helpful, last_hit FROM usage`)
+	if err != nil {
+		return nil, fmt.Errorf("usage: list: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make(map[string]record.Usage)
+	for rows.Next() {
+		var (
+			id      string
+			u       record.Usage
+			lastHit sql.NullString
+		)
+		if err := rows.Scan(&id, &u.Retrieved, &u.ConfirmedHelpful, &lastHit); err != nil {
+			return nil, fmt.Errorf("usage: scan: %w", err)
+		}
+		if lastHit.Valid {
+			u.LastHit = &lastHit.String
+		}
+		out[id] = u
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("usage: rows: %w", err)
+	}
+	return out, nil
+}
