@@ -1,0 +1,14 @@
+# twiceshy-audit.timer — fire the morning promote audit (#0044).
+# Runs after the validation timer's window so the night's promote manifest is on
+# main (or in the validate clone after merge). Daily morning review.
+[Unit]
+Description=Daily twiceshy promote audit (second opinion + dispute queue)
+
+[Timer]
+# 07:00 UTC — after the validate timer (03:30 UTC). Adjust to taste.
+OnCalendar=*-*-* 07:00:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

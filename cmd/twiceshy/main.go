@@ -142,7 +142,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|ingest|draft|promote|adapt|intake-reports|pack|doctor|eval|judge-eval> [flags]")
+		return errors.New("usage: twiceshy <index|serve|ingest|draft|promote|adapt|intake-reports|report|pack|doctor|eval|judge-eval> [flags]")
 	}
 	switch args[0] {
 	case "index":
@@ -161,6 +161,8 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runAdapt(ctx, args[1:], out, getenv)
 	case "intake-reports":
 		return runIntakeReports(args[1:], out)
+	case "report":
+		return runReport(args[1:], out)
 	case "doctor":
 		return runDoctor(ctx, args[1:], out)
 	case "eval":
@@ -168,7 +170,7 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	case "judge-eval":
 		return runJudgeEval(ctx, args[1:], out, getenv)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, draft, promote, adapt, intake-reports, pack, doctor, eval, or judge-eval)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, draft, promote, adapt, intake-reports, report, pack, doctor, eval, or judge-eval)", args[0])
 	}
 }
 
@@ -1238,6 +1240,43 @@ func runIntakeReports(args []string, out io.Writer) error {
 		_, _ = fmt.Fprintf(out, "  intake %s -> %s (disputes %s)\n", filepath.Base(f), rec.ID, rep.RecordID)
 	}
 	_, _ = fmt.Fprintf(out, "intake-reports: materialized %d report(s) into experience/, %d skipped\n", intaken, skipped)
+	return nil
+}
+
+// runReport enqueues an outcome dispute into the report intake queue without the
+// server (#0044): the daily audit (or an operator) files a disagreement, then
+// `intake-reports` materializes it and `adapt` adjudicates.
+func runReport(args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("report", flag.ContinueOnError)
+	id := fs.String("id", "", "disputed record id (required, exp-NNNN)")
+	outcome := fs.String("outcome", "audit-disagreement", "short outcome label")
+	evidence := fs.String("evidence", "", "reason / failing detail")
+	queue := fs.String("queue", "", "report queue directory (required; same as intake-reports -queue)")
+	author := fs.String("author", "daily-audit", "provenance author on the counter-record")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return errors.New("report requires -id <exp-NNNN>")
+	}
+	if !record.ValidID(*id) {
+		return fmt.Errorf("invalid record id %q (want exp-NNNN)", *id)
+	}
+	if *queue == "" {
+		return errors.New("report requires -queue <dir> (the directory intake-reports drains)")
+	}
+	r := spool.Report{
+		RecordID:   *id,
+		Outcome:    *outcome,
+		Evidence:   *evidence,
+		Author:     *author,
+		ReportedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	path, err := spool.Enqueue(*queue, r)
+	if err != nil {
+		return fmt.Errorf("enqueue report: %w", err)
+	}
+	_, _ = fmt.Fprintf(out, "report: queued dispute against %s (%s)\n", *id, path)
 	return nil
 }
 
