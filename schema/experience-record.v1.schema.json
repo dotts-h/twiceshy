@@ -10,7 +10,7 @@
     "schema_version": { "const": 1 },
     "id": { "type": "string", "pattern": "^exp-[0-9]{4,}$" },
     "kind": { "enum": ["trap", "fix", "dead-end", "convention", "workflow"] },
-    "status": { "enum": ["quarantined", "validated", "stale", "superseded"] },
+    "status": { "enum": ["quarantined", "validated", "stale", "superseded", "disputed"] },
     "title": { "type": "string", "minLength": 8, "maxLength": 120 },
     "symptom": { "$ref": "#/$defs/symptom" },
     "applies_to": {
@@ -283,6 +283,17 @@
             "reproduced_under": { "type": "array", "items": { "type": "string" } },
             "judge_model": { "type": "string", "minLength": 1 },
             "judge_decision": { "type": "string", "minLength": 1 }
+          }
+        },
+        "demotion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["attested_at", "judge_model", "judge_decision", "report"],
+          "properties": {
+            "attested_at": { "type": "string", "minLength": 1 },
+            "judge_model": { "type": "string", "minLength": 1 },
+            "judge_decision": { "type": "string", "minLength": 1 },
+            "report": { "type": "string", "pattern": "^exp-[0-9]{4,}$" }
           }
         },
         "usage": {

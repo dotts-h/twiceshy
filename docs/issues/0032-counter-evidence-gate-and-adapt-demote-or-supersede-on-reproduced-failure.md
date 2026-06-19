@@ -1,14 +1,14 @@
 ---
 id: 0032
 title: Counter-evidence gate + adapt — demote/supersede on reproduced failure, tighten scope otherwise
-status: open
+status: closed
 severity: high
 group: 0027
 depends_on: [0028, 0031]
 forgejo:
 links:
   adr: ADR-0013
-  prs: []
+  prs: [85]
   issues: [0020, 0033]
   regression:
 assets: []

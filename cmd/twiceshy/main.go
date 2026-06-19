@@ -8,6 +8,7 @@
 //	twiceshy ingest <source> -corpus <dir> -db <file> import quarantined records
 //	twiceshy draft  -corpus <dir>                     draft+gate+attach repros (needs docker+runsc)
 //	twiceshy promote -corpus <dir>                    attestation+judge auto-promote (needs docker+runsc+judge)
+//	twiceshy adapt  -corpus <dir>                     counter-evidence gate: demote/dispute (needs docker+runsc+judge)
 //	twiceshy pack   -corpus <dir> -out <dir>          build a distributable pack
 //	twiceshy doctor <name> -corpus <dir>              run a doctor (staleness | revalidate)
 //	twiceshy eval   -corpus <dir> -db <file>          report retrieval recall@k / MRR
@@ -95,12 +96,14 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runDraft(ctx, args[1:], out)
 	case "promote":
 		return runPromote(ctx, args[1:], out, getenv)
+	case "adapt":
+		return runAdapt(ctx, args[1:], out, getenv)
 	case "doctor":
 		return runDoctor(ctx, args[1:], out)
 	case "eval":
 		return runEval(ctx, args[1:], out)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, draft, promote, pack, doctor, or eval)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, draft, promote, adapt, pack, doctor, or eval)", args[0])
 	}
 }
 
@@ -630,6 +633,185 @@ func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, ru
 			rec.ID, outcome.Verdict.Model, strings.Join(outcome.Attestation.ReproducedUnder, ", "))
 	}
 	return st, nil
+}
+
+// counterRunner re-runs an original record's repro and the report's evidence as
+// a counter-repro, returning both attestations. The broker-backed impl needs
+// docker+runsc; a fake drives the adaptCorpus walk in tests.
+type counterRunner interface {
+	Run(ctx context.Context, original, report *record.Record) (promote.CounterEvidence, error)
+}
+
+// adaptStats summarizes an adapt run.
+type adaptStats struct {
+	demoted  int // reproduced failure + judge PASS → validated→stale
+	disputed int // non-reproducing reports corroborated past threshold → validated→disputed
+	held     int // no execution-backed counter-evidence and uncorroborated — no change
+	orphan   int // report disputes a record not in the corpus
+}
+
+// reportDisputes returns the disputed record id if rec is a quarantined outcome
+// report (carries provenance.disputes), else "".
+func reportDisputes(rec *record.Record) string {
+	if rec.Status == "quarantined" && rec.Provenance.Disputes != nil {
+		return *rec.Provenance.Disputes
+	}
+	return ""
+}
+
+// runAdapt is the negative direction of ADR-0013 (#0032): for each quarantined
+// outcome report, re-run the disputed record's repro plus the report's counter
+// through the broker; a reproduced failure + a judge PASS demotes the record to
+// stale, while independent non-reproducing reports accumulate and past a
+// threshold flag it disputed (escalate). Needs docker+runsc and a judge endpoint
+// (TWICESHY_JUDGE_URL); a bare checkout can use -dry-run.
+func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
+	fs := flag.NewFlagSet("adapt", flag.ContinueOnError)
+	corpus := fs.String("corpus", ".", "corpus root (the directory containing experience/)")
+	judgeModel := fs.String("judge-model", "", "diverse frontier judge model id (must differ from -drafter-model)")
+	drafterModel := fs.String("drafter-model", "", "the model that drafted records; the judge must not share its family")
+	dryRun := fs.Bool("dry-run", false, "list the outcome reports and the records they dispute; run no gate/judge, write nothing")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+
+	recs, err := record.LoadCorpus(*corpus)
+	if err != nil {
+		return fmt.Errorf("loading corpus: %w", err)
+	}
+
+	if *dryRun {
+		n := 0
+		for _, rec := range recs {
+			if d := reportDisputes(rec); d != "" {
+				n++
+				_, _ = fmt.Fprintf(out, "  report %s disputes %s\n", rec.ID, d)
+			}
+		}
+		_, _ = fmt.Fprintf(out, "adapt (dry-run): %d outcome report(s); each re-runs the disputed record + the counter and is judge-gated\n", n)
+		return nil
+	}
+
+	// Fail-safe: no judge configured → nothing is ever auto-demoted.
+	judgeURL := getenv("TWICESHY_JUDGE_URL")
+	if judgeURL == "" {
+		return errors.New("TWICESHY_JUDGE_URL must be set: the counter-evidence gate requires a diverse-model judge")
+	}
+	j, err := judge.NewModelJudge(judge.Config{Endpoint: judgeURL, Model: *judgeModel, DrafterModel: *drafterModel})
+	if err != nil {
+		return fmt.Errorf("configuring judge: %w", err)
+	}
+
+	b := repro.NewBroker([]string{repro.PinnedGoImage})
+	rv := repro.NewRevalidator(b, *corpus)
+	runner := brokerCounterRunner{rv: rv}
+	adapter := promote.NewAdapter(j)
+
+	st, err := adaptCorpus(ctx, *corpus, recs, runner, adapter, writeRecord, out)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(out, "adapt: demoted %d, disputed %d, held %d, orphan %d\n", st.demoted, st.disputed, st.held, st.orphan)
+	return nil
+}
+
+// adaptCorpus is the testable core of `twiceshy adapt`: it pairs each outcome
+// report with the record it disputes, runs the counter-evidence through `run`,
+// adjudicates it with the Adapter, and persists the disputed record when it is
+// demoted or disputed. The corroboration count (other reports disputing the same
+// record) is computed from the corpus. run and persist are injected so the walk
+// is exercised without a sandbox or a live judge.
+func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run counterRunner, adapter *promote.Adapter, persist func(string, *record.Record) error, out io.Writer) (adaptStats, error) {
+	byID := make(map[string]*record.Record, len(recs))
+	disputesCount := make(map[string]int)
+	for _, r := range recs {
+		byID[r.ID] = r
+		if d := reportDisputes(r); d != "" {
+			disputesCount[d]++
+		}
+	}
+
+	var st adaptStats
+	for _, rep := range recs {
+		origID := reportDisputes(rep)
+		if origID == "" {
+			continue
+		}
+		original, ok := byID[origID]
+		if !ok {
+			st.orphan++
+			_, _ = fmt.Fprintf(out, "  orphan report %s disputes unknown %s\n", rep.ID, origID)
+			continue
+		}
+		ev, err := run.Run(ctx, original, rep)
+		if err != nil {
+			return st, fmt.Errorf("adapt %s: %w", rep.ID, err)
+		}
+		outcome, err := adapter.Adapt(ctx, original, rep, ev, disputesCount[origID]-1)
+		if err != nil {
+			return st, fmt.Errorf("adapt %s: %w", rep.ID, err)
+		}
+		switch outcome.Action {
+		case promote.ActionDemote:
+			if err := persist(corpus, original); err != nil {
+				return st, fmt.Errorf("persist %s: %w", original.ID, err)
+			}
+			st.demoted++
+			_, _ = fmt.Fprintf(out, "  demoted %s -> stale (report %s, judge %s)\n", original.ID, rep.ID, outcome.Verdict.Model)
+		case promote.ActionDispute:
+			if err := persist(corpus, original); err != nil {
+				return st, fmt.Errorf("persist %s: %w", original.ID, err)
+			}
+			st.disputed++
+			_, _ = fmt.Fprintf(out, "  disputed %s (corroborated by %d reports)\n", original.ID, disputesCount[origID])
+		default:
+			st.held++
+		}
+	}
+	return st, nil
+}
+
+// brokerCounterRunner re-runs the original's repro in the sandbox and, when the
+// report carries its own runnable counter-repro, runs that too. Synthesizing a
+// counter-repro from free-text evidence is a drafter-level concern (ADR-0013 §8)
+// and is deferred: a prose-only report yields an inconclusive counter, so the
+// demote path then relies on the original's own repro having broken, while the
+// non-reproducing accumulation → disputed path still applies.
+type brokerCounterRunner struct {
+	rv *repro.Revalidator
+}
+
+func (b brokerCounterRunner) Run(ctx context.Context, original, report *record.Record) (promote.CounterEvidence, error) {
+	_, atts, err := b.rv.RunWithAttestations(ctx, []*record.Record{original})
+	if err != nil {
+		return promote.CounterEvidence{}, err
+	}
+	ev := promote.CounterEvidence{Counter: repro.Attestation{RecordID: report.ID, Inconclusive: true}, CounterRepro: reportEvidence(report)}
+	if len(atts) > 0 {
+		ev.Original = atts[0]
+	}
+	if report.Guard != nil && record.HasPositiveRepro(report) {
+		_, catts, err := b.rv.RunWithAttestations(ctx, []*record.Record{report})
+		if err != nil {
+			return promote.CounterEvidence{}, err
+		}
+		if len(catts) > 0 {
+			ev.Counter = catts[0]
+		}
+	}
+	return ev, nil
+}
+
+// reportEvidence pulls the human evidence out of a report as the judge's
+// context (the CounterRepro). It is prose, not a runnable script — synthesizing
+// a runnable counter-repro from it is deferred (ADR-0013 §8), so a prose-only
+// report's counter stays inconclusive and can only accumulate toward `disputed`,
+// never demote. The judge reads it only when the original's own repro broke.
+func reportEvidence(report *record.Record) string {
+	if report.Resolution != nil && len(report.Resolution.DeadEnds) > 0 {
+		return report.Resolution.DeadEnds[0].WhyItFailed
+	}
+	return report.Body
 }
 
 // runPack builds a distributable experience pack (#0007, ADR-0002 §4). It
