@@ -1,0 +1,29 @@
+# twiceshy-validate.service — the nightly validation driver (issue 0043, ADR-0013 §A1).
+# Install on the brain (engine box), then enable twiceshy-validate.timer.
+# Operator step: copy this + the .timer to /etc/systemd/system/, edit the secrets
+# in the EnvironmentFile, `systemctl daemon-reload`, `systemctl enable --now
+# twiceshy-validate.timer`. Pause anytime with TWICESHY_PAUSE=1 in the env file
+# (or `systemctl disable --now twiceshy-validate.timer`).
+[Unit]
+Description=twiceshy nightly validation driver (promote/adapt + veto-window PR)
+# Order after the live importer so a night's fresh advisories are present before
+# validation runs (the importer feeds the corpus; this validates it).
+After=twiceshy-import.service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ori
+WorkingDirectory=/home/ori/twiceshy-validate
+# Secrets + knobs (TWICESHY_JUDGE_URL, TWICESHY_REPORT_QUEUE, NTFY_URL, etc.).
+# Create this file 0600; it is NOT in the repo. See docs/DEPLOY.md.
+EnvironmentFile=/home/ori/.config/twiceshy/validate.env
+ExecStart=/home/ori/twiceshy/scripts/scheduled-validate.sh
+# The merge of a soaked PR is done by a later run, so this unit never holds for
+# the soak; a generous cap still bounds a single promote/adapt sweep.
+TimeoutStartSec=3600
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
