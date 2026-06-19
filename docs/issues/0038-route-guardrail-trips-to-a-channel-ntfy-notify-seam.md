@@ -1,14 +1,14 @@
 ---
 id: 0038
 title: "Route guardrail trips to a channel (ntfy notify seam)"
-status: open
+status: closed
 severity: high
 group: 0034
 depends_on: [0037]
 forgejo: 128
 links:
   adr: ADR-0013
-  prs: []
+  prs: [153]
   issues: []
   regression:
 assets: []
@@ -26,9 +26,9 @@ new `internal/notify`; `cmd/twiceshy/main.go` guardrail sites; optionally `inter
 
 ## Acceptance
 
-- [ ] An anomalous run posts to the ntfy topic.
-- [ ] Unset `TWICESHY_ALERT_URL` is a silent no-op.
-- [ ] Test-first; `make ci` green.
+- [x] An anomalous run posts to the ntfy topic.
+- [x] Unset `TWICESHY_ALERT_URL` is a silent no-op.
+- [x] Test-first; `make ci` green.
 
 ## Notes
 

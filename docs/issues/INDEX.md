@@ -56,7 +56,7 @@ never a cycle).
 | [0035](0035-structured-slog-logging-on-the-promote-adapt-loop.md) | Structured slog logging on the promote/adapt loop | closed | high | 0034 | ADR-0013, PR#150 |
 | [0036](0036-json-run-manifest-for-promote-adapt.md) | `-json` run manifest for promote/adapt | closed | high | 0034 | ADR-0013, PR#151 |
 | [0037](0037-anomaly-halt-non-zero-exit-checked-before-persist.md) | Anomaly = HALT + non-zero exit, checked before persist | closed | high | 0034 | ADR-0013, PR#152 |
-| [0038](0038-route-guardrail-trips-to-a-channel-ntfy-notify-seam.md) | Route guardrail trips to a channel (ntfy notify seam) | open | high | 0034 | ADR-0013; deps [#0037] |
+| [0038](0038-route-guardrail-trips-to-a-channel-ntfy-notify-seam.md) | Route guardrail trips to a channel (ntfy notify seam) | closed | high | 0034 | ADR-0013, PR#153 |
 | [0039](0039-single-flight-lock-around-promote-adapt.md) | Single-flight lock around promote/adapt | open | high | 0034 | ADR-0013; deps — |
 | [0040](0040-preflight-healthcheck-docker-runsc-judge-liveness.md) | Preflight healthcheck (docker/runsc + judge liveness) | open | medium | 0034 | ADR-0013; deps — |
 | [0041](0041-production-majority-voting-in-promote.md) | Production majority voting in promote | open | high | 0034 | ADR-0013; deps — |
