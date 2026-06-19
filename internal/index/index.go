@@ -139,6 +139,12 @@ CREATE TABLE IF NOT EXISTS embedding_cache (
   hash TEXT PRIMARY KEY,
   vec  BLOB NOT NULL
 );
+CREATE TABLE IF NOT EXISTS usage (
+  record_id         TEXT PRIMARY KEY,
+  retrieved         INTEGER NOT NULL DEFAULT 0,
+  confirmed_helpful INTEGER NOT NULL DEFAULT 0,
+  last_hit          TEXT
+);
 `
 
 // maxOpenConns bounds the SQLite connection pool to the documented

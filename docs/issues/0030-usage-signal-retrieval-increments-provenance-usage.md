@@ -1,14 +1,14 @@
 ---
 id: 0030
 title: Usage signal — retrieval increments provenance.usage (unblocks D4 + the reinforce/decay signal)
-status: open
+status: closed
 severity: medium
 group: 0027
 depends_on: []
 forgejo:
 links:
   adr: ADR-0013
-  prs: []
+  prs: [82]
   issues: [0004]
   regression:
 assets: []
