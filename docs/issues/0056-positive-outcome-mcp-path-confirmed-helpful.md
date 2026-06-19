@@ -1,14 +1,14 @@
 ---
 id: 0056
 title: "Positive-outcome MCP path (confirmed_helpful)"
-status: open
+status: closed
 severity: medium
 group: 0034
 depends_on: []
 forgejo: 146
 links:
   adr: ADR-0013
-  prs: []
+  prs: [172]
   issues: []
   regression:
 assets: []
@@ -26,8 +26,8 @@ Plan ref: `docs/GO_LIVE_HARDENING_PLAN.md` §E3.
 
 ## Acceptance
 
-- [ ] A positive report increments `confirmed_helpful`; a test covers it.
-- [ ] Test-first; `make ci` green.
+- [x] A positive report increments `confirmed_helpful`; a test covers it.
+- [x] Test-first; `make ci` green.
 
 ## Notes
 
