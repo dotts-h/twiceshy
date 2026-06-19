@@ -5,7 +5,7 @@ status: closed
 severity: medium
 group:
 depends_on: []
-forgejo:
+forgejo: 91
 links:
   adr: docs/adr/ADR-0001-architecture.md
   prs: []

@@ -5,7 +5,7 @@ status: closed
 severity: high
 group:
 depends_on: []
-forgejo:
+forgejo: 117
 links:
   adr: ADR-0013
   prs: []

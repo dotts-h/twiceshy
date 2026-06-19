@@ -5,7 +5,7 @@ status: open
 severity: high
 group:
 depends_on: []
-forgejo:
+forgejo: 98
 links:
   adr: docs/adr/ADR-0001-architecture.md
   prs: []

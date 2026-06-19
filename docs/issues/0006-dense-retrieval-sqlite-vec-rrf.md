@@ -5,7 +5,7 @@ status: closed
 severity: medium
 group: 0008
 depends_on: []
-forgejo:
+forgejo: 96
 links:
   adr: docs/adr/ADR-0006-defer-score-banding.md
   prs: []

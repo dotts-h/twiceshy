@@ -5,7 +5,7 @@ status: in-progress
 severity: high
 group: 0015
 depends_on: [0020]
-forgejo:
+forgejo: 116
 links:
   adr:
   prs: []

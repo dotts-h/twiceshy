@@ -5,7 +5,7 @@ status: closed
 severity: high
 group: 0008
 depends_on: []
-forgejo:
+forgejo: 97
 links:
   adr: docs/adr/ADR-0003-corpus-bootstrap-source-scope.md
   prs: []
