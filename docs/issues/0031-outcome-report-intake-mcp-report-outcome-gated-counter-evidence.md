@@ -1,14 +1,14 @@
 ---
 id: 0031
 title: Outcome-report intake — MCP report_outcome, quarantined counter-evidence (propose-only)
-status: open
+status: closed
 severity: medium
 group: 0027
 depends_on: []
 forgejo:
 links:
   adr: ADR-0013
-  prs: []
+  prs: [83]
   issues: [0011, 0019, 0032]
   regression:
 assets: []

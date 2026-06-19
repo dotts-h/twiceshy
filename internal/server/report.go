@@ -1,0 +1,137 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package server
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"github.com/dotts-h/twiceshy/internal/ingest"
+	"github.com/dotts-h/twiceshy/internal/record"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+// reportDescription tells the model when to call report_outcome and that a
+// report is a proposal, never a direct change to the served record.
+const reportDescription = "Report that a served experience record's lesson did NOT work in practice, so the corpus can " +
+	"correct itself. Call this after you followed a record (from search_experience/get_experience) and it " +
+	"misfired: pass the record's `record_id`, a short `outcome` label (e.g. \"failed\", \"reproduced\", " +
+	"\"incorrect\"), the failing repro or error in `evidence` (a reproducible artifact is the strongest " +
+	"signal), and `author`. " +
+	"This NEVER changes the record directly — it files a quarantined counter-record that the validation gate " +
+	"adjudicates by re-running the original plus your counter. A bare report with no evidence is a triage flag, " +
+	"not a demotion."
+
+// maxOutcomeBytes bounds the outcome label (a short word, not prose).
+const maxOutcomeBytes = 256
+
+// ReportArgs is the input to the report_outcome tool.
+type ReportArgs struct {
+	RecordID string `json:"record_id" jsonschema:"id of the record whose lesson failed, e.g. exp-0042"`
+	Outcome  string `json:"outcome" jsonschema:"short label of what happened, e.g. failed|reproduced|incorrect"`
+	Evidence string `json:"evidence,omitempty" jsonschema:"the failing repro or error text; a reproducible artifact is the strongest signal"`
+	Author   string `json:"author" jsonschema:"who is reporting"`
+	Session  string `json:"session,omitempty"`
+}
+
+// ReportResult is the output of the report_outcome tool.
+type ReportResult struct {
+	RecordID string `json:"record_id"`          // the new quarantined counter-record id
+	Disputes string `json:"disputes"`           // the disputed record id (unchanged)
+	Markdown string `json:"markdown,omitempty"` // the quarantined counter-record to PR
+	Message  string `json:"message"`
+}
+
+// reportOutcome processes a report_outcome tool call. It validates the disputed
+// record exists, builds a quarantined counter-record (propose-only, like
+// record_experience), and returns it. It NEVER mutates the disputed record and
+// never writes to disk — "a report is evidence, not a verdict" (ADR-0013 §3).
+func (h *handlers) reportOutcome(ctx context.Context, _ *mcp.CallToolRequest, args ReportArgs) (*mcp.CallToolResult, ReportResult, error) {
+	start := time.Now()
+	const tool = "report_outcome"
+
+	if err := validateReportSize(args); err != nil {
+		h.logToolError(tool, start, err)
+		return nil, ReportResult{}, err
+	}
+	if strings.TrimSpace(args.Outcome) == "" {
+		err := errors.New("outcome must be non-empty")
+		h.logToolError(tool, start, err)
+		return nil, ReportResult{}, err
+	}
+	if !record.ValidID(args.RecordID) {
+		err := fmt.Errorf("record_id %q is not a valid record id (expected exp-NNNN)", args.RecordID)
+		h.logToolError(tool, start, err)
+		return nil, ReportResult{}, err
+	}
+	// The disputed record must exist — a report can only contest a real record.
+	if _, err := h.ix.Get(ctx, args.RecordID); err != nil {
+		h.logToolError(tool, start, err, slog.String("record_id", args.RecordID))
+		return nil, ReportResult{}, fmt.Errorf("cannot report against %s: %w", args.RecordID, err)
+	}
+
+	id, err := h.ix.NextID(ctx)
+	if err != nil {
+		h.logToolError(tool, start, err)
+		return nil, ReportResult{}, err
+	}
+	meta := ingest.Meta{ID: id, Author: args.Author, Now: time.Now().UTC().Format("2006-01-02")}
+	if args.Session != "" {
+		s := args.Session
+		meta.Session = &s
+	}
+
+	rec, err := ingest.BuildReport(ingest.ReportInput{
+		RecordID: args.RecordID,
+		Outcome:  args.Outcome,
+		Evidence: args.Evidence,
+	}, meta)
+	if err != nil {
+		h.logToolError(tool, start, err)
+		return nil, ReportResult{}, err
+	}
+
+	md, err := record.Marshal(rec)
+	if err != nil {
+		h.logToolError(tool, start, err)
+		return nil, ReportResult{}, err
+	}
+
+	msg := fmt.Sprintf("Quarantined counter-record %s created disputing %s — open it as a PR; it does NOT change %s. "+
+		"The validation gate (#0032) will turn it into a repro and adjudicate.", rec.ID, args.RecordID, args.RecordID)
+	if flags := rec.Provenance.SecurityFlags; len(flags) > 0 {
+		msg += " SECURITY: the safety gate flagged the evidence (" + strings.Join(flags, ", ") + ")."
+	}
+
+	result := ReportResult{
+		RecordID: rec.ID,
+		Disputes: args.RecordID,
+		Markdown: string(md),
+		Message:  msg,
+	}
+	h.logger.Info("tool call",
+		slog.String("tool", tool),
+		slog.String("outcome", "ok"),
+		slog.Int64("duration_ms", time.Since(start).Milliseconds()),
+		slog.String("record_id", rec.ID),
+		slog.String("disputes", args.RecordID),
+	)
+	return nil, result, nil
+}
+
+// validateReportSize rejects oversized inputs cheaply, before NextID and the
+// existence probe. Evidence is body-like (a failing repro/error), so it reuses
+// the record body cap; the outcome is a short label.
+func validateReportSize(args ReportArgs) error {
+	if len(args.Evidence) > maxRecordBodyBytes {
+		return fmt.Errorf("evidence too large: %d bytes (max %d)", len(args.Evidence), maxRecordBodyBytes)
+	}
+	if len(args.Outcome) > maxOutcomeBytes {
+		return fmt.Errorf("outcome too large: %d bytes (max %d)", len(args.Outcome), maxOutcomeBytes)
+	}
+	return nil
+}

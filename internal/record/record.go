@@ -24,6 +24,10 @@ import (
 // SchemaVersion is the record schema this parser understands.
 const SchemaVersion = 1
 
+// ValidID reports whether id is a well-formed record id (exp-NNNN, ≥4 digits) —
+// the shared predicate behind `id`, `superseded_by`, and `disputes`.
+func ValidID(id string) bool { return reID.MatchString(id) }
+
 // Kinds and statuses, per docs/SCHEMA.md.
 var (
 	Kinds    = []string{"trap", "fix", "dead-end", "convention", "workflow"}
@@ -118,7 +122,12 @@ type Provenance struct {
 	SourceLicense string  `yaml:"source_license,omitempty"`
 	SourceURL     string  `yaml:"source_url,omitempty"`
 	SupersededBy  *string `yaml:"superseded_by"`
-	Usage         *Usage  `yaml:"usage,omitempty"`
+	// Disputes is the additive, optional link an outcome-report counter-record
+	// (#0031) carries to the existing record it contests — an exp-id, like
+	// SupersededBy. #0032 follows it to re-run the original repro plus the
+	// counter; it is evidence, not a verdict, so it never mutates the target.
+	Disputes *string `yaml:"disputes,omitempty"`
+	Usage    *Usage  `yaml:"usage,omitempty"`
 	// SecurityFlags records hazards the ingestion safety gate detected
 	// (#0011), e.g. "secret:aws-access-key". A flagged record is documented and
 	// quarantined but MUST NOT be promoted to validated (see validateProvenance).
@@ -485,6 +494,9 @@ func (r *Record) validateProvenance(fail func(string, ...any)) {
 	}
 	if p.SupersededBy != nil && !reID.MatchString(*p.SupersededBy) {
 		fail("superseded_by %q does not match %s", *p.SupersededBy, reID)
+	}
+	if p.Disputes != nil && !reID.MatchString(*p.Disputes) {
+		fail("disputes %q does not match %s", *p.Disputes, reID)
 	}
 	if !validated.IsZero() && !recorded.IsZero() && validated.Before(recorded) {
 		fail("provenance.validated_at precedes recorded_at")
