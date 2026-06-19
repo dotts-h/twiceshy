@@ -42,6 +42,11 @@ type Config struct {
 	Embedder index.Embedder
 	// Logger emits structured server logs. nil defaults to JSON on stderr.
 	Logger *slog.Logger
+	// ReportQueue, when set, is the directory report_outcome enqueues outcome
+	// reports into for the `intake-reports` CLI to materialize into experience/
+	// (ADR-0013 §E1, #0042). Empty keeps the legacy behavior: report_outcome
+	// returns the counter-record markdown for a human to PR, and writes nothing.
+	ReportQueue string
 }
 
 // Tool descriptions are load-bearing: description text alone produces
@@ -76,7 +81,7 @@ func New(cfg Config) (http.Handler, error) {
 		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	}
 
-	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger}
+	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue}
 	h.usage = newUsageRecorder(cfg.Index, logger, time.Now)
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "twiceshy",
@@ -107,11 +112,12 @@ func New(cfg Config) (http.Handler, error) {
 }
 
 type handlers struct {
-	ix     *index.Index
-	repo   string
-	emb    index.Embedder // optional; enables pull-channel dense retrieval
-	logger *slog.Logger
-	usage  *usageRecorder // records retrieval usage off the latency budget (ADR-0013 §4)
+	ix          *index.Index
+	repo        string
+	emb         index.Embedder // optional; enables pull-channel dense retrieval
+	logger      *slog.Logger
+	usage       *usageRecorder // records retrieval usage off the latency budget (ADR-0013 §4)
+	reportQueue string         // optional; report_outcome enqueues here for intake-reports (ADR-0013 §E1)
 }
 
 // SearchArgs is the search_experience input.

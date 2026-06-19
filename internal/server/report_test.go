@@ -6,7 +6,60 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/dotts-h/twiceshy/internal/spool"
 )
+
+// With a queue configured, report_outcome enqueues the report for automatic
+// intake (no human paste-PR) instead of just returning markdown (#0042).
+func TestReportOutcome_QueuesForIntakeWhenConfigured(t *testing.T) {
+	h, _ := newUsageHandlers(t, usageFixture()) // corpus holds exp-0200
+	queue := t.TempDir()
+	h.reportQueue = queue
+
+	_, res, err := h.reportOutcome(context.Background(), nil, ReportArgs{
+		RecordID: "exp-0200", Outcome: "failed", Evidence: "still errors", Author: "agent-x",
+	})
+	if err != nil {
+		t.Fatalf("reportOutcome: %v", err)
+	}
+	if !strings.Contains(res.Message, "queued") {
+		t.Fatalf("a queued report must say so in the message: %q", res.Message)
+	}
+
+	paths, err := spool.List(queue)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(paths) != 1 {
+		t.Fatalf("want exactly 1 queued report, got %d", len(paths))
+	}
+	rep, err := spool.Read(paths[0])
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if rep.RecordID != "exp-0200" || rep.Outcome != "failed" || rep.Evidence != "still errors" {
+		t.Fatalf("queued report lost data: %+v", rep)
+	}
+}
+
+// With no queue configured the legacy behavior holds: markdown returned, nothing
+// claimed queued.
+func TestReportOutcome_NoQueueReturnsMarkdown(t *testing.T) {
+	h, _ := newUsageHandlers(t, usageFixture())
+	_, res, err := h.reportOutcome(context.Background(), nil, ReportArgs{
+		RecordID: "exp-0200", Outcome: "failed", Author: "agent-x",
+	})
+	if err != nil {
+		t.Fatalf("reportOutcome: %v", err)
+	}
+	if res.Markdown == "" {
+		t.Fatal("the legacy path must return the counter-record markdown to PR")
+	}
+	if strings.Contains(res.Message, "queued") {
+		t.Fatalf("the no-queue path must not claim the report was queued: %q", res.Message)
+	}
+}
 
 func TestReportOutcome_BuildsQuarantinedCounterRecord(t *testing.T) {
 	h, ix := newUsageHandlers(t, usageFixture()) // corpus holds exp-0200 (validated)
