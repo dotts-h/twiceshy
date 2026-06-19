@@ -5,6 +5,8 @@ package promote
 import (
 	"encoding/json"
 	"io"
+
+	"github.com/dotts-h/twiceshy/internal/judge"
 )
 
 // RecordAction is one record's transition in a promote/adapt run: what it was,
@@ -33,9 +35,10 @@ type RunManifest struct {
 	// Anomaly is true when the run tripped the anomaly guardrail and halted
 	// before persisting further (#0037, ADR-0013 §D1) — the daily audit reads
 	// this to react to a compromised-judge spike without scraping logs.
-	Anomaly bool           `json:"anomaly"`
-	Counts  map[string]int `json:"counts"`
-	Actions []RecordAction `json:"actions"`
+	Anomaly    bool              `json:"anomaly"`
+	Counts     map[string]int    `json:"counts"`
+	JudgeStats *judge.JudgeStats `json:"judge_stats,omitempty"`
+	Actions    []RecordAction    `json:"actions"`
 }
 
 // WriteJSON emits the manifest as indented JSON. Actions is always serialized as

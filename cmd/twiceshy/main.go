@@ -641,6 +641,23 @@ func newRunLogger(runID string) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(os.Stderr, nil)).With("run_id", runID)
 }
 
+// surfaceJudgeStats logs aggregate judge latency and verdict distribution when the
+// run made at least one judge call. nil is omitted from the run manifest.
+func surfaceJudgeStats(runLog *slog.Logger, tj *judge.TimingJudge) *judge.JudgeStats {
+	stats := tj.Stats()
+	if stats.Calls == 0 {
+		return nil
+	}
+	runLog.Info("judge stats",
+		"calls", stats.Calls,
+		"approvals", stats.Approvals,
+		"rejections", stats.Rejections,
+		"p50_ms", stats.P50ms,
+		"p95_ms", stats.P95ms,
+	)
+	return &stats
+}
+
 // newRunID is a sortable, filesystem-safe id for one promote/adapt run.
 func newRunID() string {
 	return "run-" + time.Now().UTC().Format("20060102T150405Z")
@@ -749,8 +766,10 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	// Production majority voting (ADR-0013 §F1): wrap the model judge so each
 	// record is judged -votes times and promotes on majority-approve only — closes
 	// the measured ~0.7% single-shot false-approve (exp-0046). The raw j keeps its
-	// Ping for preflight; only the gate sees the voting wrapper.
-	p := promote.NewPromoter(rv, judge.NewMajority(j, *votes), *corpus)
+	// Ping for preflight; only the gate sees the voting wrapper. TimingJudge sits
+	// inside Majority so each inner HTTP call is timed, not the N-vote group.
+	tj := judge.NewTiming(j)
+	p := promote.NewPromoter(rv, judge.NewMajority(tj, *votes), *corpus)
 
 	// Preflight (ADR-0013 §A3): abort before walking the corpus if the sandbox
 	// substrate or the judge endpoint is down, rather than failing mid-run.
@@ -770,6 +789,7 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 		proseOut = io.Discard
 	}
 	st, actions, err := promoteCorpus(ctx, *corpus, recs, p, writeRecord, g, runLog, alerter, proseOut)
+	judgeStats := surfaceJudgeStats(runLog, tj)
 	// An anomaly halt still produces a summary/manifest (the run is legible and the
 	// anomaly is flagged); only a hard failure short-circuits without one.
 	if err != nil && !errors.Is(err, errAnomalyHalt) {
@@ -779,8 +799,9 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	if *asJSON {
 		if werr := (promote.RunManifest{
 			RunID: runID, Stage: "promote", Anomaly: anomaly,
-			Counts:  map[string]int{"promoted": st.promoted, "held": st.held, "ineligible": st.ineligible},
-			Actions: actions,
+			Counts:     map[string]int{"promoted": st.promoted, "held": st.held, "ineligible": st.ineligible},
+			JudgeStats: judgeStats,
+			Actions:    actions,
 		}).WriteJSON(out); werr != nil {
 			return werr
 		}
@@ -980,7 +1001,8 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 	b := repro.NewBroker([]string{repro.PinnedGoImage})
 	rv := repro.NewRevalidator(b, *corpus)
 	runner := brokerCounterRunner{rv: rv}
-	adapter := promote.NewAdapter(j)
+	tj := judge.NewTiming(j)
+	adapter := promote.NewAdapter(tj)
 
 	// Preflight (ADR-0013 §A3): abort before walking the corpus if the sandbox
 	// substrate or the judge endpoint is down, rather than failing mid-run.
@@ -998,6 +1020,7 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 		proseOut = io.Discard
 	}
 	st, actions, err := adaptCorpus(ctx, *corpus, recs, runner, adapter, writeRecord, g, runLog, alerter, proseOut)
+	judgeStats := surfaceJudgeStats(runLog, tj)
 	// An anomaly halt still produces a summary/manifest; only a hard failure short-circuits.
 	if err != nil && !errors.Is(err, errAnomalyHalt) {
 		return err
@@ -1006,8 +1029,9 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 	if *asJSON {
 		if werr := (promote.RunManifest{
 			RunID: runID, Stage: "adapt", Anomaly: anomaly,
-			Counts:  map[string]int{"demoted": st.demoted, "disputed": st.disputed, "held": st.held, "orphan": st.orphan},
-			Actions: actions,
+			Counts:     map[string]int{"demoted": st.demoted, "disputed": st.disputed, "held": st.held, "orphan": st.orphan},
+			JudgeStats: judgeStats,
+			Actions:    actions,
 		}).WriteJSON(out); werr != nil {
 			return werr
 		}
