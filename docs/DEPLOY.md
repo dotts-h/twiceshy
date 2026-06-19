@@ -141,6 +141,18 @@ sudo cp scripts/twiceshy-validate.service scripts/twiceshy-validate.timer /etc/s
 sudo systemctl daemon-reload && sudo systemctl enable --now twiceshy-validate.timer
 ```
 
+**Sandbox-orphan reaping (#0052).** Each `promote` / `adapt` run now sweeps any
+containers/volumes a crashed prior run leaked (label `twiceshy.repro`) **before**
+it walks the corpus — so the nightly timer self-cleans. `-effect` dry-runs skip
+the sweep (they delete nothing). For a host that runs the loop infrequently, add
+a periodic out-of-band sweep (the Reaper is idempotent):
+
+```sh
+# belt-and-suspenders: prune orphaned repro sandboxes on a short timer
+docker ps -aq  --filter label=twiceshy.repro | xargs -r docker rm -f
+docker volume ls -q --filter label=twiceshy.repro | xargs -r docker volume rm -f
+```
+
 Pause: `TWICESHY_PAUSE=1` in `validate.env`, or
 `sudo systemctl disable --now twiceshy-validate.timer`.
 
