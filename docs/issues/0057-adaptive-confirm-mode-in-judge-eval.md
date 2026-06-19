@@ -1,14 +1,14 @@
 ---
 id: 0057
 title: "Adaptive `-confirm` mode in judge-eval"
-status: open
+status: closed
 severity: low
 group: 0034
 depends_on: []
 forgejo: 147
 links:
   adr: ADR-0013
-  prs: []
+  prs: [173]
   issues: []
   regression:
 assets: []
@@ -26,8 +26,8 @@ Plan ref: `docs/GO_LIVE_HARDENING_PLAN.md` §F3.
 
 ## Acceptance
 
-- [ ] `judge-eval -confirm` re-samples only flipped cases and reports the same headline confidence.
-- [ ] Test-first; `make ci` green.
+- [x] `judge-eval -confirm` re-samples only flipped cases and reports the same headline confidence.
+- [x] Test-first; `make ci` green.
 
 ## Notes
 

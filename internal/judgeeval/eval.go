@@ -20,7 +20,7 @@ func Run(ctx context.Context, caller judge.Judge, cases []Case, repeat int) (Res
 	if repeat < 1 {
 		repeat = 1
 	}
-	res := Result{Repeat: repeat, Cases: len(cases)}
+	res := Result{Repeat: repeat, Cases: len(cases), JudgeCalls: repeat * len(cases)}
 	for _, c := range cases {
 		o := scoreCase(ctx, caller, c, repeat)
 		if c.ShouldReject() {
@@ -64,15 +64,80 @@ func Run(ctx context.Context, caller judge.Judge, cases []Case, repeat int) (Res
 	return res, nil
 }
 
-// scoreCase runs one case repeat times, reduces to a single decision (majority;
-// a tie or error-plurality is resolved on the side of caution below), and scores
-// it against ground truth.
-func scoreCase(ctx context.Context, caller judge.Judge, c Case, repeat int) Outcome {
-	o := Outcome{CaseID: c.ID, Mode: c.Mode, Want: c.WantDecision, WantChecks: c.WantFailingChecks, Samples: repeat}
-	var approvals, rejects, errs int
-	var lastErr error
-	var approveV, rejectV judge.Verdict
-	for i := 0; i < repeat; i++ {
+// RunConfirm adaptively samples: every case gets base samples, then only the
+// flipped cases (the judge disagreed with itself) are topped up to total.
+func RunConfirm(ctx context.Context, caller judge.Judge, cases []Case, base, total int) (Result, error) {
+	if base < 1 {
+		base = 1
+	}
+	if total < base {
+		total = base
+	}
+	res := Result{Repeat: total, Cases: len(cases)}
+	for _, c := range cases {
+		approvals, rejects, errs, approveV, rejectV, lastErr := sampleCase(ctx, caller, c, base)
+		samples := base
+		if approvals > 0 && rejects > 0 && total > base {
+			a2, r2, e2, av2, rv2, le2 := sampleCase(ctx, caller, c, total-base)
+			approvals += a2
+			rejects += r2
+			errs += e2
+			samples += total - base
+			if a2 > 0 {
+				approveV = av2
+			}
+			if r2 > 0 {
+				rejectV = rv2
+			}
+			if le2 != nil {
+				lastErr = le2
+			}
+		}
+		res.JudgeCalls += samples
+		o := scoreFromTallies(c, approvals, rejects, errs, approveV, rejectV, lastErr, samples)
+		if c.ShouldReject() {
+			res.RejectCases++
+		} else {
+			res.ApproveCases++
+		}
+		if o.Errored {
+			res.Errors++
+		}
+		if o.FalseApprove {
+			res.FalseApproves++
+		}
+		if o.FalseReject {
+			res.FalseRejects++
+		}
+		if o.Correct {
+			res.Correct++
+		}
+		if c.ShouldReject() && o.Got == judge.Reject && o.CaughtCheck {
+			res.ChecksCaught++
+		}
+		if o.Flipped {
+			res.Flips++
+		}
+		res.Outcomes = append(res.Outcomes, o)
+	}
+	if res.RejectCases > 0 {
+		res.FalseApproveRate = float64(res.FalseApproves) / float64(res.RejectCases)
+	}
+	if res.ApproveCases > 0 {
+		res.FalseRejectRate = float64(res.FalseRejects) / float64(res.ApproveCases)
+	}
+	if res.Cases > 0 {
+		res.Accuracy = float64(res.Correct) / float64(res.Cases)
+	}
+	rejectedRejects := res.RejectCases - res.FalseApproves - rejectErrors(res.Outcomes)
+	if rejectedRejects > 0 {
+		res.CheckRecall = float64(res.ChecksCaught) / float64(rejectedRejects)
+	}
+	return res, nil
+}
+
+func sampleCase(ctx context.Context, caller judge.Judge, c Case, n int) (approvals, rejects, errs int, approveV, rejectV judge.Verdict, lastErr error) {
+	for i := 0; i < n; i++ {
 		v, err := caller.Judge(ctx, c.Request())
 		if err != nil {
 			errs++
@@ -87,6 +152,19 @@ func scoreCase(ctx context.Context, caller judge.Judge, c Case, repeat int) Outc
 			rejectV = v
 		}
 	}
+	return approvals, rejects, errs, approveV, rejectV, lastErr
+}
+
+// scoreCase runs one case repeat times, reduces to a single decision (majority;
+// a tie or error-plurality is resolved on the side of caution below), and scores
+// it against ground truth.
+func scoreCase(ctx context.Context, caller judge.Judge, c Case, repeat int) Outcome {
+	approvals, rejects, errs, approveV, rejectV, lastErr := sampleCase(ctx, caller, c, repeat)
+	return scoreFromTallies(c, approvals, rejects, errs, approveV, rejectV, lastErr, repeat)
+}
+
+func scoreFromTallies(c Case, approvals, rejects, errs int, approveV, rejectV judge.Verdict, lastErr error, samples int) Outcome {
+	o := Outcome{CaseID: c.ID, Mode: c.Mode, Want: c.WantDecision, WantChecks: c.WantFailingChecks, Samples: samples}
 	o.Approvals, o.Rejects, o.ErrSamples = approvals, rejects, errs
 	o.Flipped = approvals > 0 && rejects > 0 // disagreed with itself across samples
 
@@ -95,10 +173,10 @@ func scoreCase(ctx context.Context, caller judge.Judge, c Case, repeat int) Outc
 	// outcome: errors as an error, an approve/reject tie as approve (the
 	// fail-unsafe side, so a tie can never hide a false-approve).
 	switch {
-	case approvals*2 > repeat:
+	case approvals*2 > samples:
 		o.Got = judge.Approve
 		o.Verdict = approveV
-	case rejects*2 > repeat:
+	case rejects*2 > samples:
 		o.Got = judge.Reject
 		o.Verdict = rejectV
 	case errs >= approvals && errs >= rejects:
@@ -218,6 +296,8 @@ type Result struct {
 	CheckRecall      float64 // rejected-for-the-right-reason, over correctly-rejected cases
 
 	Outcomes []Outcome
+
+	JudgeCalls int // total judge.Judge invocations actually made
 }
 
 // ByMode breaks the outcomes down per failure mode, for the report. The returned

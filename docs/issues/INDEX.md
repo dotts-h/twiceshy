@@ -75,5 +75,5 @@ never a cycle).
 | [0054](0054-run-journal-resume-cursor.md) | Run journal / resume cursor | closed | medium | 0034 | ADR-0013; deps [#0036] |
 | [0055](0055-materialize-the-usage-signal-into-provenance-usage.md) | Materialize the usage signal into provenance.usage | closed | medium | 0034 | ADR-0013; deps — |
 | [0056](0056-positive-outcome-mcp-path-confirmed-helpful.md) | Positive-outcome MCP path (confirmed_helpful) | closed | medium | 0034 | ADR-0013; deps — |
-| [0057](0057-adaptive-confirm-mode-in-judge-eval.md) | Adaptive `-confirm` mode in judge-eval | open | low | 0034 | ADR-0013; deps — |
+| [0057](0057-adaptive-confirm-mode-in-judge-eval.md) | Adaptive `-confirm` mode in judge-eval | closed | low | 0034 | ADR-0013; deps — |
 | [0058](0058-grow-the-gold-set-from-daily-audit-misses-ongoing.md) | Grow the gold set from daily-audit misses (ongoing) | open | low | 0034 | ADR-0013; deps [#0044] |

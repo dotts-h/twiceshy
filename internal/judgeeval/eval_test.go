@@ -189,6 +189,83 @@ func TestRun_DualDefectCaseCountsEitherCheck(t *testing.T) {
 	}
 }
 
+func TestRunConfirm_OnlyResamplesFlippedCases(t *testing.T) {
+	cases := []Case{
+		gcase("A1", "approve", judge.Approve),
+		gcase("P1", "poison", judge.Reject, judge.Poison),
+		gcase("F1", "poison", judge.Reject, judge.Poison),
+	}
+	stub := &fnJudge{fn: func(id string, call int) (judge.Verdict, error) {
+		switch id {
+		case "A1":
+			return vApprove(), nil
+		case "P1":
+			return vReject(judge.Poison), nil
+		default: // F1: alternate so the first two samples flip
+			if call%2 == 0 {
+				return vApprove(), nil
+			}
+			return vReject(judge.Poison), nil
+		}
+	}}
+	const base, total = 2, 6
+	res, err := RunConfirm(context.Background(), stub, cases, base, total)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCalls := map[string]int{"A1": base, "P1": base, "F1": total}
+	for id, want := range wantCalls {
+		if got := stub.calls[id]; got != want {
+			t.Errorf("case %s: judged %d times, want %d", id, got, want)
+		}
+	}
+	wantJudgeCalls := base*(len(cases)-1) + total
+	if res.JudgeCalls != wantJudgeCalls {
+		t.Errorf("JudgeCalls = %d, want %d", res.JudgeCalls, wantJudgeCalls)
+	}
+	if res.Repeat != total {
+		t.Errorf("Repeat = %d, want %d", res.Repeat, total)
+	}
+}
+
+func TestRunConfirm_SameHeadlineAsUniformOnStableCases(t *testing.T) {
+	cases := []Case{
+		gcase("A1", "approve", judge.Approve),
+		gcase("P1", "poison", judge.Reject, judge.Poison),
+		gcase("S1", "scope", judge.Reject, judge.Scope),
+	}
+	stub := &fnJudge{fn: func(id string, _ int) (judge.Verdict, error) {
+		switch id {
+		case "A1":
+			return vApprove(), nil
+		default:
+			if id == "P1" {
+				return vReject(judge.Poison), nil
+			}
+			return vReject(judge.Scope), nil
+		}
+	}}
+	const base = 2
+	confirmRes, err := RunConfirm(context.Background(), stub, cases, base, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uniformRes, err := Run(context.Background(), stub, cases, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if confirmRes.FalseApproveRate != uniformRes.FalseApproveRate {
+		t.Errorf("FalseApproveRate: confirm=%v uniform=%v", confirmRes.FalseApproveRate, uniformRes.FalseApproveRate)
+	}
+	if confirmRes.Accuracy != uniformRes.Accuracy {
+		t.Errorf("Accuracy: confirm=%v uniform=%v", confirmRes.Accuracy, uniformRes.Accuracy)
+	}
+	wantCalls := base * len(cases)
+	if confirmRes.JudgeCalls != wantCalls {
+		t.Errorf("JudgeCalls = %d, want %d", confirmRes.JudgeCalls, wantCalls)
+	}
+}
+
 func TestRun_ByModeBreakdown(t *testing.T) {
 	cases := []Case{
 		gcase("A1", "approve", judge.Approve),
