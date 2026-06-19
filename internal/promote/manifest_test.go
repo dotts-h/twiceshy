@@ -49,6 +49,23 @@ func TestRunManifest_WriteJSON(t *testing.T) {
 	}
 }
 
+// The anomaly flag (a tripped guardrail, #0037) must survive serialization so
+// the daily audit can react to a halted run from the manifest alone.
+func TestRunManifest_AnomalyRoundTrips(t *testing.T) {
+	m := promote.RunManifest{RunID: "r", Stage: "promote", Anomaly: true, Counts: map[string]int{}, Actions: []promote.RecordAction{}}
+	var buf bytes.Buffer
+	if err := m.WriteJSON(&buf); err != nil {
+		t.Fatalf("WriteJSON: %v", err)
+	}
+	var got promote.RunManifest
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("not valid JSON: %v", err)
+	}
+	if !got.Anomaly {
+		t.Fatalf("anomaly flag lost in round-trip: %s", buf.String())
+	}
+}
+
 // An empty run still emits a JSON array, never null — the consumer can iterate
 // unconditionally.
 func TestRunManifest_EmptyActionsIsArray(t *testing.T) {

@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -52,23 +53,22 @@ func TestPromoteCorpus_BudgetCapStops(t *testing.T) {
 	}
 }
 
-func TestPromoteCorpus_AnomalyAlerts(t *testing.T) {
+func TestPromoteCorpus_AnomalyOnFinalActionStillHalts(t *testing.T) {
 	recs := []*record.Record{eligibleRec("exp-0100"), eligibleRec("exp-0101")}
 	fp := &fakePromoter{promote: map[string]bool{"exp-0100": true, "exp-0101": true}}
 	persist := func(_ string, _ *record.Record) error { return nil }
 	var buf bytes.Buffer
 
-	// MaxActions 1: the 2nd promotion crosses the threshold and alerts (but still
-	// completes — the alert is a notification, not a halt).
+	// MaxActions 1, exactly 2 records: the 2nd promotion trips the threshold but
+	// there is no further record to halt before. The run must STILL report the
+	// anomaly (errAnomalyHalt → non-zero exit) so a spike on the last action can't
+	// slip through with exit 0 (#0037, ADR-0013 §D1).
 	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxActions: 1}, nil, &buf)
-	if err != nil {
-		t.Fatalf("promoteCorpus: %v", err)
+	if !errors.Is(err, errAnomalyHalt) {
+		t.Fatalf("a threshold-tripping run must return errAnomalyHalt, got %v", err)
 	}
 	if st.promoted != 2 {
-		t.Fatalf("an anomaly alert must NOT halt; promoted=%d, want 2", st.promoted)
-	}
-	if !strings.Contains(buf.String(), "ANOMALY") {
-		t.Fatalf("expected an anomaly alert; got %q", buf.String())
+		t.Fatalf("both promotions persist (nothing after to halt); promoted=%d, want 2", st.promoted)
 	}
 }
 
@@ -131,20 +131,19 @@ func TestAdaptCorpus_BudgetCapStops(t *testing.T) {
 	}
 }
 
-func TestAdaptCorpus_AnomalyAlerts(t *testing.T) {
+func TestAdaptCorpus_AnomalyOnFinalActionStillHalts(t *testing.T) {
 	recs, runner := adaptDemoting(t, 2)
 	adapter := promote.NewAdapter(&judge.StubJudge{Verdict: judge.ApproveVerdict("g")})
 	persist := func(_ string, _ *record.Record) error { return nil }
 	var buf bytes.Buffer
 
+	// MaxActions 1, 2 demotes: the 2nd trips the threshold with nothing after to
+	// halt — the run must still return errAnomalyHalt (non-zero exit).
 	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxActions: 1}, nil, &buf)
-	if err != nil {
-		t.Fatalf("adaptCorpus: %v", err)
+	if !errors.Is(err, errAnomalyHalt) {
+		t.Fatalf("a threshold-tripping adapt run must return errAnomalyHalt, got %v", err)
 	}
 	if st.demoted != 2 {
-		t.Fatalf("an anomaly alert must NOT halt; demoted=%d, want 2", st.demoted)
-	}
-	if !strings.Contains(buf.String(), "ANOMALY") {
-		t.Fatalf("expected an anomaly alert; got %q", buf.String())
+		t.Fatalf("both demotions persist (nothing after to halt); demoted=%d, want 2", st.demoted)
 	}
 }
