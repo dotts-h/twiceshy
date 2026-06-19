@@ -24,6 +24,8 @@ func (f *fakeBroker) Run(_ context.Context, job repro.Job) (repro.Result, error)
 	return f.result, nil
 }
 
+func (f *fakeBroker) Healthy(context.Context) error { return nil }
+
 func passing() repro.Result {
 	return repro.Result{Prepare: repro.PhaseResult{ExitCode: 0}, Execute: repro.PhaseResult{ExitCode: 0}}
 }

@@ -1,14 +1,14 @@
 ---
 id: 0040
 title: "Preflight healthcheck (docker/runsc + judge liveness)"
-status: open
+status: closed
 severity: medium
 group: 0034
 depends_on: []
 forgejo: 130
 links:
   adr: ADR-0013
-  prs: []
+  prs: [155]
   issues: []
   regression:
 assets: []
@@ -26,9 +26,9 @@ Plan ref: `docs/GO_LIVE_HARDENING_PLAN.md` §A3.
 
 ## Acceptance
 
-- [ ] With docker stopped or the judge unreachable, the command aborts before processing any record.
-- [ ] The abort names which preflight check failed.
-- [ ] Test-first; `make ci` green.
+- [x] With docker stopped or the judge unreachable, the command aborts before processing any record.
+- [x] The abort names which preflight check failed.
+- [x] Test-first; `make ci` green.
 
 ## Notes
 

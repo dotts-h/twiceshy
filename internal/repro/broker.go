@@ -52,6 +52,11 @@ import (
 // call, even on error, timeout, or panic.
 type Broker interface {
 	Run(ctx context.Context, job Job) (Result, error)
+	// Healthy is the preflight probe (ADR-0013 §A3): it reports whether the
+	// substrate the broker needs — a reachable docker daemon with the gVisor
+	// (runsc) runtime registered — is up, so the loop can fail fast instead of
+	// discovering a dead sandbox partway through.
+	Healthy(ctx context.Context) error
 }
 
 // Job is one repro to run. Its fields are supplied by the (trusted) caller — the
@@ -183,6 +188,31 @@ func NewBroker(allowedImages []string, opts ...Option) Broker {
 		o(b)
 	}
 	return b
+}
+
+// healthTimeout bounds the preflight probe — a `docker info` should answer fast;
+// if it doesn't, the daemon is effectively down for an unattended run.
+const healthTimeout = 15 * time.Second
+
+// Healthy confirms the docker daemon is reachable and the configured OCI runtime
+// (runsc/gVisor) is registered. It probes with a single `docker info` (templated
+// to list runtime names) through the same runner seam the rest of the broker
+// uses, so it is unit-tested with a stub and needs no daemon.
+func (b *dockerBroker) Healthy(ctx context.Context) error {
+	res, err := b.runner.run(ctx, nil, healthTimeout, "docker", "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}}\n{{end}}")
+	if err != nil || res.exitCode != 0 {
+		detail := strings.TrimSpace(res.stderr)
+		if detail == "" && err != nil {
+			detail = err.Error()
+		}
+		return fmt.Errorf("docker daemon not reachable: %s", detail)
+	}
+	for _, rt := range strings.Fields(res.stdout) {
+		if rt == b.runtime {
+			return nil
+		}
+	}
+	return fmt.Errorf("the %q OCI runtime is not registered with docker (gVisor/runsc is required for the sandbox)", b.runtime)
 }
 
 // Run validates the job, then: create volume → populate (root) → prepare

@@ -65,6 +65,11 @@ var errUsage = errors.New("invalid flags")
 // specifically, separate from a usage error (2) or a generic failure (1).
 var errAnomalyHalt = errors.New("run halted: anomaly threshold exceeded")
 
+// errPreflight marks a run aborted by the preflight healthcheck (ADR-0013 §A3):
+// the broker substrate (docker/runsc) or the judge endpoint was down before any
+// record was processed. main maps it to a distinct non-zero exit (4).
+var errPreflight = errors.New("preflight check failed")
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -80,7 +85,8 @@ func main() {
 }
 
 // exitCode maps a run error to the process exit code: 0 success / 2 usage /
-// 3 anomaly-halt (a guardrail tripped) / 1 any other failure.
+// 3 anomaly-halt (a guardrail tripped) / 4 preflight failure (substrate down) /
+// 1 any other failure.
 func exitCode(err error) int {
 	switch {
 	case err == nil, errors.Is(err, flag.ErrHelp):
@@ -89,9 +95,35 @@ func exitCode(err error) int {
 		return 2
 	case errors.Is(err, errAnomalyHalt):
 		return 3
+	case errors.Is(err, errPreflight):
+		return 4
 	default:
 		return 1
 	}
+}
+
+// brokerHealth and judgeLive are the minimal preflight seams (ADR-0013 §A3):
+// repro.Broker and judge.ModelJudge satisfy them, and a fake drives the
+// orchestration in tests.
+type brokerHealth interface {
+	Healthy(ctx context.Context) error
+}
+type judgeLive interface {
+	Ping(ctx context.Context) error
+}
+
+// preflight probes the broker substrate (docker/runsc) and the judge endpoint
+// before the loop walks the corpus, so a dead substrate aborts cleanly up front
+// (distinct exit) instead of failing partway through. The error names which check
+// failed.
+func preflight(ctx context.Context, b brokerHealth, j judgeLive) error {
+	if err := b.Healthy(ctx); err != nil {
+		return fmt.Errorf("%w: broker substrate: %v", errPreflight, err)
+	}
+	if err := j.Ping(ctx); err != nil {
+		return fmt.Errorf("%w: judge liveness: %v", errPreflight, err)
+	}
+	return nil
 }
 
 // parseFlags parses args, leaving usage/errors on stderr (flag's default — never
@@ -709,6 +741,12 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	rv := repro.NewRevalidator(b, *corpus)
 	p := promote.NewPromoter(rv, j, *corpus)
 
+	// Preflight (ADR-0013 §A3): abort before walking the corpus if the sandbox
+	// substrate or the judge endpoint is down, rather than failing mid-run.
+	if err := preflight(ctx, b, j); err != nil {
+		return err
+	}
+
 	g := guardrailsFrom(getenv, *maxActions, *maxRuns)
 	runID := newRunID()
 	runLog := newRunLogger(runID)
@@ -926,6 +964,12 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 	rv := repro.NewRevalidator(b, *corpus)
 	runner := brokerCounterRunner{rv: rv}
 	adapter := promote.NewAdapter(j)
+
+	// Preflight (ADR-0013 §A3): abort before walking the corpus if the sandbox
+	// substrate or the judge endpoint is down, rather than failing mid-run.
+	if err := preflight(ctx, b, j); err != nil {
+		return err
+	}
 
 	g := guardrailsFrom(getenv, *maxActions, *maxRuns)
 	runID := newRunID()
