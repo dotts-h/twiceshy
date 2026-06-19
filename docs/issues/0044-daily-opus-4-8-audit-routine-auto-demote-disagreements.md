@@ -1,14 +1,14 @@
 ---
 id: 0044
 title: "Daily Opus-4.8 audit routine (auto-demote disagreements)"
-status: open
+status: closed
 severity: high
 group: 0034
 depends_on: [0043, 0036]
 forgejo: 134
 links:
   adr: ADR-0013
-  prs: []
+  prs: [159]
   issues: []
   regression:
 assets: []
@@ -26,10 +26,10 @@ a /schedule routine or systemd timer + a small audit script; reads #0036 JSON; w
 
 ## Acceptance
 
-- [ ] The morning after a run, a digest lists promotions + the audit's agree/disagree per record.
-- [ ] Disagreements are demoted or flagged.
-- [ ] OPERATOR STEP: schedule the routine.
-- [ ] Test-first; `make ci` green.
+- [x] The morning after a run, a digest lists promotions + the audit's agree/disagree per record.
+- [x] Disagreements are demoted or flagged.
+- [x] OPERATOR STEP: schedule the routine.
+- [x] Test-first; `make ci` green.
 
 ## Notes
 
