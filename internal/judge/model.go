@@ -59,6 +59,15 @@ type Config struct {
 	// DrafterModel is the model that drafted records; the judge must differ in
 	// family (anti-monoculture, ADR-0013 §6). Optional: empty skips the check.
 	DrafterModel string
+	// System overrides the judge's system prompt (e.g. RubricSystemV1, the A/B
+	// winner). Empty leaves it to the shim's built-in default — the back-compat
+	// path. Sent over the wire so the prompt lives in version control, not the
+	// untracked shim.
+	System string
+	// Think enables the judge model's reasoning pass when the shim/model supports
+	// it (gpt-oss "think"). Default false. Whether it earns its latency is exactly
+	// what the eval measures.
+	Think bool
 	// Client is an optional HTTP client; nil uses a timeout-bounded default.
 	Client *http.Client
 }
@@ -70,6 +79,8 @@ type Config struct {
 type ModelJudge struct {
 	endpoint string
 	model    string
+	system   string
+	think    bool
 	client   *http.Client
 }
 
@@ -98,7 +109,17 @@ func NewModelJudge(cfg Config) (*ModelJudge, error) {
 	if client == nil {
 		client = &http.Client{Timeout: judgeHTTPTimeout}
 	}
-	return &ModelJudge{endpoint: endpoint, model: cfg.Model, client: client}, nil
+	return &ModelJudge{endpoint: endpoint, model: cfg.Model, system: cfg.System, think: cfg.Think, client: client}, nil
+}
+
+// wireRequest is the body twiceshy POSTs to the shim. System and Think are
+// optional (omitted when unset) so the historical {model,prompt} contract still
+// holds for a shim that predates them.
+type wireRequest struct {
+	Model  string `json:"model"`
+	Prompt string `json:"prompt"`
+	System string `json:"system,omitempty"`
+	Think  bool   `json:"think,omitempty"`
 }
 
 // wireVerdict is the strict JSON the endpoint must return. A response that
@@ -116,8 +137,8 @@ type wireVerdict struct {
 // Judge POSTs the request as a prompt and parses the strict-JSON verdict. On any
 // failure it returns an error and the zero Verdict, never a spurious approve.
 func (j *ModelJudge) Judge(ctx context.Context, req Request) (Verdict, error) {
-	prompt := buildPrompt(req)
-	body, err := json.Marshal(map[string]string{"model": j.model, "prompt": prompt})
+	prompt := BuildPrompt(req)
+	body, err := json.Marshal(wireRequest{Model: j.model, Prompt: prompt, System: j.system, Think: j.think})
 	if err != nil {
 		return Verdict{}, fmt.Errorf("judge: marshal request: %w", err)
 	}
@@ -177,12 +198,14 @@ func toVerdict(wv wireVerdict, model string) (Verdict, error) {
 	return v, nil
 }
 
-// buildPrompt renders the proof into the judging instruction. It is plain text:
-// the record's claim, the attestation result, and the repro bodies, followed by
-// the four checks and the strict-JSON contract. Record content is untrusted, so
-// it is delimited and the model is told to treat it as data (CONVENTIONS:
-// memory-poisoning) — never to follow instructions embedded in it.
-func buildPrompt(req Request) string {
+// BuildPrompt renders the proof into the judging instruction (the user message).
+// It is plain text: the record's claim, the attestation result, and the repro
+// bodies, followed by the four checks and the strict-JSON contract. Record
+// content is untrusted, so it is delimited and the model is told to treat it as
+// data (CONVENTIONS: memory-poisoning) — never to follow instructions embedded in
+// it. Exported so the prompt eval (internal/judgeeval) renders cases through the
+// exact production path it is measuring.
+func BuildPrompt(req Request) string {
 	var b strings.Builder
 	b.WriteString("You are an independent judge for an experience-record corpus. ")
 	b.WriteString("A sandbox already PROVED this record's repro runs fail-pre / pass-post; ")
