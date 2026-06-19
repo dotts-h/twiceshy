@@ -141,6 +141,18 @@ var reapOrphans = func(ctx context.Context) (containers, volumes int, err error)
 // substrate already passed preflight; cleanup hiccups shouldn't abort the run).
 // For belt-and-suspenders, also run `twiceshy` … with a periodic out-of-band
 // sweep (the Reaper is idempotent and safe on a schedule, see repro.Reaper).
+// logSkippedPoison reports records the resilient run-loader skipped (#0053): a
+// poison/unparseable file does not abort the run, but each one is surfaced
+// (slog + prose) so it is never silently dropped.
+func logSkippedPoison(logger *slog.Logger, out io.Writer, stage string, skipped []string) {
+	for _, s := range skipped {
+		if logger != nil {
+			logger.Warn("skipped unparseable record", "stage", stage, "detail", s)
+		}
+		_, _ = fmt.Fprintf(out, "%s: skipped unparseable record — %s\n", stage, s)
+	}
+}
+
 func startupReap(ctx context.Context, stage string, dryRun bool, logger *slog.Logger, out io.Writer) {
 	if dryRun {
 		return
@@ -766,12 +778,13 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 		return err
 	}
 
-	recs, err := record.LoadCorpus(*corpus)
+	recs, skipped, err := record.LoadCorpusResilient(*corpus)
 	if err != nil {
 		return fmt.Errorf("loading corpus: %w", err)
 	}
 
 	if *dryRun && !*effect {
+		logSkippedPoison(nil, out, "promote", skipped)
 		n := 0
 		for _, rec := range recs {
 			if ok, _ := promote.Eligible(rec); ok {
@@ -845,6 +858,7 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	}
 	// Sweep a crashed prior run's leaked sandbox resources before the walk (#0052).
 	startupReap(ctx, "promote", *effect, runLog, proseOut)
+	logSkippedPoison(runLog, proseOut, "promote", skipped)
 	st, actions, err := promoteCorpus(ctx, *corpus, recs, p, persist, g, runLog, alerter, proseOut)
 	if *effect {
 		if err != nil && !errors.Is(err, errAnomalyHalt) {
@@ -1112,7 +1126,7 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 		return err
 	}
 
-	recs, err := record.LoadCorpus(*corpus)
+	recs, skipped, err := record.LoadCorpusResilient(*corpus)
 	if err != nil {
 		return fmt.Errorf("loading corpus: %w", err)
 	}
@@ -1181,6 +1195,7 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 	}
 	// Sweep a crashed prior run's leaked sandbox resources before the walk (#0052).
 	startupReap(ctx, "adapt", *effect, runLog, proseOut)
+	logSkippedPoison(runLog, proseOut, "adapt", skipped)
 	st, actions, err := adaptCorpus(ctx, *corpus, recs, runner, adapter, persist, g, runLog, alerter, proseOut)
 	if *effect {
 		if err != nil && !errors.Is(err, errAnomalyHalt) {
