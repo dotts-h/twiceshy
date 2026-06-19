@@ -53,8 +53,8 @@ never a cycle).
 | [0031](0031-outcome-report-intake-mcp-report-outcome-gated-counter-evidence.md) | Outcome-report intake — MCP report_outcome, quarantined counter-evidence | closed | medium | 0027 | ADR-0013, PR#83 |
 | [0032](0032-counter-evidence-gate-and-adapt-demote-or-supersede-on-reproduced-failure.md) | Counter-evidence gate + adapt — demote/supersede on reproduced failure | closed | high | 0027 | ADR-0013, PR#85 |
 | [0033](0033-guardrails-anomaly-monitoring-emergency-stop-budget-caps.md) | Guardrails — anomaly monitoring, emergency stop, budget caps | closed | high | 0027 | ADR-0013, PR#86 |
-| [0035](0035-structured-slog-logging-on-the-promote-adapt-loop.md) | Structured slog logging on the promote/adapt loop | open | high | 0034 | ADR-0013; deps — |
-| [0036](0036-json-run-manifest-for-promote-adapt.md) | `-json` run manifest for promote/adapt | open | high | 0034 | ADR-0013; deps [#0035] |
+| [0035](0035-structured-slog-logging-on-the-promote-adapt-loop.md) | Structured slog logging on the promote/adapt loop | closed | high | 0034 | ADR-0013, PR#150 |
+| [0036](0036-json-run-manifest-for-promote-adapt.md) | `-json` run manifest for promote/adapt | closed | high | 0034 | ADR-0013, PR#151 |
 | [0037](0037-anomaly-halt-non-zero-exit-checked-before-persist.md) | Anomaly = HALT + non-zero exit, checked before persist | open | high | 0034 | ADR-0013; deps [#0036] |
 | [0038](0038-route-guardrail-trips-to-a-channel-ntfy-notify-seam.md) | Route guardrail trips to a channel (ntfy notify seam) | open | high | 0034 | ADR-0013; deps [#0037] |
 | [0039](0039-single-flight-lock-around-promote-adapt.md) | Single-flight lock around promote/adapt | open | high | 0034 | ADR-0013; deps — |
