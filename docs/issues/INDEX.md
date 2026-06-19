@@ -67,7 +67,7 @@ never a cycle).
 | [0046](0046-unify-broker-reaper-logging-to-slog.md) | Unify broker reaper logging to slog | closed | low | 0034 | ADR-0013, PR#161 |
 | [0047](0047-judge-latency-verdict-distribution-metrics.md) | Judge latency + verdict-distribution metrics | closed | medium | 0034 | ADR-0013, PR#162 |
 | [0048](0048-re-promote-un-demote-path.md) | Re-promote / un-demote path | closed | high | 0034 | ADR-0013, PR#163 |
-| [0049](0049-true-effect-preview-dry-run.md) | True effect-preview dry-run | open | medium | 0034 | ADR-0013; deps — |
+| [0049](0049-true-effect-preview-dry-run.md) | True effect-preview dry-run | closed | medium | 0034 | ADR-0013, PR#164 |
 | [0050](0050-validator-desync-guards-valid-until-demotion.md) | Validator desync guards (valid.until / demotion) | open | medium | 0034 | ADR-0013; deps — |
 | [0051](0051-rollback-runbook.md) | Rollback runbook | open | medium | 0034 | ADR-0013; deps [#0043, #0048] |
 | [0052](0052-wire-the-reaper-at-promote-adapt-startup.md) | Wire the Reaper at promote/adapt startup | open | medium | 0034 | ADR-0013; deps — |

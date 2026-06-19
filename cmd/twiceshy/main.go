@@ -699,6 +699,19 @@ type promoteStats struct {
 	ineligible int // not the execution-provable class (left for a human)
 }
 
+// printEffectPreview reports the would-be transitions of a no-persist run; a
+// record whose status is unchanged (held/ineligible/orphan) is shown as no-op.
+func printEffectPreview(out io.Writer, stage string, actions []promote.RecordAction) {
+	changed := 0
+	for _, a := range actions {
+		if a.FromStatus != a.ToStatus {
+			_, _ = fmt.Fprintf(out, "  %s: %s→%s (%s)\n", a.ID, a.FromStatus, a.ToStatus, a.Outcome)
+			changed++
+		}
+	}
+	_, _ = fmt.Fprintf(out, "%s -effect: %d of %d record(s) would change status — nothing written\n", stage, changed, len(actions))
+}
+
 // runPromote is the positive direction of ADR-0013 (#0029): for each quarantined
 // execution-provable record, a holding broker attestation PLUS a judge PASS flips
 // it to validated with no human approver, recording the attestation + verdict in
@@ -711,6 +724,7 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	judgeModel := fs.String("judge-model", "", "diverse frontier judge model id, e.g. gemini-2.5-pro (must differ from -drafter-model)")
 	drafterModel := fs.String("drafter-model", "", "the model that drafted records; the judge must not share its family (anti-monoculture)")
 	dryRun := fs.Bool("dry-run", false, "list the execution-provable promotion candidates; run no gate/judge, write nothing")
+	effect := fs.Bool("effect", false, "with the gate+judge run but write NOTHING, print the would-be status delta per record (effect preview)")
 	asJSON := fs.Bool("json", false, "emit a machine-readable run manifest (every record's transition) to stdout instead of prose; the daily audit reads this")
 	maxActions := fs.Int("max-actions", defaultMaxActions, "anomaly alert threshold: promotions per run above which an alert fires (0 = off)")
 	maxRuns := fs.Int("max-runs", 0, "budget cap: max records processed (broker/judge runs) per invocation (0 = unlimited)")
@@ -724,7 +738,7 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 		return fmt.Errorf("loading corpus: %w", err)
 	}
 
-	if *dryRun {
+	if *dryRun && !*effect {
 		n := 0
 		for _, rec := range recs {
 			if ok, _ := promote.Eligible(rec); ok {
@@ -785,13 +799,25 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	runLog := newRunLogger(runID)
 	// Guardrail trips fire to TWICESHY_ALERT_URL (ntfy) when set; unset = no-op.
 	alerter := notify.New(getenv("TWICESHY_ALERT_URL"), runLog)
-	// In -json mode stdout carries the manifest alone; the per-record prose is
-	// suppressed (the slog stream on stderr stays the human-followable channel).
+	// In -json or -effect mode stdout carries only the manifest or effect preview;
+	// the per-record prose is suppressed (the slog stream on stderr stays the
+	// human-followable channel).
 	proseOut := out
-	if *asJSON {
+	if *asJSON || *effect {
 		proseOut = io.Discard
 	}
-	st, actions, err := promoteCorpus(ctx, *corpus, recs, p, writeRecord, g, runLog, alerter, proseOut)
+	persist := writeRecord
+	if *effect {
+		persist = func(string, *record.Record) error { return nil }
+	}
+	st, actions, err := promoteCorpus(ctx, *corpus, recs, p, persist, g, runLog, alerter, proseOut)
+	if *effect {
+		if err != nil && !errors.Is(err, errAnomalyHalt) {
+			return err
+		}
+		printEffectPreview(out, "promote", actions)
+		return err
+	}
 	judgeStats := surfaceJudgeStats(runLog, tj)
 	// An anomaly halt still produces a summary/manifest (the run is legible and the
 	// anomaly is flagged); only a hard failure short-circuits without one.
@@ -1043,6 +1069,7 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 	judgeModel := fs.String("judge-model", "", "diverse frontier judge model id (must differ from -drafter-model)")
 	drafterModel := fs.String("drafter-model", "", "the model that drafted records; the judge must not share its family")
 	dryRun := fs.Bool("dry-run", false, "list the outcome reports and the records they dispute; run no gate/judge, write nothing")
+	effect := fs.Bool("effect", false, "with the gate+judge run but write NOTHING, print the would-be status delta per record (effect preview)")
 	asJSON := fs.Bool("json", false, "emit a machine-readable run manifest (every record's transition) to stdout instead of prose; the daily audit reads this")
 	maxActions := fs.Int("max-actions", defaultMaxActions, "anomaly alert threshold: demotions per run above which an alert fires (0 = off)")
 	maxRuns := fs.Int("max-runs", 0, "budget cap: max reports processed (broker/judge runs) per invocation (0 = unlimited)")
@@ -1055,7 +1082,7 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 		return fmt.Errorf("loading corpus: %w", err)
 	}
 
-	if *dryRun {
+	if *dryRun && !*effect {
 		n := 0
 		for _, rec := range recs {
 			if d := reportDisputes(rec); d != "" {
@@ -1110,10 +1137,21 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 	// Guardrail trips fire to TWICESHY_ALERT_URL (ntfy) when set; unset = no-op.
 	alerter := notify.New(getenv("TWICESHY_ALERT_URL"), runLog)
 	proseOut := out
-	if *asJSON {
+	if *asJSON || *effect {
 		proseOut = io.Discard
 	}
-	st, actions, err := adaptCorpus(ctx, *corpus, recs, runner, adapter, writeRecord, g, runLog, alerter, proseOut)
+	persist := writeRecord
+	if *effect {
+		persist = func(string, *record.Record) error { return nil }
+	}
+	st, actions, err := adaptCorpus(ctx, *corpus, recs, runner, adapter, persist, g, runLog, alerter, proseOut)
+	if *effect {
+		if err != nil && !errors.Is(err, errAnomalyHalt) {
+			return err
+		}
+		printEffectPreview(out, "adapt", actions)
+		return err
+	}
 	judgeStats := surfaceJudgeStats(runLog, tj)
 	// An anomaly halt still produces a summary/manifest; only a hard failure short-circuits.
 	if err != nil && !errors.Is(err, errAnomalyHalt) {

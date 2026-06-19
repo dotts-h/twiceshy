@@ -1,14 +1,14 @@
 ---
 id: 0049
 title: "True effect-preview dry-run"
-status: open
+status: closed
 severity: medium
 group: 0034
 depends_on: []
 forgejo: 139
 links:
   adr: ADR-0013
-  prs: []
+  prs: [164]
   issues: []
   regression:
 assets: []
@@ -26,8 +26,8 @@ Plan ref: `docs/GO_LIVE_HARDENING_PLAN.md` §C3.
 
 ## Acceptance
 
-- [ ] `promote -dry-run -effect` prints `exp-X: quarantined→validated` per record and writes nothing.
-- [ ] Test-first; `make ci` green.
+- [x] `promote -dry-run -effect` prints `exp-X: quarantined→validated` per record and writes nothing.
+- [x] Test-first; `make ci` green.
 
 ## Notes
 
