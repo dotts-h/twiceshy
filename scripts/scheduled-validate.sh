@@ -86,10 +86,18 @@ merge_due() {
 	local now due_prs pr head sha created age
 	now="$(date -u +%s)"
 	due_prs="$(curl -fsS "$API/pulls?state=open&limit=50" -H "Authorization: token $tok" 2>/dev/null || echo '[]')"
-	# Each open validate/* PR: merge if (now - created_at) >= SOAK.
-	while read -r pr head sha created; do
+	# Each open validate/* PR: merge if (now - created_at) >= SOAK. An anomalous
+	# batch (its PR body carries the ANOMALY marker) is NEVER auto-merged here even
+	# after the soak — the merge happens in a LATER run that has no memory of the
+	# original run's anomaly flag, so the PR body is the durable "held for review"
+	# signal. The operator merges or closes it by hand.
+	while read -r pr head sha created anom; do
 		[ -n "$pr" ] || continue
 		case "$head" in validate/*) ;; *) continue ;; esac
+		if [ "$anom" = "true" ]; then
+			echo "validate: PR #${pr} (${head}) flagged ANOMALY — held for human review, not auto-merged"
+			continue
+		fi
 		age=$((now - created))
 		if [ "$age" -ge "$SOAK" ]; then
 			if forgejo-ci-merge claude/twiceshy "$pr" "$sha" "$REPO"; then
@@ -98,7 +106,7 @@ merge_due() {
 				notify "twiceshy validate: PR #${pr} (${head}) merge failed after soak"
 			fi
 		fi
-	done < <(printf '%s' "$due_prs" | jq -r '.[] | "\(.number) \(.head.ref) \(.head.sha) \(.created_at | fromdateiso8601)"')
+	done < <(printf '%s' "$due_prs" | jq -r '.[] | "\(.number) \(.head.ref) \(.head.sha) \(.created_at | fromdateiso8601) \((.body // "") | test("ANOMALY"))"')
 }
 merge_due
 
