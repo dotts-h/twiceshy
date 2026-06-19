@@ -1,14 +1,14 @@
 ---
 id: 0051
 title: "Rollback runbook"
-status: open
+status: closed
 severity: medium
 group: 0034
 depends_on: [0043, 0048]
 forgejo: 141
 links:
   adr: ADR-0013
-  prs: []
+  prs: [167]
   issues: []
   regression:
 assets: []
@@ -26,8 +26,8 @@ Plan ref: `docs/GO_LIVE_HARDENING_PLAN.md` §C5.
 
 ## Acceptance
 
-- [ ] A runbook covers veto, batch-rollback, and single-record restore with exact commands.
-- [ ] Test-first; `make ci` green.
+- [x] A runbook covers veto, batch-rollback, and single-record restore with exact commands.
+- [x] Test-first; `make ci` green.
 
 ## Notes
 
