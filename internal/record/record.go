@@ -518,6 +518,11 @@ func (r *Record) validateProvenance(fail func(string, ...any)) {
 	// with a closed validity window or a lingering demotion block — either makes
 	// the staleness doctor re-flag it (validated↔stale flip-flop).
 	if r.Status == "validated" {
+		// Boundary is deliberately `until.Before(now)` with a raw UTC instant —
+		// IDENTICAL to the staleness doctor (internal/doctor/staleness.go uses
+		// time.Now().UTC()). Do NOT truncate to start-of-day "valid through the
+		// until date": that would make the validator disagree with the doctor on
+		// until==today and reintroduce the flip-flop this guard prevents.
 		if !until.IsZero() && until.Before(nowUTC()) {
 			fail("status validated with a past provenance.valid.until %q — promote clears the window or demote it", *p.Valid.Until)
 		}
