@@ -1,14 +1,14 @@
 ---
 id: 0053
 title: "Fail-safe verification tests (broker outage / poison record)"
-status: open
+status: closed
 severity: high
 group: 0034
 depends_on: []
 forgejo: 143
 links:
   adr: ADR-0013
-  prs: []
+  prs: [169]
   issues: []
   regression:
 assets: []
@@ -26,9 +26,9 @@ Plan ref: `docs/GO_LIVE_HARDENING_PLAN.md` §D3.
 
 ## Acceptance
 
-- [ ] A broker-outage test proves nothing bad promotes and the run exits non-zero.
-- [ ] A poison/unparseable record does not kill the whole run.
-- [ ] Test-first; `make ci` green.
+- [x] A broker-outage test proves nothing bad promotes and the run exits non-zero.
+- [x] A poison/unparseable record does not kill the whole run.
+- [x] Test-first; `make ci` green.
 
 ## Notes
 

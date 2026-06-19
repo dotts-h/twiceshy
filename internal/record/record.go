@@ -300,6 +300,46 @@ func LoadCorpus(root string) ([]*Record, error) {
 	return recs, nil
 }
 
+// LoadCorpusResilient loads the corpus for an autonomous RUN: a single poison /
+// unparseable record must not kill the whole promote/adapt run (#0053, §D3), so
+// it is skipped and reported instead of aborting. It returns the survivors plus
+// "path: reason" lines for each skipped file, for the caller to log. Unlike
+// LoadCorpus it does NOT run the strict cross-record integrity checks (duplicate
+// ids, superseded_by existence, repro-path presence) — those stay the strict
+// validator's job (index/doctor/CI); a run only acts on independently-eligible
+// records. A missing/unreadable corpus tree is still fatal (nothing to run on).
+func LoadCorpusResilient(root string) (recs []*Record, skipped []string, err error) {
+	expDir := filepath.Join(root, "experience")
+	werr := filepath.WalkDir(expDir, func(p string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, p)
+		if relErr != nil {
+			return relErr
+		}
+		rel = filepath.ToSlash(rel)
+		if !reRecordPath.MatchString(rel) {
+			return nil // repro scripts, READMEs, scratch files
+		}
+		rec, parseErr := ParseFile(root, rel)
+		if parseErr != nil {
+			skipped = append(skipped, fmt.Sprintf("%s: %v", rel, parseErr))
+			return nil // skip the poison record, keep walking
+		}
+		recs = append(recs, rec)
+		return nil
+	})
+	if werr != nil {
+		return nil, nil, werr
+	}
+	sort.Slice(recs, func(i, j int) bool { return recs[i].ID < recs[j].ID })
+	return recs, skipped, nil
+}
+
 func splitFrontmatter(src []byte) (front []byte, body string, err error) {
 	const fence = "---\n"
 	if !bytes.HasPrefix(src, []byte(fence)) {
