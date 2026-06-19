@@ -1,14 +1,14 @@
 ---
 id: 0050
 title: "Validator desync guards (valid.until / demotion)"
-status: open
+status: closed
 severity: medium
 group: 0034
 depends_on: []
 forgejo: 140
 links:
   adr: ADR-0013
-  prs: []
+  prs: [165]
   issues: []
   regression:
 assets: []
@@ -26,8 +26,8 @@ Plan ref: `docs/GO_LIVE_HARDENING_PLAN.md` §C4.
 
 ## Acceptance
 
-- [ ] A validated record with a past valid.until or a lingering demotion block fails validation.
-- [ ] Test-first; `make ci` green.
+- [x] A validated record with a past valid.until or a lingering demotion block fails validation.
+- [x] Test-first; `make ci` green.
 
 ## Notes
 
