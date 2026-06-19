@@ -2,7 +2,7 @@
 schema_version: 1
 id: exp-0045
 kind: fix
-status: quarantined
+status: validated
 title: rand.Seed is deprecated since Go 1.20 — the global source is auto-seeded
 symptom:
     summary: staticcheck flags math/rand Seed as deprecated; programs no longer need to seed the global source.
@@ -30,13 +30,19 @@ provenance:
         session: null
         pr: null
     recorded_at: "2026-06-19"
-    validated_at: null
+    validated_at: "2026-06-19"
     valid:
         from: "2026-06-19"
         until: null
     source_license: none (facts only)
     source_url: https://go.dev/doc/go1.20#math/rand
     superseded_by: null
+    promotion:
+        attested_at: "2026-06-19T15:14:45Z"
+        reproduced_under:
+            - go1.25
+        judge_model: gpt-oss:20b
+        judge_decision: approve
 ---
 
 Go 1.20 made the top-level math/rand functions use a randomly-seeded global
