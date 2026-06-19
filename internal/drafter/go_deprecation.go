@@ -166,7 +166,14 @@ func reproScript(check string) string {
 	return "#!/bin/sh\nset -u\n" + scriptEnv +
 		"command -v go >/dev/null 2>&1 || { echo SKIP; exit 75; }\n" +
 		"[ -x /work/bin/staticcheck ] || { echo 'SKIP: staticcheck not warmed'; exit 75; }\n" +
+		// The trap must be flagged with the deprecation code. A staticcheck crash
+		// here yields no match → "NOT REPRODUCED" (the safe direction: don't attach).
 		"if ! (cd /work/trap && /work/bin/staticcheck .) 2>&1 | grep -q " + check + "; then echo 'NOT REPRODUCED: trap not flagged'; exit 1; fi\n" +
-		"if (cd /work/fix && /work/bin/staticcheck .) 2>&1 | grep -q " + check + "; then echo 'FIX BROKEN: replacement still flagged'; exit 1; fi\n" +
+		// The fix must analyze CLEANLY — assert a zero exit, not merely the absence
+		// of the code. Any non-zero (the deprecation code, another finding, or a
+		// compile error / staticcheck crash) means the replacement is not proven
+		// clean; keying only on absence would treat a crash as a false hold.
+		"fixout=$(cd /work/fix && /work/bin/staticcheck . 2>&1); fixrc=$?\n" +
+		"if [ \"$fixrc\" -ne 0 ]; then echo \"FIX BROKEN: staticcheck did not pass cleanly (rc=$fixrc): $fixout\"; exit 1; fi\n" +
 		"echo OK; exit 0\n"
 }

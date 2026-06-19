@@ -74,6 +74,11 @@ func TestGoDeprecation_DraftsCatalogedPackage(t *testing.T) {
 	if !strings.Contains(repro, "SA1019") {
 		t.Errorf("repro.sh should grep the staticcheck code SA1019; got:\n%s", repro)
 	}
+	// The fix-check must assert a clean exit code, not merely the absence of the
+	// code — else a staticcheck crash on a non-compiling fix would be a false hold.
+	if !strings.Contains(repro, "fixrc") || !strings.Contains(repro, "-ne 0") {
+		t.Errorf("repro.sh fix-check must assert staticcheck exited cleanly; got:\n%s", repro)
+	}
 	// noexec-/tmp trap (exp-0017): a Go compile-then-exec needs an exec-able TMPDIR.
 	if !strings.Contains(repro+read("prepare.sh"), "/work") {
 		t.Errorf("scripts should pin caches/TMPDIR under the work volume")
