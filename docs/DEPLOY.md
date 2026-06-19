@@ -143,3 +143,37 @@ sudo systemctl daemon-reload && sudo systemctl enable --now twiceshy-validate.ti
 
 Pause: `TWICESHY_PAUSE=1` in `validate.env`, or
 `sudo systemctl disable --now twiceshy-validate.timer`.
+
+## Daily audit routine (issue 0044)
+
+`scripts/daily-audit.sh` is the morning second-opinion check on the **brain**:
+it reads the newest `runs/*-promote.json` manifest from the validate clone,
+re-judges each `promoted` record with a high-reasoning auditor (default Opus
+4.8 via `claude -p`), queues `audit-disagreement` counter-reports for
+disagreements (`twiceshy report` → `intake-reports` → `adapt` demotes/flags),
+and posts an ntfy digest listing each promotion with AGREE/DISAGREE. ADR-0013's
+escape hatch when the overnight judge may have been compromised.
+
+**Queue wiring:** `TWICESHY_REPORT_QUEUE` must be the **same** directory as
+`serve -report-queue` and the validation driver's `TWICESHY_REPORT_QUEUE`, or
+queued disputes never reach adapt.
+
+**Operator step — enable the timer** (after `twiceshy-validate.timer`):
+
+```sh
+install -Dm600 /dev/stdin /home/ori/.config/twiceshy/audit.env <<'ENV'
+TWICESHY_REPORT_QUEUE=/home/ori/.local/share/twiceshy/report-queue
+AUDIT_CMD=claude -p
+AUDIT_MODEL=claude-opus-4-8
+NTFY_URL=https://ntfy.example/twiceshy
+# TWICESHY_PAUSE=1
+# TWICESHY_AUDIT_DRYRUN=1
+ENV
+# dry-run first (audits + digest, never queues or notifies)
+TWICESHY_AUDIT_DRYRUN=1 scripts/daily-audit.sh
+sudo cp scripts/twiceshy-audit.service scripts/twiceshy-audit.timer /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now twiceshy-audit.timer
+```
+
+Pause: `TWICESHY_PAUSE=1` in `audit.env`, or
+`sudo systemctl disable --now twiceshy-audit.timer`.

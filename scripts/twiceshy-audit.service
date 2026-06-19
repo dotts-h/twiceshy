@@ -1,0 +1,26 @@
+# twiceshy-audit.service — morning second-opinion audit of promote runs (#0044).
+# Install on the brain (engine box), then enable twiceshy-audit.timer.
+# Operator step: copy this + the .timer to /etc/systemd/system/, edit the secrets
+# in the EnvironmentFile, `systemctl daemon-reload`, `systemctl enable --now
+# twiceshy-audit.timer`. Pause anytime with TWICESHY_PAUSE=1 in the env file
+# (or `systemctl disable --now twiceshy-audit.timer`).
+[Unit]
+Description=twiceshy daily promote audit (Opus second opinion + dispute queue)
+# Order after the nightly validation driver so a promote manifest exists to read.
+After=twiceshy-validate.service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ori
+WorkingDirectory=/home/ori/twiceshy-validate
+# Secrets + knobs (TWICESHY_REPORT_QUEUE, AUDIT_CMD, NTFY_URL, etc.).
+# Create this file 0600; it is NOT in the repo. See docs/DEPLOY.md.
+EnvironmentFile=/home/ori/.config/twiceshy/audit.env
+ExecStart=/home/ori/twiceshy/scripts/daily-audit.sh
+TimeoutStartSec=3600
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
