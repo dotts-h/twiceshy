@@ -77,6 +77,7 @@ func New(cfg Config) (http.Handler, error) {
 	}
 
 	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger}
+	h.usage = newUsageRecorder(cfg.Index, logger, time.Now)
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "twiceshy",
 		Title:   "twiceshy experience service",
@@ -109,6 +110,7 @@ type handlers struct {
 	repo   string
 	emb    index.Embedder // optional; enables pull-channel dense retrieval
 	logger *slog.Logger
+	usage  *usageRecorder // records retrieval usage off the latency budget (ADR-0013 §4)
 }
 
 // SearchArgs is the search_experience input.
@@ -185,6 +187,13 @@ func (h *handlers) search(ctx context.Context, _ *mcp.CallToolRequest, args Sear
 		})
 	}
 	enveloped := renderSearchResults(out.Hits)
+	// Reinforcement signal (ADR-0013 §4): a served record's usage advances. Done
+	// async so it never adds to the retrieval latency budget.
+	ids := make([]string, len(hits))
+	for i, hit := range hits {
+		ids[i] = hit.ID
+	}
+	h.usage.record(ids)
 	h.logger.Info("tool call",
 		slog.String("tool", tool),
 		slog.String("outcome", "ok"),
@@ -230,6 +239,7 @@ func (h *handlers) get(ctx context.Context, _ *mcp.CallToolRequest, args GetArgs
 		slog.String("id", args.ID),
 		slog.Bool("found", true),
 	)
+	h.usage.record([]string{stored.ID})
 	enveloped := renderGetExperience(stored.Status, stored.ID, stored.Markdown)
 	result := GetResult{
 		ID:       stored.ID,
