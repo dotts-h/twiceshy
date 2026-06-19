@@ -1,14 +1,14 @@
 ---
 id: 0048
 title: "Re-promote / un-demote path"
-status: open
+status: closed
 severity: high
 group: 0034
 depends_on: []
 forgejo: 138
 links:
   adr: ADR-0013
-  prs: []
+  prs: [163]
   issues: []
   regression:
 assets: []
@@ -26,9 +26,9 @@ Plan ref: `docs/GO_LIVE_HARDENING_PLAN.md` §C2.
 
 ## Acceptance
 
-- [ ] A demoted record is restored by one command; valid.until/demotion are unwound.
-- [ ] Test-first.
-- [ ] Test-first; `make ci` green.
+- [x] A demoted record is restored by one command; valid.until/demotion are unwound.
+- [x] Test-first.
+- [x] Test-first; `make ci` green.
 
 ## Notes
 
