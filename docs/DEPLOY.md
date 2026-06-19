@@ -189,3 +189,23 @@ sudo systemctl daemon-reload && sudo systemctl enable --now twiceshy-audit.timer
 
 Pause: `TWICESHY_PAUSE=1` in `audit.env`, or
 `sudo systemctl disable --now twiceshy-audit.timer`.
+
+### Gold-set flywheel (#0058)
+
+A daily-audit **disagreement** (auditor rejects what the overnight judge
+approved) is a labelled judge miss. Capture it as a new gold case, then
+re-measure the prompt:
+
+```sh
+twiceshy gold-add \
+  -record experience/2026/<audit-miss>.md \
+  -id Gnn \
+  -mode <mode> \
+  -checks <check> \
+  -rationale "<why the auditor is right>" \
+  -append
+twiceshy judge-eval            # optionally -confirm to promote a winning variant
+```
+
+Each loop grows `internal/judgeeval/gold.yaml` from real production misses so
+the judge eval tracks what actually slips through.

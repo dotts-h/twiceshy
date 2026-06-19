@@ -1,7 +1,7 @@
 ---
 id: 0034
 title: "Epic: Go-live hardening — bulletproof the autonomous loop (single-tenant)"
-status: open
+status: closed
 severity: high
 group: 
 depends_on: []

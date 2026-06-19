@@ -1,14 +1,14 @@
 ---
 id: 0058
 title: "Grow the gold set from daily-audit misses (ongoing)"
-status: open
+status: closed
 severity: low
 group: 0034
 depends_on: [0044]
 forgejo: 148
 links:
   adr: ADR-0013
-  prs: []
+  prs: [174]
   issues: []
   regression:
 assets: []
@@ -26,8 +26,8 @@ Plan ref: `docs/GO_LIVE_HARDENING_PLAN.md` §F4.
 
 ## Acceptance
 
-- [ ] A documented process (and helper) turns an audit miss into a new gold case + a re-measure.
-- [ ] Test-first; `make ci` green.
+- [x] A documented process (and helper) turns an audit miss into a new gold case + a re-measure.
+- [x] Test-first; `make ci` green.
 
 ## Notes
 
