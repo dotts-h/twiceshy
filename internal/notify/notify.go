@@ -73,3 +73,31 @@ func (n *HTTPNotifier) Alert(ctx context.Context, event, message string) {
 		n.logger.Warn("alert post returned non-2xx", "event", event, "status", resp.StatusCode)
 	}
 }
+
+// Heartbeat GETs url on clean loop completion so Uptime-Kuma (or any push monitor)
+// can detect a missed nightly run. Env-gated — with no URL it is a silent no-op.
+// A non-2xx or transport error is logged at Warn and swallowed; it must never
+// abort or alter the run outcome.
+func Heartbeat(ctx context.Context, url string, logger *slog.Logger) {
+	if url == "" {
+		return
+	}
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		logger.Warn("heartbeat failed", "error", err.Error())
+		return
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		logger.Warn("heartbeat failed", "error", err.Error())
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= http.StatusMultipleChoices {
+		logger.Warn("heartbeat returned non-2xx", "status", resp.StatusCode)
+	}
+}
