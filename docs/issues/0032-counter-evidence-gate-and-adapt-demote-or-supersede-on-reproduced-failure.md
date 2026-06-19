@@ -9,7 +9,7 @@ forgejo:
 links:
   adr: ADR-0013
   prs: []
-  issues: [0020]
+  issues: [0020, 0033]
   regression:
 assets: []
 ---
@@ -40,7 +40,11 @@ are per-record deltas via git (ADR-0008), never silent store rewrites.
 - [ ] Reproduced failure + judge PASS → `stale` or a superseding corrected record,
   with the counter-attestation + verdict in provenance; original is **superseded,
   never deleted**.
-- [ ] Non-reproducing report → no demotion; optional `applies_to` tightening only.
+- [ ] Non-reproducing report → no demotion; independent non-reproducing reports
+  **accumulate** and past a threshold flag the card `disputed` + escalate (the
+  cover for non-deterministic / prod-only failures — never silently dropped).
+- [ ] `applies_to` narrowing is **judge-gated, reversible, and needs corroboration**
+  — one report can't stealth-neuter a good card.
 - [ ] Demotion rides the ADR-0012 self-merge PR flow (git-audited, CI-gated,
   reversible); non-provable records escalate to a human (ADR-0013 §5).
 - [ ] Test-first (stubbed broker + judge); `make ci` green.

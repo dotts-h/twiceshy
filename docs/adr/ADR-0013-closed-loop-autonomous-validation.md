@@ -1,8 +1,8 @@
 # ADR-0013: Closed-loop autonomous validation — proof + a diverse-model judge replace the human approver for execution-provable records
 
-- **Status:** Proposed (deciders: claude proposes; **horia to ratify** — this
-  refines load-bearing decisions ADR-0001 §7, ADR-0008, and ADR-0010, so it needs
-  sign-off, like ADR-0011).
+- **Status:** Accepted (2026-06-19) — deciders: **horia** (ratified the direction
+  and the veto-window safety); claude proposed. Refines load-bearing decisions
+  ADR-0001 §7, ADR-0008, and ADR-0010 (forward-linked below).
 - **Related:** [ADR-0001 §7](ADR-0001-architecture.md) (doctors are delta-only,
   never whole-store rewrites — locked); [ADR-0008](ADR-0008-write-path-persistence-is-a-cli-concern.md)
   (git/PR is the trust boundary); [ADR-0010](ADR-0010-doctors-build-d2-defer-the-rest.md)
@@ -65,24 +65,45 @@ gate already delivers that *proof*. What still pins a human in the loop is
    reviewer"); the **cheap local model is forbidden as judge** (standing rule). The
    judge checks what a green gate cannot: does the proof actually capture the
    *intended, correctly-scoped* lesson; is it license-clean; could it mislead a
-   future agent (poison).
+   future agent (poison). **The trust anchor is the deterministic execution gate,
+   NOT an LLM** — the judge is a *secondary* filter that only ever sees records
+   that already ran fail-pre / pass-post, so a hallucinated PASS is bounded to "a
+   functionally-correct but mis-scoped or misleading lesson," never arbitrary code.
+   Proof covers *behaviour*, not *intent / safety-of-advice*; the poison check is
+   therefore **best-effort**, backstopped by the veto window (§2), monitoring (§7),
+   and the outcome-feedback loop (§3).
 
-2. **Git + CI remain the boundary and the audit trail — only the human *approver*
-   is removed.** Promotion flows through the ADR-0012 self-merge mechanism (a bot
-   opens a promotion PR, CI greens, it self-merges); the record's `provenance`
-   carries the attestation id + the judge verdict. We do **not** let a process
-   write `validated` to the store unaudited — every promotion is a git commit,
-   schema-checked by CI, and reversible by supersede.
+2. **Git + CI remain the boundary and the audit trail — only the *required* human
+   approver is removed; a human can still veto (the held queue).** Promotion flows
+   through the ADR-0012 self-merge mechanism **with a soak window**: a bot opens a
+   promotion PR (this *is* the held queue), CI greens, the attestation id + judge
+   verdict land in `provenance`, then the PR **self-merges only after a cooldown**
+   (config, default ~48h) during which a human may skim and **veto** (close it with
+   a reason — that close *is* the "why it was blocked" audit trail) — but is **never
+   required to act.** No human action → it goes live; one bad card → a human catches
+   it in the window. This is the synthesis the goal demands: *no human required,
+   but a human always allowed* for oversight. Batched promotions share one PR so the
+   skim is cheap. We do **not** write `validated` unaudited — every promotion is a
+   git commit, CI-checked, reversible by supersede.
 
 3. **Closed-loop outcome feedback (the reverse direction).** A consuming agent
    reports a failure via a new MCP `report_outcome` tool. **A report is gated
    counter-evidence, not a verdict.** twiceshy turns it into a repro and re-runs the
-   record's original repro **plus** the counter through the broker:
-   - lesson's claim no longer holds, **or** the counter reproduces → the diverse
-     judge approves a **demotion to `stale`** or a **superseding corrected record**;
-   - it does **not** reproduce → at most `applies_to` is tightened (a scope/near-miss
-     fix) — **a misapplied lesson never demotes a correct card.**
-   Supersede-never-delete (ADR-0001) holds throughout.
+   record's original repro **plus** the counter **in the same hardened broker** (the
+   gVisor sandbox — not a prose content screen — is what contains untrusted
+   shell/env in counter-evidence):
+   - claim no longer holds, **or** the counter reproduces → the diverse judge
+     approves a **demotion to `stale`** or a **superseding corrected record**;
+   - does **not** reproduce → **no silent drop**: independent non-reproducing
+     reports *accumulate*, and past a threshold the card is flagged `disputed` and
+     escalated — this is the deliberate cover for the non-deterministic / prod-only
+     failures the sandbox cannot reproduce (see Threats);
+   - any `applies_to` narrowing is **judge-gated, reversible, and needs
+     corroboration** — one report cannot stealth-neuter a good card.
+   The channel is **authenticated, rate-limited, and budget-capped** so it cannot be
+   a DoS on the broker/judge. Demotions to `stale` are the safe direction (stop
+   serving) and apply immediately; a *superseding* record adds served content and
+   rides the §2 soak. Supersede-never-delete (ADR-0001) holds throughout.
 
 4. **Usage is the reinforcement signal.** Retrieval increments `provenance.usage`
    (`retrieved`, `last_hit`; `confirmed_helpful` from a positive outcome report),
@@ -100,6 +121,13 @@ gate already delivers that *proof*. What still pins a human in the loop is
    judge outage **fails safe**: no verdict → the record stays quarantined; nothing
    is ever auto-promoted without a recorded PASS.
 
+7. **Guardrails are part of the decision, not an afterthought.** Autonomous
+   promotion ships with: **(a) anomaly monitoring** — promotion/demotion rate +
+   pattern alerts, so a judge that suddenly starts approving everything is caught
+   ("who judges the judge"); **(b) an emergency stop** — one switch halts all
+   auto-promotion (records pile up quarantined — fail-safe); **(c) budget caps** on
+   the broker/judge runs a report can trigger. Tracked as issue #0033.
+
 ## Consequences
 
 - **twiceshy finally lives its name.** Proven lessons go live on their own; misfires
@@ -114,8 +142,9 @@ gate already delivers that *proof*. What still pins a human in the loop is
   **off the Anthropic pool** ([[llm-offload-stack]]). Injectable + stubbed; an
   outage blocks auto-promotion (fail-safe), never bypasses it.
 - **New attack surface — the `report_outcome` channel.** Mitigated: reports are
-  execution-gated counter-evidence (never direct mutations), pass the same content
-  screen as ingest (#0011/#0019), and are rate-limitable. The worst a hostile
+  execution-gated counter-evidence (never direct mutations); the counter-repro is
+  contained by the same gVisor sandbox (prose is content-screened, #0011/#0019);
+  the channel is authenticated, rate-limited, and budget-capped. The worst a hostile
   report can do is *propose* re-validation work, which the gate adjudicates.
 - **Monoculture residual.** LLM-drafted, LLM-judged, LLM-consumed. Reduced — not
   eliminated — by the execution gate + model diversity; revisit if drift appears
@@ -123,3 +152,32 @@ gate already delivers that *proof*. What still pins a human in the loop is
 - **Multi-tenant raises the stakes.** Autonomous promotion makes the prepare-phase
   egress and the `/work` disk cap (#0025) **hard preconditions** for multi-tenant
   (epic #0010); the single-tenant brain is unaffected.
+
+## Threats and residual risks (diverse-model review, 2026-06-19)
+
+A skeptical second-model pass (gemini, off-pool — dogfooding the very judge this
+ADR proposes) surfaced these; recorded honestly rather than waved away:
+
+- **Available-but-compromised judge = fail-*unsafe*.** "Fail-safe" above covers an
+  *outage*; a judge that is up but subtly wrong/poisoned still approves. This is the
+  sharpest residual. Layered cover, not a cure: model **diversity** (one compromised
+  model ≠ both), the **veto window** (a human can catch it), **anomaly monitoring**
+  (§7), and the **outcome-feedback loop** (a bad promotion that misfires gets
+  reported → demoted). Accept consciously for single-tenant; reassess for §5/0010.
+- **The sandbox is not production.** Proof in the broker is necessary, not
+  sufficient — non-deterministic / environment / timing-specific failures pass the
+  gate yet break in a real agent. The **accumulating non-reproducing reports →
+  `disputed` escalation** (§3) is the deliberate cover; the gate alone is not relied
+  on to be complete.
+- **Rests on the broker's integrity.** The whole engine assumes the gVisor broker
+  (ADR-0011 §4 / #0018) cannot be tricked into attesting a false proof. That is a
+  pre-existing foundational assumption this ADR inherits, not one it introduces — but
+  it is now load-bearing for *promotion*, not just reporting.
+- **`report_outcome` DoS / stealth-neuter** — addressed in §3 (auth + rate-limit +
+  budget cap; `applies_to` narrowing judge-gated + reversible + corroborated).
+- **Accountability is not "the system."** Every auto-promotion is a git commit
+  carrying its attestation + judge verdict; the accountable party is the maintainer
+  who ratified this ADR and owns the audit trail — not an anonymous pipeline.
+- **A formal LLM threat model** (prompt-injection of judge/drafter, adversarial
+  inputs to the gate) is **required before multi-tenant** (epic #0010), where
+  untrusted parties can submit; bounded today (only claude + horia submit).

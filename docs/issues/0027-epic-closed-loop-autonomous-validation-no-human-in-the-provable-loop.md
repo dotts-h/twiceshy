@@ -50,9 +50,13 @@ Mostly **disjoint seams → parallel lanes**. `internal/judge` ⟂ `internal/ind
    Independent lane.
 5. **0032 — Counter-evidence gate + adapt (negative proof → stale/supersede)**:
    turn a report into a repro, re-run original + counter through the broker; the
-   judge approves demote/supersede when the claim breaks, or tighten `applies_to`
-   when it doesn't reproduce (a fumble never demotes a correct card).
+   judge approves demote/supersede when the claim breaks; non-reproducing reports
+   *accumulate* into a `disputed` escalation (don't drop the prod-only failures the
+   sandbox can't reproduce); `applies_to` narrowing is judge-gated + reversible.
    `depends_on: 0028, 0031`.
+6. **0033 — Guardrails** (ADR-0013 §7, from the diverse-model review): anomaly
+   monitoring + an emergency stop + budget caps — the layered cover for an
+   available-but-compromised judge and a `report_outcome` DoS. `depends_on: 0029, 0031`.
 
 ## Definition of done
 

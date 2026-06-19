@@ -20,4 +20,4 @@ accepted ADR's decision — supersede it (`Status: superseded-by-NNNN`).
 | [0010](ADR-0010-doctors-build-d2-defer-the-rest.md) | Doctors — build the framework + D2 staleness now; defer D1/D3/D4/D5 | Accepted |
 | [0011](ADR-0011-corpus-growth-and-validation-engine.md) | Corpus growth as a live feed, with execution-validation as the moat | Proposed |
 | [0012](ADR-0012-cicd-trust-posture-and-runner-isolation.md) | CI/CD trust posture — self-merge gate + an isolated hardened runner for twiceshy CI | Accepted |
-| [0013](ADR-0013-closed-loop-autonomous-validation.md) | Closed-loop autonomous validation — proof + a diverse-model judge replace the human approver for provable records | Proposed |
+| [0013](ADR-0013-closed-loop-autonomous-validation.md) | Closed-loop autonomous validation — proof + a diverse-model judge replace the human approver for provable records | Accepted |

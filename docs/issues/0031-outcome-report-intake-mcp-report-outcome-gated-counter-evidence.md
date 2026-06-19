@@ -35,8 +35,9 @@ content screen** as ingest (#0011/#0019) — it's untrusted text headed for a re
   record exists; stores a quarantined counter-record / revalidation request.
 - [ ] Does **not** mutate the referenced record (propose-only); does NOT write
   `validated`/`stale` directly.
-- [ ] Report text is screened (secret/harmful/PII) before storage; rate-limitable;
-  body-capped (reuse the app-hardening limits).
+- [ ] Report text is screened (secret/harmful/PII) before storage; the channel is
+  **authenticated, rate-limited, and body-capped**, and re-validation work it
+  triggers is **budget-capped** (#0033) so it can't DoS the broker/judge.
 - [ ] A bare/non-reproducible report becomes a triage flag, not an auto-demotion.
 - [ ] Test-first; `make ci` green.
 
