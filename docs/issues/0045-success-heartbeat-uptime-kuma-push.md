@@ -1,14 +1,14 @@
 ---
 id: 0045
 title: "Success heartbeat (Uptime-Kuma push)"
-status: open
+status: closed
 severity: medium
 group: 0034
 depends_on: [0043]
 forgejo: 135
 links:
   adr: ADR-0013
-  prs: []
+  prs: [160]
   issues: []
   regression:
 assets: []
@@ -26,8 +26,8 @@ end of runPromote/runAdapt; reuse the #0038 notify seam.
 
 ## Acceptance
 
-- [ ] A clean run pings the heartbeat URL; a skipped run is detectable as a missed ping.
-- [ ] Test-first; `make ci` green.
+- [x] A clean run pings the heartbeat URL; a skipped run is detectable as a missed ping.
+- [x] Test-first; `make ci` green.
 
 ## Notes
 
