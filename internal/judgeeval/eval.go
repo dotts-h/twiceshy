@@ -22,32 +22,44 @@ func Run(ctx context.Context, caller judge.Judge, cases []Case, repeat int) (Res
 	}
 	res := Result{Repeat: repeat, Cases: len(cases), JudgeCalls: repeat * len(cases)}
 	for _, c := range cases {
-		o := scoreCase(ctx, caller, c, repeat)
-		if c.ShouldReject() {
-			res.RejectCases++
-		} else {
-			res.ApproveCases++
-		}
-		if o.Errored {
-			res.Errors++
-		}
-		if o.FalseApprove {
-			res.FalseApproves++
-		}
-		if o.FalseReject {
-			res.FalseRejects++
-		}
-		if o.Correct {
-			res.Correct++
-		}
-		if c.ShouldReject() && o.Got == judge.Reject && o.CaughtCheck {
-			res.ChecksCaught++
-		}
-		if o.Flipped {
-			res.Flips++
-		}
-		res.Outcomes = append(res.Outcomes, o)
+		res.tally(c, scoreCase(ctx, caller, c, repeat))
 	}
+	res.finalize()
+	return res, nil
+}
+
+// tally folds one scored case into the running result. Shared by Run (uniform)
+// and RunConfirm (adaptive) so the two scoring paths can never drift apart.
+func (res *Result) tally(c Case, o Outcome) {
+	if c.ShouldReject() {
+		res.RejectCases++
+	} else {
+		res.ApproveCases++
+	}
+	if o.Errored {
+		res.Errors++
+	}
+	if o.FalseApprove {
+		res.FalseApproves++
+	}
+	if o.FalseReject {
+		res.FalseRejects++
+	}
+	if o.Correct {
+		res.Correct++
+	}
+	if c.ShouldReject() && o.Got == judge.Reject && o.CaughtCheck {
+		res.ChecksCaught++
+	}
+	if o.Flipped {
+		res.Flips++
+	}
+	res.Outcomes = append(res.Outcomes, o)
+}
+
+// finalize computes the derived rates from the tallied counts. Call once, after
+// every case has been tallied.
+func (res *Result) finalize() {
 	if res.RejectCases > 0 {
 		res.FalseApproveRate = float64(res.FalseApproves) / float64(res.RejectCases)
 	}
@@ -61,7 +73,6 @@ func Run(ctx context.Context, caller judge.Judge, cases []Case, repeat int) (Res
 	if rejectedRejects > 0 {
 		res.CheckRecall = float64(res.ChecksCaught) / float64(rejectedRejects)
 	}
-	return res, nil
 }
 
 // RunConfirm adaptively samples: every case gets base samples, then only the
@@ -94,45 +105,9 @@ func RunConfirm(ctx context.Context, caller judge.Judge, cases []Case, base, tot
 			}
 		}
 		res.JudgeCalls += samples
-		o := scoreFromTallies(c, approvals, rejects, errs, approveV, rejectV, lastErr, samples)
-		if c.ShouldReject() {
-			res.RejectCases++
-		} else {
-			res.ApproveCases++
-		}
-		if o.Errored {
-			res.Errors++
-		}
-		if o.FalseApprove {
-			res.FalseApproves++
-		}
-		if o.FalseReject {
-			res.FalseRejects++
-		}
-		if o.Correct {
-			res.Correct++
-		}
-		if c.ShouldReject() && o.Got == judge.Reject && o.CaughtCheck {
-			res.ChecksCaught++
-		}
-		if o.Flipped {
-			res.Flips++
-		}
-		res.Outcomes = append(res.Outcomes, o)
+		res.tally(c, scoreFromTallies(c, approvals, rejects, errs, approveV, rejectV, lastErr, samples))
 	}
-	if res.RejectCases > 0 {
-		res.FalseApproveRate = float64(res.FalseApproves) / float64(res.RejectCases)
-	}
-	if res.ApproveCases > 0 {
-		res.FalseRejectRate = float64(res.FalseRejects) / float64(res.ApproveCases)
-	}
-	if res.Cases > 0 {
-		res.Accuracy = float64(res.Correct) / float64(res.Cases)
-	}
-	rejectedRejects := res.RejectCases - res.FalseApproves - rejectErrors(res.Outcomes)
-	if rejectedRejects > 0 {
-		res.CheckRecall = float64(res.ChecksCaught) / float64(rejectedRejects)
-	}
+	res.finalize()
 	return res, nil
 }
 
