@@ -45,6 +45,7 @@ import (
 	"github.com/dotts-h/twiceshy/internal/ingest"
 	"github.com/dotts-h/twiceshy/internal/judge"
 	"github.com/dotts-h/twiceshy/internal/judgeeval"
+	"github.com/dotts-h/twiceshy/internal/lock"
 	"github.com/dotts-h/twiceshy/internal/notify"
 	"github.com/dotts-h/twiceshy/internal/pack"
 	"github.com/dotts-h/twiceshy/internal/promote"
@@ -607,6 +608,25 @@ func newRunID() string {
 	return "run-" + time.Now().UTC().Format("20060102T150405Z")
 }
 
+// loopLockName is the corpus-local single-flight lockfile shared by promote and
+// adapt, so the two mutating commands are mutually exclusive (ADR-0013 §A2).
+const loopLockName = ".twiceshy-loop.lock"
+
+// acquireLoopLock takes the single-flight lock for a mutating run, mapping
+// contention to a clear, non-zero-exit error (a second overlapping run skips
+// rather than double-writing).
+func acquireLoopLock(corpus string) (*lock.Lock, error) {
+	path := filepath.Join(corpus, loopLockName)
+	lk, err := lock.Acquire(path)
+	if errors.Is(err, lock.ErrHeld) {
+		return nil, fmt.Errorf("another promote/adapt run is in progress (lock %s held) — skipping this run", path)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("acquiring run lock %s: %w", path, err)
+	}
+	return lk, nil
+}
+
 // recordPromoter is the seam the promote command drives: promote.Promoter.Promote
 // satisfies it. Abstracting it lets the corpus walk + persistence be unit-tested
 // without a broker or a live judge.
@@ -656,6 +676,15 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 		_, _ = fmt.Fprintf(out, "promote (dry-run): %d execution-provable candidate(s); each needs a holding attestation + a judge PASS to flip\n", n)
 		return nil
 	}
+
+	// Single-flight (ADR-0013 §A2): only one mutating run at a time. A second
+	// overlapping run (cron tick + manual, or two ticks) exits here, before any
+	// judge/broker setup or write, rather than double-writing the corpus.
+	lk, err := acquireLoopLock(*corpus)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lk.Release() }()
 
 	// Fail-safe: no judge configured → nothing is ever auto-promoted (ADR-0013 §6).
 	judgeURL := getenv("TWICESHY_JUDGE_URL")
@@ -867,6 +896,14 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 		_, _ = fmt.Fprintf(out, "adapt (dry-run): %d outcome report(s); each re-runs the disputed record + the counter and is judge-gated\n", n)
 		return nil
 	}
+
+	// Single-flight (ADR-0013 §A2): the same lock as promote, so adapt and promote
+	// (and two adapt runs) are mutually exclusive — no overlapping double-write.
+	lk, err := acquireLoopLock(*corpus)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lk.Release() }()
 
 	// Fail-safe: no judge configured → nothing is ever auto-demoted.
 	judgeURL := getenv("TWICESHY_JUDGE_URL")

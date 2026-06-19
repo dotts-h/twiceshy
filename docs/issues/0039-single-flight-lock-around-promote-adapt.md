@@ -1,14 +1,14 @@
 ---
 id: 0039
 title: "Single-flight lock around promote/adapt"
-status: open
+status: closed
 severity: high
 group: 0034
 depends_on: []
 forgejo: 129
 links:
   adr: ADR-0013
-  prs: []
+  prs: [154]
   issues: []
   regression:
 assets: []
@@ -26,9 +26,9 @@ Plan ref: `docs/GO_LIVE_HARDENING_PLAN.md` §A2.
 
 ## Acceptance
 
-- [ ] A second invocation while one holds the lock exits non-zero with a clear message.
-- [ ] A test covers the contention path.
-- [ ] Test-first; `make ci` green.
+- [x] A second invocation while one holds the lock exits non-zero with a clear message.
+- [x] A test covers the contention path.
+- [x] Test-first; `make ci` green.
 
 ## Notes
 
