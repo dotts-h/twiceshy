@@ -8,6 +8,7 @@
 //	twiceshy ingest <source> -corpus <dir> -db <file> import quarantined records
 //	twiceshy draft  -corpus <dir>                     draft+gate+attach repros (needs docker+runsc)
 //	twiceshy promote -corpus <dir>                    attestation+judge auto-promote (needs docker+runsc+judge)
+//	twiceshy repromote -corpus <dir> -id <exp-NNNN>   attestation+judge restore demoted record (needs docker+runsc+judge)
 //	twiceshy adapt  -corpus <dir>                     counter-evidence gate: demote/dispute (needs docker+runsc+judge)
 //	twiceshy pack   -corpus <dir> -out <dir>          build a distributable pack
 //	twiceshy doctor <name> -corpus <dir>              run a doctor (staleness | revalidate)
@@ -142,7 +143,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|ingest|draft|promote|adapt|intake-reports|report|pack|doctor|eval|judge-eval> [flags]")
+		return errors.New("usage: twiceshy <index|serve|ingest|draft|promote|repromote|adapt|intake-reports|report|pack|doctor|eval|judge-eval> [flags]")
 	}
 	switch args[0] {
 	case "index":
@@ -157,6 +158,8 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runDraft(ctx, args[1:], out)
 	case "promote":
 		return runPromote(ctx, args[1:], out, getenv)
+	case "repromote":
+		return runRepromote(ctx, args[1:], out, getenv)
 	case "adapt":
 		return runAdapt(ctx, args[1:], out, getenv)
 	case "intake-reports":
@@ -170,7 +173,7 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	case "judge-eval":
 		return runJudgeEval(ctx, args[1:], out, getenv)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, draft, promote, adapt, intake-reports, report, pack, doctor, eval, or judge-eval)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, draft, promote, repromote, adapt, intake-reports, report, pack, doctor, eval, or judge-eval)", args[0])
 	}
 }
 
@@ -816,6 +819,97 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 		notify.Heartbeat(ctx, getenv("TWICESHY_HEARTBEAT_URL"), runLog)
 	}
 	return err
+}
+
+// runRepromote is the reversal path of ADR-0013 (#0048): for one stale or
+// disputed execution-provable record, a holding broker attestation PLUS a judge
+// PASS restores it to validated — clearing valid.until and the demotion block.
+// Like promote it needs docker + runsc (the brain) AND a judge endpoint
+// (TWICESHY_JUDGE_URL); a bare checkout can use -dry-run to preview eligibility.
+func runRepromote(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
+	fs := flag.NewFlagSet("repromote", flag.ContinueOnError)
+	id := fs.String("id", "", "record id to restore (required, exp-NNNN)")
+	corpus := fs.String("corpus", ".", "corpus root (the directory containing experience/)")
+	judgeModel := fs.String("judge-model", "", "diverse frontier judge model id, e.g. gemini-2.5-pro (must differ from -drafter-model)")
+	drafterModel := fs.String("drafter-model", "", "the model that drafted records; the judge must not share its family (anti-monoculture)")
+	dryRun := fs.Bool("dry-run", false, "report whether the record is re-promotable; run no gate/judge, write nothing")
+	votes := fs.Int("votes", judge.DefaultVotes, "judge this many times and re-promote on majority-approve only (ADR-0013 §F1; min 1)")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return errors.New("repromote requires -id <exp-NNNN>")
+	}
+	if !record.ValidID(*id) {
+		return fmt.Errorf("invalid record id %q (want exp-NNNN)", *id)
+	}
+
+	recs, err := record.LoadCorpus(*corpus)
+	if err != nil {
+		return fmt.Errorf("loading corpus: %w", err)
+	}
+	var rec *record.Record
+	for _, r := range recs {
+		if r.ID == *id {
+			rec = r
+			break
+		}
+	}
+	if rec == nil {
+		return fmt.Errorf("record %s not found in corpus", *id)
+	}
+
+	if *dryRun {
+		ok, reason := promote.RepromoteEligible(rec)
+		if ok {
+			_, _ = fmt.Fprintf(out, "repromote (dry-run): %s %s is re-promotable (needs holding attestation + judge PASS)\n", rec.ID, rec.Path)
+		} else {
+			_, _ = fmt.Fprintf(out, "repromote (dry-run): %s %s is not re-promotable: %s\n", rec.ID, rec.Path, reason)
+		}
+		return nil
+	}
+
+	lk, err := acquireLoopLock(*corpus)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lk.Release() }()
+
+	judgeURL := getenv("TWICESHY_JUDGE_URL")
+	if judgeURL == "" {
+		return errors.New("TWICESHY_JUDGE_URL must be set: re-promotion requires a diverse-model judge (it is never bypassed)")
+	}
+	j, err := judge.NewModelJudge(judge.Config{
+		Endpoint: judgeURL, Model: *judgeModel, DrafterModel: *drafterModel,
+		System: judge.ProseSystemV1, Think: false,
+	})
+	if err != nil {
+		return fmt.Errorf("configuring judge: %w", err)
+	}
+
+	b := repro.NewBroker([]string{repro.PinnedGoImage})
+	rv := repro.NewRevalidator(b, *corpus)
+	tj := judge.NewTiming(j)
+	p := promote.NewPromoter(rv, judge.NewMajority(tj, *votes), *corpus)
+
+	if err := preflight(ctx, b, j); err != nil {
+		return err
+	}
+
+	origStatus := rec.Status
+	outcome, err := p.Repromote(ctx, rec)
+	if err != nil {
+		return err
+	}
+	if !outcome.Promoted {
+		_, _ = fmt.Fprintf(out, "repromote: held %s — %s\n", rec.ID, outcome.Reason)
+		return nil
+	}
+	if err := writeRecord(*corpus, rec); err != nil {
+		return fmt.Errorf("writing record %s: %w", rec.ID, err)
+	}
+	_, _ = fmt.Fprintf(out, "repromote: restored %s %s -> validated\n", rec.ID, origStatus)
+	return nil
 }
 
 // promoteCorpus is the testable core of `twiceshy promote`: it walks the records,

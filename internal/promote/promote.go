@@ -161,6 +161,83 @@ func (p *Promoter) Promote(ctx context.Context, rec *record.Record) (Outcome, er
 	return Outcome{Promoted: true, Attestation: att, Verdict: verdict}, nil
 }
 
+// RepromoteEligible reports whether a record is a demoted execution-provable
+// lesson that can be restored to validated, and if not, why. Only stale or
+// disputed records with executable proof and no security flags qualify; the
+// holding attestation and the judge verdict are Repromote's job.
+func RepromoteEligible(rec *record.Record) (bool, string) {
+	switch {
+	case rec.Status != "stale" && rec.Status != "disputed":
+		return false, "not a demoted record"
+	case len(rec.Provenance.SecurityFlags) > 0:
+		return false, "security-flagged record cannot be validated"
+	case !record.HasPositiveRepro(rec):
+		return false, "no executable proof — left for a human (ADR-0013 §5)"
+	}
+	return true, ""
+}
+
+// Repromote attempts to restore a demoted record to validated. It mutates rec
+// in place ONLY on a successful re-promotion (the caller then persists the
+// delta); on any non-promotion path rec is left untouched. A hard error
+// (attestor/broker failure, an invalid re-promoted record) is returned
+// distinct from a fail-safe non-promotion, which returns (Outcome{Promoted:false}, nil).
+func (p *Promoter) Repromote(ctx context.Context, rec *record.Record) (Outcome, error) {
+	if ok, reason := RepromoteEligible(rec); !ok {
+		return skip(reason)
+	}
+
+	_, atts, err := p.attestor.RunWithAttestations(ctx, []*record.Record{rec})
+	if err != nil {
+		return Outcome{}, fmt.Errorf("repromote %s: attest: %w", rec.ID, err)
+	}
+	if len(atts) == 0 {
+		return skip("no attestation produced")
+	}
+	att := atts[0]
+	if !att.Holds || att.Inconclusive {
+		return Outcome{Reason: "attestation does not hold — stays demoted (fail-safe)", Attestation: att}, nil
+	}
+
+	repros, err := p.reproArtifacts(rec)
+	if err != nil {
+		return Outcome{}, fmt.Errorf("repromote %s: read repros: %w", rec.ID, err)
+	}
+	verdict, err := p.judge.Judge(ctx, judge.Request{Record: rec, Attestation: att, Repros: repros})
+	if err != nil {
+		return Outcome{Reason: "judge unavailable — stays demoted (fail-safe): " + err.Error(), Attestation: att}, nil
+	}
+	if !verdict.Approved() {
+		return Outcome{Reason: "judge did not approve — stays demoted", Attestation: att, Verdict: verdict}, nil
+	}
+
+	origStatus := rec.Status
+	origUntil := rec.Provenance.Valid.Until
+	origValidatedAt := rec.Provenance.ValidatedAt
+	origDemotion := rec.Provenance.Demotion
+	origPromotion := rec.Provenance.Promotion
+	validatedAt := p.now()
+	rec.Status = "validated"
+	rec.Provenance.ValidatedAt = &validatedAt
+	rec.Provenance.Valid.Until = nil
+	rec.Provenance.Demotion = nil
+	rec.Provenance.Promotion = &record.Promotion{
+		AttestedAt:      att.RanAt,
+		ReproducedUnder: att.ReproducedUnder,
+		JudgeModel:      verdict.Model,
+		JudgeDecision:   string(verdict.Decision),
+	}
+	if err := record.Validate(rec); err != nil {
+		rec.Status = origStatus
+		rec.Provenance.Valid.Until = origUntil
+		rec.Provenance.ValidatedAt = origValidatedAt
+		rec.Provenance.Demotion = origDemotion
+		rec.Provenance.Promotion = origPromotion
+		return Outcome{}, fmt.Errorf("repromote %s: re-promoted record is invalid (not persisted): %w", rec.ID, err)
+	}
+	return Outcome{Promoted: true, Attestation: att, Verdict: verdict}, nil
+}
+
 // reproArtifacts resolves a record's repro scripts to their contents for the
 // judge (the proof body, not just the attestation's pass/fail).
 func (p *Promoter) reproArtifacts(rec *record.Record) ([]judge.ReproArtifact, error) {
