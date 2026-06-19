@@ -514,6 +514,22 @@ func (r *Record) validateProvenance(fail func(string, ...any)) {
 	if r.Status == "validated" && len(p.SecurityFlags) > 0 {
 		fail("status validated is not allowed with provenance.security_flags %v — a flagged record cannot be promoted", p.SecurityFlags)
 	}
+	// Desync guards (#0050): a manual reversal must not leave a validated record
+	// with a closed validity window or a lingering demotion block — either makes
+	// the staleness doctor re-flag it (validated↔stale flip-flop).
+	if r.Status == "validated" {
+		// Boundary is deliberately `until.Before(now)` with a raw UTC instant —
+		// IDENTICAL to the staleness doctor (internal/doctor/staleness.go uses
+		// time.Now().UTC()). Do NOT truncate to start-of-day "valid through the
+		// until date": that would make the validator disagree with the doctor on
+		// until==today and reintroduce the flip-flop this guard prevents.
+		if !until.IsZero() && until.Before(nowUTC()) {
+			fail("status validated with a past provenance.valid.until %q — promote clears the window or demote it", *p.Valid.Until)
+		}
+		if p.Demotion != nil {
+			fail("status validated must not carry a provenance.demotion block — a demoted record is stale, not validated")
+		}
+	}
 	if r.Status == "superseded" {
 		if p.SupersededBy == nil {
 			fail("status superseded requires provenance.superseded_by")
@@ -574,6 +590,10 @@ func (r *Record) validateProvenance(fail func(string, ...any)) {
 		fail("provenance.source_url %q is not an http(s) URL", u)
 	}
 }
+
+// nowUTC is the validator's clock for the past-window guard (#0050); a package
+// var so a future test can pin it. Mirrors the staleness doctor's injected now.
+var nowUTC = func() time.Time { return time.Now().UTC() }
 
 func checkDate(fail func(string, ...any), field, v string) time.Time {
 	if !reDate.MatchString(v) {
