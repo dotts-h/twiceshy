@@ -92,6 +92,7 @@ func New(cfg Config) (http.Handler, error) {
 	mcp.AddTool(srv, &mcp.Tool{Name: "get_experience", Description: getDescription}, h.get)
 	mcp.AddTool(srv, &mcp.Tool{Name: "record_experience", Description: recordDescription}, h.record)
 	mcp.AddTool(srv, &mcp.Tool{Name: "report_outcome", Description: reportDescription}, h.reportOutcome)
+	mcp.AddTool(srv, &mcp.Tool{Name: "confirm_helpful", Description: confirmDescription}, h.confirmHelpful)
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return srv }, nil)
