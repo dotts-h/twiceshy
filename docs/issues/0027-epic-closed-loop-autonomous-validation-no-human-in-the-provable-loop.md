@@ -1,7 +1,7 @@
 ---
 id: 0027
 title: "Epic: Closed-loop autonomous validation — no human in the provable loop"
-status: open
+status: closed
 severity: high
 group:
 depends_on: []

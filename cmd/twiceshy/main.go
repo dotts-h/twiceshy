@@ -38,6 +38,7 @@ import (
 	"github.com/dotts-h/twiceshy/internal/doctor"
 	"github.com/dotts-h/twiceshy/internal/drafter"
 	"github.com/dotts-h/twiceshy/internal/eval"
+	"github.com/dotts-h/twiceshy/internal/guard"
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/ingest"
 	"github.com/dotts-h/twiceshy/internal/judge"
@@ -531,6 +532,22 @@ func removeRepro(corpus, reproPath string) {
 	}
 }
 
+// defaultMaxActions is the default anomaly alert threshold (ADR-0013 §7, #0033):
+// more auto-promotions/demotions than this in one run raises a notification — the
+// "judge approving everything" signal. It alerts, never halts; the emergency stop
+// (TWICESHY_PAUSE) is the halt.
+const defaultMaxActions = 25
+
+// guardrailsFrom builds the safety limits for a promote/adapt run: the emergency
+// stop from TWICESHY_PAUSE, and the anomaly + budget caps from flags.
+func guardrailsFrom(getenv func(string) string, maxActions, maxRuns int) guard.Guardrails {
+	return guard.Guardrails{
+		Paused:     guard.Truthy(getenv("TWICESHY_PAUSE")),
+		MaxActions: maxActions,
+		MaxRuns:    maxRuns,
+	}
+}
+
 // recordPromoter is the seam the promote command drives: promote.Promoter.Promote
 // satisfies it. Abstracting it lets the corpus walk + persistence be unit-tested
 // without a broker or a live judge.
@@ -557,6 +574,8 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	judgeModel := fs.String("judge-model", "", "diverse frontier judge model id, e.g. gemini-2.5-pro (must differ from -drafter-model)")
 	drafterModel := fs.String("drafter-model", "", "the model that drafted records; the judge must not share its family (anti-monoculture)")
 	dryRun := fs.Bool("dry-run", false, "list the execution-provable promotion candidates; run no gate/judge, write nothing")
+	maxActions := fs.Int("max-actions", defaultMaxActions, "anomaly alert threshold: promotions per run above which an alert fires (0 = off)")
+	maxRuns := fs.Int("max-runs", 0, "budget cap: max records processed (broker/judge runs) per invocation (0 = unlimited)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -594,7 +613,8 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	rv := repro.NewRevalidator(b, *corpus)
 	p := promote.NewPromoter(rv, j, *corpus)
 
-	st, err := promoteCorpus(ctx, *corpus, recs, p, writeRecord, out)
+	g := guardrailsFrom(getenv, *maxActions, *maxRuns)
+	st, err := promoteCorpus(ctx, *corpus, recs, p, writeRecord, g, out)
 	if err != nil {
 		return err
 	}
@@ -609,13 +629,25 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 // are injected so the walk is exercised without a sandbox or a live judge. A hard
 // promoter error (broker failure, an invalid promoted record) aborts; records
 // promoted before it stay written (each is an independently-valid delta).
-func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, run recordPromoter, persist func(string, *record.Record) error, out io.Writer) (promoteStats, error) {
+func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, run recordPromoter, persist func(string, *record.Record) error, g guard.Guardrails, out io.Writer) (promoteStats, error) {
 	var st promoteStats
+	// Emergency stop (ADR-0013 §7): nothing auto-releases; records pile up.
+	if g.Engaged() {
+		_, _ = fmt.Fprintln(out, "promote: emergency stop engaged (TWICESHY_PAUSE) — no promotions")
+		return st, nil
+	}
+	budget := g.Budget()
 	for _, rec := range recs {
 		if ok, _ := promote.Eligible(rec); !ok {
 			st.ineligible++
 			continue
 		}
+		// Budget cap: stop draining the sandbox past the per-run ceiling.
+		if !budget.AllowRun() {
+			_, _ = fmt.Fprintf(out, "promote: budget cap reached (%d runs) — stopping; re-run to continue\n", budget.Runs())
+			break
+		}
+		budget.StartRun()
 		outcome, err := run.Promote(ctx, rec)
 		if err != nil {
 			return st, fmt.Errorf("promote %s: %w", rec.ID, err)
@@ -629,8 +661,14 @@ func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, ru
 			return st, fmt.Errorf("persist %s: %w", rec.ID, err)
 		}
 		st.promoted++
+		budget.CountAction()
 		_, _ = fmt.Fprintf(out, "  promoted %s -> validated (judge %s, reproduced under %s)\n",
 			rec.ID, outcome.Verdict.Model, strings.Join(outcome.Attestation.ReproducedUnder, ", "))
+		// Anomaly monitor: a promotion spike is the "judge approving everything"
+		// signal — alert (a human can engage the emergency stop).
+		if budget.Anomalous() {
+			_, _ = fmt.Fprintf(out, "  ANOMALY: %d promotions this run exceeds the alert threshold — a compromised judge? set TWICESHY_PAUSE=1 to halt\n", budget.Actions())
+		}
 	}
 	return st, nil
 }
@@ -671,6 +709,8 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 	judgeModel := fs.String("judge-model", "", "diverse frontier judge model id (must differ from -drafter-model)")
 	drafterModel := fs.String("drafter-model", "", "the model that drafted records; the judge must not share its family")
 	dryRun := fs.Bool("dry-run", false, "list the outcome reports and the records they dispute; run no gate/judge, write nothing")
+	maxActions := fs.Int("max-actions", defaultMaxActions, "anomaly alert threshold: demotions per run above which an alert fires (0 = off)")
+	maxRuns := fs.Int("max-runs", 0, "budget cap: max reports processed (broker/judge runs) per invocation (0 = unlimited)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -707,7 +747,8 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 	runner := brokerCounterRunner{rv: rv}
 	adapter := promote.NewAdapter(j)
 
-	st, err := adaptCorpus(ctx, *corpus, recs, runner, adapter, writeRecord, out)
+	g := guardrailsFrom(getenv, *maxActions, *maxRuns)
+	st, err := adaptCorpus(ctx, *corpus, recs, runner, adapter, writeRecord, g, out)
 	if err != nil {
 		return err
 	}
@@ -721,7 +762,7 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 // demoted or disputed. The corroboration count (other reports disputing the same
 // record) is computed from the corpus. run and persist are injected so the walk
 // is exercised without a sandbox or a live judge.
-func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run counterRunner, adapter *promote.Adapter, persist func(string, *record.Record) error, out io.Writer) (adaptStats, error) {
+func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run counterRunner, adapter *promote.Adapter, persist func(string, *record.Record) error, g guard.Guardrails, out io.Writer) (adaptStats, error) {
 	byID := make(map[string]*record.Record, len(recs))
 	disputesCount := make(map[string]int)
 	for _, r := range recs {
@@ -732,6 +773,12 @@ func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run 
 	}
 
 	var st adaptStats
+	// Emergency stop (ADR-0013 §7) halts auto-demotion too.
+	if g.Engaged() {
+		_, _ = fmt.Fprintln(out, "adapt: emergency stop engaged (TWICESHY_PAUSE) — no demotions")
+		return st, nil
+	}
+	budget := g.Budget()
 	for _, rep := range recs {
 		origID := reportDisputes(rep)
 		if origID == "" {
@@ -743,6 +790,12 @@ func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run 
 			_, _ = fmt.Fprintf(out, "  orphan report %s disputes unknown %s\n", rep.ID, origID)
 			continue
 		}
+		// Budget cap: a report flood can't drain the broker/judge past the ceiling.
+		if !budget.AllowRun() {
+			_, _ = fmt.Fprintf(out, "adapt: budget cap reached (%d runs) — stopping; re-run to continue\n", budget.Runs())
+			break
+		}
+		budget.StartRun()
 		ev, err := run.Run(ctx, original, rep)
 		if err != nil {
 			return st, fmt.Errorf("adapt %s: %w", rep.ID, err)
@@ -757,15 +810,20 @@ func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run 
 				return st, fmt.Errorf("persist %s: %w", original.ID, err)
 			}
 			st.demoted++
+			budget.CountAction()
 			_, _ = fmt.Fprintf(out, "  demoted %s -> stale (report %s, judge %s)\n", original.ID, rep.ID, outcome.Verdict.Model)
 		case promote.ActionDispute:
 			if err := persist(corpus, original); err != nil {
 				return st, fmt.Errorf("persist %s: %w", original.ID, err)
 			}
 			st.disputed++
+			budget.CountAction()
 			_, _ = fmt.Fprintf(out, "  disputed %s (corroborated by %d reports)\n", original.ID, disputesCount[origID])
 		default:
 			st.held++
+		}
+		if budget.Anomalous() {
+			_, _ = fmt.Fprintf(out, "  ANOMALY: %d demote/dispute actions this run exceeds the alert threshold — set TWICESHY_PAUSE=1 to halt\n", budget.Actions())
 		}
 	}
 	return st, nil

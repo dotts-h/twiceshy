@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dotts-h/twiceshy/internal/guard"
 	"github.com/dotts-h/twiceshy/internal/judge"
 	"github.com/dotts-h/twiceshy/internal/promote"
 	"github.com/dotts-h/twiceshy/internal/record"
@@ -64,7 +65,7 @@ func TestPromoteCorpus_PromotesEligiblePersistsFlip(t *testing.T) {
 	}
 	var buf bytes.Buffer
 
-	st, err := promoteCorpus(context.Background(), ".", recs, fp, persist, &buf)
+	st, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, &buf)
 	if err != nil {
 		t.Fatalf("promoteCorpus: %v", err)
 	}
@@ -89,7 +90,7 @@ func TestPromoteCorpus_AbortsOnPromoterError(t *testing.T) {
 	var persisted []string
 	persist := func(_ string, rec *record.Record) error { persisted = append(persisted, rec.ID); return nil }
 
-	_, err := promoteCorpus(context.Background(), ".", recs, fp, persist, &bytes.Buffer{})
+	_, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("a promoter error must abort the run")
 	}

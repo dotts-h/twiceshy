@@ -1,14 +1,14 @@
 ---
 id: 0033
 title: Guardrails for autonomous promotion — anomaly monitoring, emergency stop, budget caps
-status: open
+status: closed
 severity: high
 group: 0027
 depends_on: [0029, 0031]
 forgejo:
 links:
   adr: ADR-0013
-  prs: []
+  prs: [86]
   issues: [0032]
   regression:
 assets: []
