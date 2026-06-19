@@ -26,6 +26,14 @@ type usageStore interface {
 // immediately; the write happens in a short tracked goroutine, never a hot-path
 // synchronous write. A failing or panicking usage write never blocks or crashes
 // a retrieval. flush() drains in-flight writes for tests and graceful shutdown.
+//
+// Usage is a *best-effort* reinforcement signal: it is not on the request's
+// critical path, and a write still in flight when the index closes at shutdown
+// is logged-and-dropped, not recovered. That edge loses at most the handful of
+// retrievals served in the final milliseconds — acceptable for a decay/reinforce
+// counter accumulated over a record's whole life (ADR-0013 §4). The server owns
+// no shutdown hook for flush() by design; adding a lifecycle API for this would
+// over-serve a signal that tolerates the loss.
 type usageRecorder struct {
 	store usageStore
 	log   *slog.Logger
