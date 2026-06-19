@@ -1,14 +1,14 @@
 ---
 id: 0055
 title: "Materialize the usage signal into provenance.usage"
-status: open
+status: closed
 severity: medium
 group: 0034
 depends_on: []
 forgejo: 145
 links:
   adr: ADR-0013
-  prs: []
+  prs: [171]
   issues: []
   regression:
 assets: []
@@ -26,8 +26,8 @@ Plan ref: `docs/GO_LIVE_HARDENING_PLAN.md` §E2.
 
 ## Acceptance
 
-- [ ] The committed corpus reflects real usage counters the loop and audit can read.
-- [ ] Test-first; `make ci` green.
+- [x] The committed corpus reflects real usage counters the loop and audit can read.
+- [x] Test-first; `make ci` green.
 
 ## Notes
 
