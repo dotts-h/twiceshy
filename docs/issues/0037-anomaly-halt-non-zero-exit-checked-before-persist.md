@@ -1,14 +1,14 @@
 ---
 id: 0037
 title: "Anomaly = HALT + non-zero exit, checked before persist"
-status: open
+status: closed
 severity: high
 group: 0034
 depends_on: [0036]
 forgejo: 127
 links:
   adr: ADR-0013
-  prs: []
+  prs: [152]
   issues: []
   regression:
 assets: []
@@ -26,9 +26,9 @@ Plan ref: `docs/GO_LIVE_HARDENING_PLAN.md` §D1.
 
 ## Acceptance
 
-- [ ] A forced anomaly stops mid-run with no further writes and a non-zero exit.
-- [ ] The anomaly appears as a field in the run summary (#0036).
-- [ ] Test-first; `make ci` green.
+- [x] A forced anomaly stops mid-run with no further writes and a non-zero exit.
+- [x] The anomaly appears as a field in the run summary (#0036).
+- [x] Test-first; `make ci` green.
 
 ## Notes
 

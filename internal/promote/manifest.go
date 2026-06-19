@@ -28,8 +28,12 @@ type RecordAction struct {
 // morning review and the daily Opus audit (#0044) consume it without scraping
 // stdout. Stage is "promote" or "adapt"; Counts mirrors the run's stats.
 type RunManifest struct {
-	RunID   string         `json:"run_id"`
-	Stage   string         `json:"stage"`
+	RunID string `json:"run_id"`
+	Stage string `json:"stage"`
+	// Anomaly is true when the run tripped the anomaly guardrail and halted
+	// before persisting further (#0037, ADR-0013 §D1) — the daily audit reads
+	// this to react to a compromised-judge spike without scraping logs.
+	Anomaly bool           `json:"anomaly"`
 	Counts  map[string]int `json:"counts"`
 	Actions []RecordAction `json:"actions"`
 }
