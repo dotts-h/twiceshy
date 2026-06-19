@@ -714,7 +714,7 @@ func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, ru
 			"outcome", "promoted",
 			"judge_model", outcome.Verdict.Model,
 			"judge_decision", string(outcome.Verdict.Decision),
-			"reproduced_under", strings.Join(outcome.Attestation.ReproducedUnder, ","),
+			"reproduced_under", outcome.Attestation.ReproducedUnder,
 			"attestation_ran_at", outcome.Attestation.RanAt,
 			"duration_ms", dur,
 		)
@@ -880,6 +880,7 @@ func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run 
 		switch outcome.Action {
 		case promote.ActionDemote:
 			if err := persist(corpus, original); err != nil {
+				log.Error("decision", "record_id", original.ID, "outcome", "error", "reason", err.Error(), "duration_ms", dur)
 				return st, fmt.Errorf("persist %s: %w", original.ID, err)
 			}
 			st.demoted++
@@ -889,6 +890,7 @@ func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run 
 				"judge_model", outcome.Verdict.Model, "judge_decision", string(outcome.Verdict.Decision), "duration_ms", dur)
 		case promote.ActionDispute:
 			if err := persist(corpus, original); err != nil {
+				log.Error("decision", "record_id", original.ID, "outcome", "error", "reason", err.Error(), "duration_ms", dur)
 				return st, fmt.Errorf("persist %s: %w", original.ID, err)
 			}
 			st.disputed++
