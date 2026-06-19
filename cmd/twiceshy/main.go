@@ -688,6 +688,7 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	asJSON := fs.Bool("json", false, "emit a machine-readable run manifest (every record's transition) to stdout instead of prose; the daily audit reads this")
 	maxActions := fs.Int("max-actions", defaultMaxActions, "anomaly alert threshold: promotions per run above which an alert fires (0 = off)")
 	maxRuns := fs.Int("max-runs", 0, "budget cap: max records processed (broker/judge runs) per invocation (0 = unlimited)")
+	votes := fs.Int("votes", judge.DefaultVotes, "judge each record this many times and promote on majority-approve only — closes the model's single-shot non-determinism (ADR-0013 §F1; min 1)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -739,7 +740,11 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	// proven here holds identically when re-checked.
 	b := repro.NewBroker([]string{repro.PinnedGoImage})
 	rv := repro.NewRevalidator(b, *corpus)
-	p := promote.NewPromoter(rv, j, *corpus)
+	// Production majority voting (ADR-0013 §F1): wrap the model judge so each
+	// record is judged -votes times and promotes on majority-approve only — closes
+	// the measured ~0.7% single-shot false-approve (exp-0046). The raw j keeps its
+	// Ping for preflight; only the gate sees the voting wrapper.
+	p := promote.NewPromoter(rv, judge.NewMajority(j, *votes), *corpus)
 
 	// Preflight (ADR-0013 §A3): abort before walking the corpus if the sandbox
 	// substrate or the judge endpoint is down, rather than failing mid-run.
