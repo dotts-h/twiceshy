@@ -7,6 +7,7 @@
 //	twiceshy serve  -corpus <dir> -db <file> -addr …  rebuild, then serve MCP
 //	twiceshy ingest <source> -corpus <dir> -db <file> import quarantined records
 //	twiceshy draft  -corpus <dir>                     draft+gate+attach repros (needs docker+runsc)
+//	twiceshy promote -corpus <dir>                    attestation+judge auto-promote (needs docker+runsc+judge)
 //	twiceshy pack   -corpus <dir> -out <dir>          build a distributable pack
 //	twiceshy doctor <name> -corpus <dir>              run a doctor (staleness | revalidate)
 //	twiceshy eval   -corpus <dir> -db <file>          report retrieval recall@k / MRR
@@ -38,7 +39,9 @@ import (
 	"github.com/dotts-h/twiceshy/internal/eval"
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/ingest"
+	"github.com/dotts-h/twiceshy/internal/judge"
 	"github.com/dotts-h/twiceshy/internal/pack"
+	"github.com/dotts-h/twiceshy/internal/promote"
 	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/repro"
 	"github.com/dotts-h/twiceshy/internal/server"
@@ -77,7 +80,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|ingest|draft|pack|doctor|eval> [flags]")
+		return errors.New("usage: twiceshy <index|serve|ingest|draft|promote|pack|doctor|eval> [flags]")
 	}
 	switch args[0] {
 	case "index":
@@ -90,12 +93,14 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runIngest(ctx, args[1:], out)
 	case "draft":
 		return runDraft(ctx, args[1:], out)
+	case "promote":
+		return runPromote(ctx, args[1:], out, getenv)
 	case "doctor":
 		return runDoctor(ctx, args[1:], out)
 	case "eval":
 		return runEval(ctx, args[1:], out)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, draft, pack, doctor, or eval)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, draft, promote, pack, doctor, or eval)", args[0])
 	}
 }
 
@@ -521,6 +526,110 @@ func removeRepro(corpus, reproPath string) {
 	if dst, err := safeJoin(corpus, reproPath); err == nil {
 		_ = os.RemoveAll(dst)
 	}
+}
+
+// recordPromoter is the seam the promote command drives: promote.Promoter.Promote
+// satisfies it. Abstracting it lets the corpus walk + persistence be unit-tested
+// without a broker or a live judge.
+type recordPromoter interface {
+	Promote(ctx context.Context, rec *record.Record) (promote.Outcome, error)
+}
+
+// promoteStats summarizes a promote run.
+type promoteStats struct {
+	promoted   int // holding attestation + judge PASS → flipped to validated
+	held       int // eligible but not promoted (attestation didn't hold or judge declined)
+	ineligible int // not the execution-provable class (left for a human)
+}
+
+// runPromote is the positive direction of ADR-0013 (#0029): for each quarantined
+// execution-provable record, a holding broker attestation PLUS a judge PASS flips
+// it to validated with no human approver, recording the attestation + verdict in
+// provenance. The execute phase runs untrusted repros, so a real run needs docker
+// + the runsc runtime (the brain) AND a judge endpoint (TWICESHY_JUDGE_URL, off
+// the Anthropic pool); a bare checkout can use -dry-run to list candidates.
+func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
+	fs := flag.NewFlagSet("promote", flag.ContinueOnError)
+	corpus := fs.String("corpus", ".", "corpus root (the directory containing experience/)")
+	judgeModel := fs.String("judge-model", "", "diverse frontier judge model id, e.g. gemini-2.5-pro (must differ from -drafter-model)")
+	drafterModel := fs.String("drafter-model", "", "the model that drafted records; the judge must not share its family (anti-monoculture)")
+	dryRun := fs.Bool("dry-run", false, "list the execution-provable promotion candidates; run no gate/judge, write nothing")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+
+	recs, err := record.LoadCorpus(*corpus)
+	if err != nil {
+		return fmt.Errorf("loading corpus: %w", err)
+	}
+
+	if *dryRun {
+		n := 0
+		for _, rec := range recs {
+			if ok, _ := promote.Eligible(rec); ok {
+				n++
+				_, _ = fmt.Fprintf(out, "  candidate %s %s\n", rec.ID, rec.Path)
+			}
+		}
+		_, _ = fmt.Fprintf(out, "promote (dry-run): %d execution-provable candidate(s); each needs a holding attestation + a judge PASS to flip\n", n)
+		return nil
+	}
+
+	// Fail-safe: no judge configured → nothing is ever auto-promoted (ADR-0013 §6).
+	judgeURL := getenv("TWICESHY_JUDGE_URL")
+	if judgeURL == "" {
+		return errors.New("TWICESHY_JUDGE_URL must be set: auto-promotion requires a diverse-model judge (it is never bypassed)")
+	}
+	j, err := judge.NewModelJudge(judge.Config{Endpoint: judgeURL, Model: *judgeModel, DrafterModel: *drafterModel})
+	if err != nil {
+		return fmt.Errorf("configuring judge: %w", err)
+	}
+
+	// The SAME broker caps the revalidate doctor (#0020) and draft use, so a repro
+	// proven here holds identically when re-checked.
+	b := repro.NewBroker([]string{repro.PinnedGoImage})
+	rv := repro.NewRevalidator(b, *corpus)
+	p := promote.NewPromoter(rv, j, *corpus)
+
+	st, err := promoteCorpus(ctx, *corpus, recs, p, writeRecord, out)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(out, "promote: promoted %d, held %d (attestation/judge declined), ineligible %d\n",
+		st.promoted, st.held, st.ineligible)
+	return nil
+}
+
+// promoteCorpus is the testable core of `twiceshy promote`: it walks the records,
+// runs each through the promoter, and persists the records that were promoted
+// (the promoter mutated status/validated_at/provenance in place). run and persist
+// are injected so the walk is exercised without a sandbox or a live judge. A hard
+// promoter error (broker failure, an invalid promoted record) aborts; records
+// promoted before it stay written (each is an independently-valid delta).
+func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, run recordPromoter, persist func(string, *record.Record) error, out io.Writer) (promoteStats, error) {
+	var st promoteStats
+	for _, rec := range recs {
+		if ok, _ := promote.Eligible(rec); !ok {
+			st.ineligible++
+			continue
+		}
+		outcome, err := run.Promote(ctx, rec)
+		if err != nil {
+			return st, fmt.Errorf("promote %s: %w", rec.ID, err)
+		}
+		if !outcome.Promoted {
+			st.held++
+			_, _ = fmt.Fprintf(out, "  held %s (%s)\n", rec.ID, outcome.Reason)
+			continue
+		}
+		if err := persist(corpus, rec); err != nil {
+			return st, fmt.Errorf("persist %s: %w", rec.ID, err)
+		}
+		st.promoted++
+		_, _ = fmt.Fprintf(out, "  promoted %s -> validated (judge %s, reproduced under %s)\n",
+			rec.ID, outcome.Verdict.Model, strings.Join(outcome.Attestation.ReproducedUnder, ", "))
+	}
+	return st, nil
 }
 
 // runPack builds a distributable experience pack (#0007, ADR-0002 §4). It

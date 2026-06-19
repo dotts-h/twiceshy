@@ -1,14 +1,14 @@
 ---
 id: 0029
 title: Auto-promotion — attestation + judge PASS promotes quarantined to validated (no human approver)
-status: open
+status: closed
 severity: high
 group: 0027
 depends_on: [0028]
 forgejo:
 links:
   adr: ADR-0013
-  prs: []
+  prs: [84]
   issues: [0026, 0012]
   regression:
 assets: []

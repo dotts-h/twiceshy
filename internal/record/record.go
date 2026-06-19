@@ -127,7 +127,12 @@ type Provenance struct {
 	// SupersededBy. #0032 follows it to re-run the original repro plus the
 	// counter; it is evidence, not a verdict, so it never mutates the target.
 	Disputes *string `yaml:"disputes,omitempty"`
-	Usage    *Usage  `yaml:"usage,omitempty"`
+	// Promotion is the additive, optional audit trail an autonomous promotion
+	// (#0029, ADR-0013) stamps in: the holding attestation it rode and the
+	// diverse judge's verdict. Set only by the promoter; nil on a human-validated
+	// or quarantined record.
+	Promotion *Promotion `yaml:"promotion,omitempty"`
+	Usage     *Usage     `yaml:"usage,omitempty"`
 	// SecurityFlags records hazards the ingestion safety gate detected
 	// (#0011), e.g. "secret:aws-access-key". A flagged record is documented and
 	// quarantined but MUST NOT be promoted to validated (see validateProvenance).
@@ -154,6 +159,16 @@ type Usage struct {
 	Retrieved        int     `yaml:"retrieved"`
 	ConfirmedHelpful int     `yaml:"confirmed_helpful"`
 	LastHit          *string `yaml:"last_hit"`
+}
+
+// Promotion records why an autonomous quarantined→validated flip was allowed
+// (#0029, ADR-0013 §1–2): the holding broker attestation and the diverse
+// judge's verdict, carried in the git commit itself as the audit trail.
+type Promotion struct {
+	AttestedAt      string   `yaml:"attested_at"`                // the attestation's ran_at (RFC3339)
+	ReproducedUnder []string `yaml:"reproduced_under,omitempty"` // matrix labels the test-set held under
+	JudgeModel      string   `yaml:"judge_model"`                // the diverse model that approved
+	JudgeDecision   string   `yaml:"judge_decision"`             // the verdict decision (an approval)
 }
 
 var (
@@ -497,6 +512,17 @@ func (r *Record) validateProvenance(fail func(string, ...any)) {
 	}
 	if p.Disputes != nil && !reID.MatchString(*p.Disputes) {
 		fail("disputes %q does not match %s", *p.Disputes, reID)
+	}
+	if pr := p.Promotion; pr != nil {
+		if strings.TrimSpace(pr.AttestedAt) == "" {
+			fail("provenance.promotion.attested_at is required")
+		}
+		if strings.TrimSpace(pr.JudgeModel) == "" {
+			fail("provenance.promotion.judge_model is required")
+		}
+		if strings.TrimSpace(pr.JudgeDecision) == "" {
+			fail("provenance.promotion.judge_decision is required")
+		}
 	}
 	if !validated.IsZero() && !recorded.IsZero() && validated.Before(recorded) {
 		fail("provenance.validated_at precedes recorded_at")

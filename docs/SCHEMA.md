@@ -104,6 +104,7 @@ also carry a named Go unit test.
 | `security_flags` | string[] | no | hazards the ingestion safety gate detected (e.g. `secret:aws-access-key`, `harmful-code:pipe-to-shell`); set on ingest (#0011). A record with `security_flags` **cannot be `validated`** — it is documented + quarantined |
 | `superseded_by` | string\|null | when `status: superseded` | id of the replacement. **Supersede, never delete** |
 | `disputes` | string\|null | no | id of an existing record this one is **counter-evidence against** — set on an outcome-report counter-record (#0031). Additive, optional, `exp-NNNN`-shaped like `superseded_by`. It is evidence, not a verdict: #0032 follows it to re-run the original repro plus the counter, and a report never mutates its target |
+| `promotion` | object | no | the **audit trail of an autonomous promotion** (#0029, ADR-0013): `{attested_at, reproduced_under?, judge_model, judge_decision}` — the holding attestation and the diverse judge's verdict that flipped this record `quarantined → validated` with no human approver. Additive, optional; set only by the promoter |
 | `usage` | object | no | `{retrieved: int, confirmed_helpful: int, last_hit: date\|null}` — Doctor 4's signal; maintained by tooling, zero-valued at creation |
 
 ## Lifecycle

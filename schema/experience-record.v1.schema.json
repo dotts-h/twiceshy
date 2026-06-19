@@ -274,6 +274,17 @@
             { "type": "null" }
           ]
         },
+        "promotion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["attested_at", "judge_model", "judge_decision"],
+          "properties": {
+            "attested_at": { "type": "string", "minLength": 1 },
+            "reproduced_under": { "type": "array", "items": { "type": "string" } },
+            "judge_model": { "type": "string", "minLength": 1 },
+            "judge_decision": { "type": "string", "minLength": 1 }
+          }
+        },
         "usage": {
           "type": "object",
           "additionalProperties": false,
