@@ -9,6 +9,9 @@
 - **Related / extends:** ADR-0001 (architecture), ADR-0002 (licensing),
   ADR-0003 (bootstrap source scope), ADR-0009 (embedding-free hot path),
   ADR-0010 (doctors / D3 deferral). Tracked: #0004 (D3), #0005 (eval), #0007 (importer).
+  **Loop closed by [ADR-0013](ADR-0013-closed-loop-autonomous-validation.md)
+  (proposed)** — proof + a diverse-model judge auto-promote, and gated outcome
+  reports demote/supersede, removing the human from the *provable* loop (epic #0027).
 
 ## Context
 

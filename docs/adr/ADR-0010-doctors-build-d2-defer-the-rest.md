@@ -5,7 +5,9 @@
 - **Related:** [ADR-0001 §7](ADR-0001-architecture.md) (doctors: background jobs,
   **delta-only, never whole-store rewrites** — locked); [ADR-0008](ADR-0008-write-path-persistence-is-a-cli-concern.md)
   (git/PR is the trust boundary); [CONTEXT.md](../CONTEXT.md) (the D1–D5 roster,
-  `stale`); issue #0004.
+  `stale`); issue #0004. **Refined by [ADR-0013](ADR-0013-closed-loop-autonomous-validation.md)
+  (proposed)** — the propose-only stance gains an apply-when-proven-and-judged path
+  for execution-provable records, and D4 gets its substrate (#0030).
 
 ## Context
 
