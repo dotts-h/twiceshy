@@ -73,7 +73,9 @@ cd "$REPO"
 git fetch origin -q
 git checkout main -q
 git reset --hard origin/main -q
-git clean -fdq -- experience/ runs/ 2>/dev/null || git clean -fdq -- experience/
+# Sweep untracked stragglers from a prior crashed run (a missing pathspec is a
+# no-op, not an error) so the next batch never commits a stale manifest/record.
+git clean -fdq -- experience/ runs/
 
 tok="$(git config --get remote.origin.url | sed -E 's#.*//[^:]+:([^@]+)@.*#\1#')"
 
@@ -111,7 +113,9 @@ merge_due() {
 merge_due
 
 # --- Phase 3: run tonight's validation on a fresh branch ----------------------
-bin="$(mktemp -d)/twiceshy"
+bindir="$(mktemp -d)"
+trap 'rm -rf "$bindir"' EXIT # don't leak the build dir in /tmp across nightly runs
+bin="$bindir/twiceshy"
 "$GO" build -o "$bin" ./cmd/twiceshy
 
 runid="run-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -179,6 +183,7 @@ sha="$(git rev-parse HEAD)"
 if [ "$DRYRUN" = "1" ]; then
 	echo "[dry-run] would push ${branch} and open a veto-window PR (anomaly=${anomaly}, sha=${sha})"
 	git checkout main -q
+	git branch -D "$branch" -q # leave no local branch behind on repeated dry-runs
 	exit 0
 fi
 

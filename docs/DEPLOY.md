@@ -131,6 +131,7 @@ TWICESHY_REPORT_QUEUE=/home/ori/.local/share/twiceshy/report-queue
 TWICESHY_ALERT_URL=https://ntfy.example/twiceshy-alerts
 NTFY_URL=https://ntfy.example/twiceshy
 # TWICESHY_SOAK_SECONDS=172800   # 48h veto window (default)
+# TWICESHY_AUTOMERGE=1           # auto-merge soaked, non-anomalous PRs on green (default)
 # TWICESHY_PAUSE=1               # emergency stop
 ENV
 # 3. dry-run first (builds + runs locally, never pushes/merges)
