@@ -1,14 +1,14 @@
 ---
 id: 0046
 title: "Unify broker reaper logging to slog"
-status: open
+status: closed
 severity: low
 group: 0034
 depends_on: [0035]
 forgejo: 136
 links:
   adr: ADR-0013
-  prs: []
+  prs: [161]
   issues: []
   regression:
 assets: []
@@ -26,8 +26,8 @@ Plan ref: `docs/GO_LIVE_HARDENING_PLAN.md` §B5.
 
 ## Acceptance
 
-- [ ] Reaper events are structured slog; no bare log.Printf remains on the loop path.
-- [ ] Test-first; `make ci` green.
+- [x] Reaper events are structured slog; no bare log.Printf remains on the loop path.
+- [x] Test-first; `make ci` green.
 
 ## Notes
 

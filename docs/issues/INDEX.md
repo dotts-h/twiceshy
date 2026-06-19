@@ -64,7 +64,7 @@ never a cycle).
 | [0043](0043-nightly-validate-driver-adr-0013-2-veto-window-pr.md) | Nightly validate driver + ADR-0013 §2 veto-window PR | closed | high | 0034 | ADR-0013, PR#158 |
 | [0044](0044-daily-opus-4-8-audit-routine-auto-demote-disagreements.md) | Daily Opus-4.8 audit routine (auto-demote disagreements) | closed | high | 0034 | ADR-0013, PR#159 |
 | [0045](0045-success-heartbeat-uptime-kuma-push.md) | Success heartbeat (Uptime-Kuma push) | closed | medium | 0034 | ADR-0013, PR#160 |
-| [0046](0046-unify-broker-reaper-logging-to-slog.md) | Unify broker reaper logging to slog | open | low | 0034 | ADR-0013; deps [#0035] |
+| [0046](0046-unify-broker-reaper-logging-to-slog.md) | Unify broker reaper logging to slog | closed | low | 0034 | ADR-0013, PR#161 |
 | [0047](0047-judge-latency-verdict-distribution-metrics.md) | Judge latency + verdict-distribution metrics | open | medium | 0034 | ADR-0013; deps [#0036] |
 | [0048](0048-re-promote-un-demote-path.md) | Re-promote / un-demote path | open | high | 0034 | ADR-0013; deps — |
 | [0049](0049-true-effect-preview-dry-run.md) | True effect-preview dry-run | open | medium | 0034 | ADR-0013; deps — |
