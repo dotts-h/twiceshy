@@ -75,7 +75,7 @@ func TestPromoteCorpus_EmitsStructuredLog(t *testing.T) {
 	var logbuf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logbuf, nil)).With("run_id", "run-test")
 
-	_, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, logger, &bytes.Buffer{})
+	_, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, logger, nil, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("promoteCorpus: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestAdaptCorpus_LogsHeldOutcome(t *testing.T) {
 	var logbuf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logbuf, nil)).With("run_id", "run-test")
 
-	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{}, logger, &bytes.Buffer{})
+	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{}, logger, nil, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("adaptCorpus: %v", err)
 	}

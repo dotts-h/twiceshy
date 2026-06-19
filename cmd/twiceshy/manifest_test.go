@@ -32,7 +32,7 @@ func TestPromoteCorpus_ReturnsManifestActions(t *testing.T) {
 	fp := &fakePromoter{promote: map[string]bool{"exp-0100": true}}
 	persist := func(string, *record.Record) error { return nil }
 
-	_, actions, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, nil, &bytes.Buffer{})
+	_, actions, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, nil, nil, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("promoteCorpus: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestAdaptCorpus_ReturnsManifestActions(t *testing.T) {
 	adapter := promote.NewAdapter(&judge.StubJudge{Verdict: judge.ApproveVerdict("gemini-2.5-pro")})
 	persist := func(string, *record.Record) error { return nil }
 
-	_, actions, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{}, nil, &bytes.Buffer{})
+	_, actions, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{}, nil, nil, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("adaptCorpus: %v", err)
 	}

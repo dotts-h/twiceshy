@@ -67,7 +67,7 @@ func TestAdaptCorpus_DemotesAndPersists(t *testing.T) {
 	var persisted []string
 	persist := func(_ string, r *record.Record) error { persisted = append(persisted, r.ID); return nil }
 
-	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{}, nil, &bytes.Buffer{})
+	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{}, nil, nil, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("adaptCorpus: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestAdaptCorpus_CorroboratedDisputesFlagsDisputed(t *testing.T) {
 	adapter := promote.NewAdapter(&judge.StubJudge{Verdict: judge.ApproveVerdict("g")})
 	persist := func(_ string, _ *record.Record) error { return nil }
 
-	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{}, nil, &bytes.Buffer{})
+	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{}, nil, nil, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("adaptCorpus: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestAdaptCorpus_OrphanReportCounted(t *testing.T) {
 	adapter := promote.NewAdapter(&judge.StubJudge{Verdict: judge.ApproveVerdict("g")})
 	persist := func(_ string, _ *record.Record) error { return nil }
 
-	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{}, nil, &bytes.Buffer{})
+	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{}, nil, nil, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("adaptCorpus: %v", err)
 	}

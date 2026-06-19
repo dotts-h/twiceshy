@@ -32,7 +32,7 @@ func TestPromoteCorpus_AnomalyHaltsBeforeFurtherWrites(t *testing.T) {
 
 	// MaxActions=1: count 1 (ok), 2 (>1 → anomalous); the check runs BEFORE the
 	// next persist, so the 3rd promotion is halted, the 4th never reached.
-	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxActions: 1}, nil, &bytes.Buffer{})
+	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxActions: 1}, nil, nil, &bytes.Buffer{})
 	if !errors.Is(err, errAnomalyHalt) {
 		t.Fatalf("an anomalous run must return errAnomalyHalt, got %v", err)
 	}
@@ -51,7 +51,7 @@ func TestPromoteCorpus_NoAnomalyWhenMonitorOff(t *testing.T) {
 	var persisted []string
 	persist := func(_ string, rec *record.Record) error { persisted = append(persisted, rec.ID); return nil }
 
-	_, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxActions: 0}, nil, &bytes.Buffer{})
+	_, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxActions: 0}, nil, nil, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("monitor off must never halt: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestAdaptCorpus_AnomalyHaltsBeforeFurtherWrites(t *testing.T) {
 	var persisted []string
 	persist := func(_ string, r *record.Record) error { persisted = append(persisted, r.ID); return nil }
 
-	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxActions: 1}, nil, &bytes.Buffer{})
+	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxActions: 1}, nil, nil, &bytes.Buffer{})
 	if !errors.Is(err, errAnomalyHalt) {
 		t.Fatalf("an anomalous adapt run must return errAnomalyHalt, got %v", err)
 	}

@@ -45,6 +45,7 @@ import (
 	"github.com/dotts-h/twiceshy/internal/ingest"
 	"github.com/dotts-h/twiceshy/internal/judge"
 	"github.com/dotts-h/twiceshy/internal/judgeeval"
+	"github.com/dotts-h/twiceshy/internal/notify"
 	"github.com/dotts-h/twiceshy/internal/pack"
 	"github.com/dotts-h/twiceshy/internal/promote"
 	"github.com/dotts-h/twiceshy/internal/record"
@@ -584,6 +585,15 @@ func loopLogger(logger *slog.Logger) *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+// loopAlerter returns alerter, or a no-op when nil, so the promote/adapt core can
+// fire guardrail alerts unconditionally while tests inject a recorder or nil.
+func loopAlerter(alerter notify.Alerter) notify.Alerter {
+	if alerter != nil {
+		return alerter
+	}
+	return notify.NopAlerter{}
+}
+
 // newRunLogger builds the structured loop logger for one promote/adapt run: JSON
 // to stderr (the read path's slog.NewJSONHandler pattern, internal/server),
 // scoped to runID so a night's events are greppable by run. stdout stays the
@@ -672,13 +682,16 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 
 	g := guardrailsFrom(getenv, *maxActions, *maxRuns)
 	runID := newRunID()
+	runLog := newRunLogger(runID)
+	// Guardrail trips fire to TWICESHY_ALERT_URL (ntfy) when set; unset = no-op.
+	alerter := notify.New(getenv("TWICESHY_ALERT_URL"), runLog)
 	// In -json mode stdout carries the manifest alone; the per-record prose is
 	// suppressed (the slog stream on stderr stays the human-followable channel).
 	proseOut := out
 	if *asJSON {
 		proseOut = io.Discard
 	}
-	st, actions, err := promoteCorpus(ctx, *corpus, recs, p, writeRecord, g, newRunLogger(runID), proseOut)
+	st, actions, err := promoteCorpus(ctx, *corpus, recs, p, writeRecord, g, runLog, alerter, proseOut)
 	// An anomaly halt still produces a summary/manifest (the run is legible and the
 	// anomaly is flagged); only a hard failure short-circuits without one.
 	if err != nil && !errors.Is(err, errAnomalyHalt) {
@@ -706,8 +719,9 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 // are injected so the walk is exercised without a sandbox or a live judge. A hard
 // promoter error (broker failure, an invalid promoted record) aborts; records
 // promoted before it stay written (each is an independently-valid delta).
-func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, run recordPromoter, persist func(string, *record.Record) error, g guard.Guardrails, logger *slog.Logger, out io.Writer) (promoteStats, []promote.RecordAction, error) {
+func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, run recordPromoter, persist func(string, *record.Record) error, g guard.Guardrails, logger *slog.Logger, alerter notify.Alerter, out io.Writer) (promoteStats, []promote.RecordAction, error) {
 	log := loopLogger(logger).With("stage", "promote")
+	alert := loopAlerter(alerter)
 	start := time.Now()
 	var st promoteStats
 	actions := []promote.RecordAction{}
@@ -715,6 +729,7 @@ func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, ru
 	if g.Engaged() {
 		_, _ = fmt.Fprintln(out, "promote: emergency stop engaged (TWICESHY_PAUSE) — no promotions")
 		log.Warn("emergency stop engaged", "outcome", "emergency_stop")
+		alert.Alert(ctx, "emergency_stop", "promote: emergency stop engaged (TWICESHY_PAUSE) — no promotions")
 		log.Info("run complete", "outcome", "summary", "promoted", st.promoted, "held", st.held, "ineligible", st.ineligible, "anomaly", false, "duration_ms", time.Since(start).Milliseconds())
 		return st, actions, nil
 	}
@@ -726,8 +741,10 @@ func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, ru
 		// then exited 0, so a compromised judge wrote bad records and reported
 		// success. Stop here; the post-loop summary flags it + a non-zero exit.
 		if budget.Anomalous() {
-			_, _ = fmt.Fprintf(out, "promote: ANOMALY HALT — %d promotions exceed the alert threshold; stopping with nothing further written (investigate a compromised judge; TWICESHY_PAUSE=1)\n", budget.Actions())
+			msg := fmt.Sprintf("promote: ANOMALY HALT — %d promotions exceed the alert threshold; stopping with nothing further written (investigate a compromised judge; TWICESHY_PAUSE=1)", budget.Actions())
+			_, _ = fmt.Fprintln(out, msg)
 			log.Warn("anomaly halt — stopping before further writes", "outcome", "anomaly_halt", "actions", budget.Actions())
+			alert.Alert(ctx, "anomaly", msg)
 			break
 		}
 		if ok, reason := promote.Eligible(rec); !ok {
@@ -738,8 +755,10 @@ func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, ru
 		}
 		// Budget cap: stop draining the sandbox past the per-run ceiling.
 		if !budget.AllowRun() {
-			_, _ = fmt.Fprintf(out, "promote: budget cap reached (%d runs) — stopping; re-run to continue\n", budget.Runs())
+			msg := fmt.Sprintf("promote: budget cap reached (%d runs) — stopping; re-run to continue", budget.Runs())
+			_, _ = fmt.Fprintln(out, msg)
 			log.Warn("budget cap reached", "outcome", "budget_cap", "runs", budget.Runs())
+			alert.Alert(ctx, "budget_cap", msg)
 			break
 		}
 		budget.StartRun()
@@ -873,11 +892,14 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 
 	g := guardrailsFrom(getenv, *maxActions, *maxRuns)
 	runID := newRunID()
+	runLog := newRunLogger(runID)
+	// Guardrail trips fire to TWICESHY_ALERT_URL (ntfy) when set; unset = no-op.
+	alerter := notify.New(getenv("TWICESHY_ALERT_URL"), runLog)
 	proseOut := out
 	if *asJSON {
 		proseOut = io.Discard
 	}
-	st, actions, err := adaptCorpus(ctx, *corpus, recs, runner, adapter, writeRecord, g, newRunLogger(runID), proseOut)
+	st, actions, err := adaptCorpus(ctx, *corpus, recs, runner, adapter, writeRecord, g, runLog, alerter, proseOut)
 	// An anomaly halt still produces a summary/manifest; only a hard failure short-circuits.
 	if err != nil && !errors.Is(err, errAnomalyHalt) {
 		return err
@@ -903,8 +925,9 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 // demoted or disputed. The corroboration count (other reports disputing the same
 // record) is computed from the corpus. run and persist are injected so the walk
 // is exercised without a sandbox or a live judge.
-func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run counterRunner, adapter *promote.Adapter, persist func(string, *record.Record) error, g guard.Guardrails, logger *slog.Logger, out io.Writer) (adaptStats, []promote.RecordAction, error) {
+func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run counterRunner, adapter *promote.Adapter, persist func(string, *record.Record) error, g guard.Guardrails, logger *slog.Logger, alerter notify.Alerter, out io.Writer) (adaptStats, []promote.RecordAction, error) {
 	log := loopLogger(logger).With("stage", "adapt")
+	alert := loopAlerter(alerter)
 	start := time.Now()
 	byID := make(map[string]*record.Record, len(recs))
 	disputesCount := make(map[string]int)
@@ -921,6 +944,7 @@ func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run 
 	if g.Engaged() {
 		_, _ = fmt.Fprintln(out, "adapt: emergency stop engaged (TWICESHY_PAUSE) — no demotions")
 		log.Warn("emergency stop engaged", "outcome", "emergency_stop")
+		alert.Alert(ctx, "emergency_stop", "adapt: emergency stop engaged (TWICESHY_PAUSE) — no demotions")
 		log.Info("run complete", "outcome", "summary", "demoted", st.demoted, "disputed", st.disputed, "held", st.held, "orphan", st.orphan, "anomaly", false, "duration_ms", time.Since(start).Milliseconds())
 		return st, actions, nil
 	}
@@ -931,8 +955,10 @@ func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run 
 		// more (the old path persisted, then checked, then continued, then exited 0).
 		// The post-loop summary flags it + a non-zero exit.
 		if budget.Anomalous() {
-			_, _ = fmt.Fprintf(out, "adapt: ANOMALY HALT — %d demote/dispute actions exceed the alert threshold; stopping with nothing further written (investigate a compromised judge; TWICESHY_PAUSE=1)\n", budget.Actions())
+			msg := fmt.Sprintf("adapt: ANOMALY HALT — %d demote/dispute actions exceed the alert threshold; stopping with nothing further written (investigate a compromised judge; TWICESHY_PAUSE=1)", budget.Actions())
+			_, _ = fmt.Fprintln(out, msg)
 			log.Warn("anomaly halt — stopping before further writes", "outcome", "anomaly_halt", "actions", budget.Actions())
+			alert.Alert(ctx, "anomaly", msg)
 			break
 		}
 		origID := reportDisputes(rep)
@@ -949,8 +975,10 @@ func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run 
 		}
 		// Budget cap: a report flood can't drain the broker/judge past the ceiling.
 		if !budget.AllowRun() {
-			_, _ = fmt.Fprintf(out, "adapt: budget cap reached (%d runs) — stopping; re-run to continue\n", budget.Runs())
+			msg := fmt.Sprintf("adapt: budget cap reached (%d runs) — stopping; re-run to continue", budget.Runs())
+			_, _ = fmt.Fprintln(out, msg)
 			log.Warn("budget cap reached", "outcome", "budget_cap", "runs", budget.Runs())
+			alert.Alert(ctx, "budget_cap", msg)
 			break
 		}
 		budget.StartRun()
