@@ -128,6 +128,39 @@ func preflight(ctx context.Context, b brokerHealth, j judgeLive) error {
 	return nil
 }
 
+// reapOrphans sweeps sandbox containers/volumes a crashed prior run leaked — the
+// Reaper backstop (#0018). A var so tests can spy without a live docker.
+var reapOrphans = func(ctx context.Context) (containers, volumes int, err error) {
+	return repro.NewReaper().Reap(ctx)
+}
+
+// startupReap wires the Reaper into the loop start (#0052): before the corpus
+// walk, sweep any orphans a crashed prior run left so they don't accumulate. It
+// is skipped in a dry-run (-effect writes nothing, so it must delete nothing
+// either) and is best-effort — a sweep error is reported, never fatal (a healthy
+// substrate already passed preflight; cleanup hiccups shouldn't abort the run).
+// For belt-and-suspenders, also run `twiceshy` … with a periodic out-of-band
+// sweep (the Reaper is idempotent and safe on a schedule, see repro.Reaper).
+func startupReap(ctx context.Context, stage string, dryRun bool, logger *slog.Logger, out io.Writer) {
+	if dryRun {
+		return
+	}
+	c, v, err := reapOrphans(ctx)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("orphan sweep failed", "stage", stage, "error", err.Error())
+		}
+		_, _ = fmt.Fprintf(out, "%s: orphan sweep failed: %v (continuing)\n", stage, err)
+		return
+	}
+	if c+v > 0 {
+		if logger != nil {
+			logger.Info("reaped orphaned sandbox resources", "stage", stage, "containers", c, "volumes", v)
+		}
+		_, _ = fmt.Fprintf(out, "%s: reaped %d orphaned container(s), %d volume(s)\n", stage, c, v)
+	}
+}
+
 // parseFlags parses args, leaving usage/errors on stderr (flag's default — never
 // stdout). It returns flag.ErrHelp for `-h` and errUsage for a real flag error,
 // so main can exit 0 vs 2 without re-printing what flag already showed.
@@ -810,6 +843,8 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	if *effect {
 		persist = func(string, *record.Record) error { return nil }
 	}
+	// Sweep a crashed prior run's leaked sandbox resources before the walk (#0052).
+	startupReap(ctx, "promote", *effect, runLog, proseOut)
 	st, actions, err := promoteCorpus(ctx, *corpus, recs, p, persist, g, runLog, alerter, proseOut)
 	if *effect {
 		if err != nil && !errors.Is(err, errAnomalyHalt) {
@@ -1144,6 +1179,8 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 	if *effect {
 		persist = func(string, *record.Record) error { return nil }
 	}
+	// Sweep a crashed prior run's leaked sandbox resources before the walk (#0052).
+	startupReap(ctx, "adapt", *effect, runLog, proseOut)
 	st, actions, err := adaptCorpus(ctx, *corpus, recs, runner, adapter, persist, g, runLog, alerter, proseOut)
 	if *effect {
 		if err != nil && !errors.Is(err, errAnomalyHalt) {
