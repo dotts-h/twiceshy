@@ -18,7 +18,7 @@ never a cycle).
 | [0009](0009-epic-pre-deploy-security.md) | Epic: Pre-deploy security hardening (Tier A) | open | 0011, 0012, 0013, 0014 |
 | [0010](0010-epic-public-release.md) | Epic: Public release (Tier B) — multi-tenant, trial, anti-abuse | open | — |
 | [0027](0027-epic-closed-loop-autonomous-validation-no-human-in-the-provable-loop.md) | Epic: Closed-loop autonomous validation — no human in the provable loop | closed | 0028, 0029, 0030, 0031, 0032, 0033 |
-| [0034](0034-epic-go-live-hardening-bulletproof-the-autonomous-loop-single-tenant.md) | Epic: Go-live hardening — bulletproof the autonomous loop (single-tenant) | open | 0035, 0036, 0037, 0038, 0039, 0040, 0041, 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049, 0050, 0051, 0052, 0053, 0054, 0055, 0056, 0057, 0058 |
+| [0034](0034-epic-go-live-hardening-bulletproof-the-autonomous-loop-single-tenant.md) | Epic: Go-live hardening — bulletproof the autonomous loop (single-tenant) | closed | 0035, 0036, 0037, 0038, 0039, 0040, 0041, 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049, 0050, 0051, 0052, 0053, 0054, 0055, 0056, 0057, 0058 |
 
 ## Issues
 
@@ -76,4 +76,4 @@ never a cycle).
 | [0055](0055-materialize-the-usage-signal-into-provenance-usage.md) | Materialize the usage signal into provenance.usage | closed | medium | 0034 | ADR-0013; deps — |
 | [0056](0056-positive-outcome-mcp-path-confirmed-helpful.md) | Positive-outcome MCP path (confirmed_helpful) | closed | medium | 0034 | ADR-0013; deps — |
 | [0057](0057-adaptive-confirm-mode-in-judge-eval.md) | Adaptive `-confirm` mode in judge-eval | closed | low | 0034 | ADR-0013; deps — |
-| [0058](0058-grow-the-gold-set-from-daily-audit-misses-ongoing.md) | Grow the gold set from daily-audit misses (ongoing) | open | low | 0034 | ADR-0013; deps [#0044] |
+| [0058](0058-grow-the-gold-set-from-daily-audit-misses-ongoing.md) | Grow the gold set from daily-audit misses (ongoing) | closed | low | 0034 | ADR-0013; deps [#0044] |

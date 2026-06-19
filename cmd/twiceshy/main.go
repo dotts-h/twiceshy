@@ -14,6 +14,7 @@
 //	twiceshy doctor <name> -corpus <dir>              run a doctor (staleness | revalidate)
 //	twiceshy eval   -corpus <dir> -db <file>          report retrieval recall@k / MRR
 //	twiceshy usage-flush -corpus <dir> -db <file>  materialize usage counters into provenance.usage
+//	twiceshy gold-add -record <path> -id <Gxx> -mode <mode> -rationale <text>  render a gold.yaml case from an audit miss
 //	twiceshy judge-eval                               A/B the judge prompt vs the gold set (needs judge)
 //
 // serve requires the bearer token in TWICESHY_TOKEN. index and serve accept an
@@ -189,7 +190,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|ingest|draft|promote|repromote|adapt|intake-reports|report|pack|doctor|eval|usage-flush|judge-eval> [flags]")
+		return errors.New("usage: twiceshy <index|serve|ingest|draft|promote|repromote|adapt|intake-reports|report|pack|doctor|eval|usage-flush|gold-add|judge-eval> [flags]")
 	}
 	switch args[0] {
 	case "index":
@@ -218,10 +219,12 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runEval(ctx, args[1:], out)
 	case "usage-flush":
 		return runUsageFlush(ctx, args[1:], out)
+	case "gold-add":
+		return runGoldAdd(ctx, args[1:], out)
 	case "judge-eval":
 		return runJudgeEval(ctx, args[1:], out, getenv)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, draft, promote, repromote, adapt, intake-reports, report, pack, doctor, eval, usage-flush, or judge-eval)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, draft, promote, repromote, adapt, intake-reports, report, pack, doctor, eval, usage-flush, gold-add, or judge-eval)", args[0])
 	}
 }
 
@@ -1864,6 +1867,145 @@ func runUsageFlush(ctx context.Context, args []string, out io.Writer) error {
 	}
 	_, _ = fmt.Fprintf(out, "usage-flush: updated %d of %d record(s) from %s\n", updated, len(recs), c.db)
 	return nil
+}
+
+// runGoldAdd turns an audit-miss record into one gold.yaml case stanza (#0058).
+func runGoldAdd(_ context.Context, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("gold-add", flag.ContinueOnError)
+	corpus := fs.String("corpus", ".", "corpus root (the directory containing experience/)")
+	recordPath := fs.String("record", "", "corpus-relative or absolute path to the audit-miss record markdown")
+	id := fs.String("id", "", "gold case id (e.g. G42)")
+	mode := fs.String("mode", "", "gold case mode (approve, poison, scope, meaning, license)")
+	rationale := fs.String("rationale", "", "ground-truth rationale for the label")
+	checks := fs.String("checks", "", "comma-separated want_failing_checks (reject cases only)")
+	goldFile := fs.String("gold-file", "internal/judgeeval/gold.yaml", "path to gold.yaml (for -append)")
+	appendFile := fs.Bool("append", false, "append the stanza to -gold-file instead of printing")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if *recordPath == "" || *id == "" || *mode == "" || *rationale == "" {
+		return errors.New("gold-add: -record, -id, -mode, and -rationale are required")
+	}
+
+	rec, err := loadRecordForGoldAdd(*corpus, *recordPath)
+	if err != nil {
+		return fmt.Errorf("gold-add: loading record: %w", err)
+	}
+	repros, err := loadRecordRepros(*corpus, rec)
+	if err != nil {
+		return err
+	}
+	if len(repros) == 0 {
+		return fmt.Errorf("gold-add: %s has no guard.repro or guard.repros — a gold case needs at least one repro", rec.Path)
+	}
+
+	var checkList []string
+	if strings.TrimSpace(*checks) != "" {
+		for _, c := range strings.Split(*checks, ",") {
+			if c = strings.TrimSpace(c); c != "" {
+				checkList = append(checkList, c)
+			}
+		}
+	}
+
+	stanza, err := judgeeval.GoldCaseStanza(judgeeval.GoldStanzaInput{
+		ID:        *id,
+		Mode:      *mode,
+		Rationale: *rationale,
+		Checks:    checkList,
+		Record:    rec,
+		Repros:    repros,
+	})
+	if err != nil {
+		return fmt.Errorf("gold-add: %w", err)
+	}
+
+	if *appendFile {
+		f, err := os.OpenFile(*goldFile, os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			return fmt.Errorf("gold-add: opening %s: %w", *goldFile, err)
+		}
+		defer func() { _ = f.Close() }()
+		if _, err := f.WriteString("\n" + stanza); err != nil {
+			return fmt.Errorf("gold-add: appending to %s: %w", *goldFile, err)
+		}
+		_, _ = fmt.Fprintf(out, "gold-add: appended case %s to %s — re-run judge-eval to re-measure\n", *id, *goldFile)
+		return nil
+	}
+	_, _ = fmt.Fprintln(out, stanza)
+	_, _ = fmt.Fprintf(out, "\n# paste under cases: in %s, then re-run judge-eval to re-measure\n", *goldFile)
+	return nil
+}
+
+func loadRecordForGoldAdd(corpus, recordPath string) (*record.Record, error) {
+	if !filepath.IsAbs(recordPath) {
+		return record.ParseFile(corpus, recordPath)
+	}
+	src, err := os.ReadFile(recordPath)
+	if err != nil {
+		return nil, err
+	}
+	rel := recordPath
+	if r, err := filepath.Rel(corpus, recordPath); err == nil {
+		r = filepath.ToSlash(r)
+		if !strings.HasPrefix(r, "..") {
+			rel = r
+		}
+	}
+	return record.Parse(rel, src)
+}
+
+const maxReproContentBytes = 64 << 10
+
+func loadRecordRepros(corpus string, rec *record.Record) ([]judge.ReproArtifact, error) {
+	if rec.Guard == nil {
+		return nil, nil
+	}
+	var arts []judge.ReproArtifact
+	add := func(rp, kind, label string) error {
+		content, err := readReproContent(corpus, rp)
+		if err != nil {
+			return fmt.Errorf("gold-add: repro %s: %w", rp, err)
+		}
+		arts = append(arts, judge.ReproArtifact{Path: rp, Kind: kind, Label: label, Content: content})
+		return nil
+	}
+	if rec.Guard.Repro != nil && *rec.Guard.Repro != "" {
+		if err := add(*rec.Guard.Repro, "positive", ""); err != nil {
+			return nil, err
+		}
+	}
+	for _, rp := range rec.Guard.Repros {
+		if err := add(rp.Path, rp.Kind, rp.Label); err != nil {
+			return nil, err
+		}
+	}
+	return arts, nil
+}
+
+func readReproContent(root, rel string) (string, error) {
+	clean := filepath.Clean(filepath.FromSlash(rel))
+	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("repro path %q escapes the corpus root", rel)
+	}
+	abs := filepath.Join(root, clean)
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		abs = filepath.Join(abs, "repro.sh")
+	}
+	f, err := os.Open(abs) //nolint:gosec // abs is rooted at the corpus and escape-checked above
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	b, err := io.ReadAll(io.LimitReader(f, maxReproContentBytes))
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // runEval runs the retrieval-effectiveness eval (#0005) over the corpus: it
