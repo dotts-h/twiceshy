@@ -859,7 +859,7 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	// Sweep a crashed prior run's leaked sandbox resources before the walk (#0052).
 	startupReap(ctx, "promote", *effect, runLog, proseOut)
 	logSkippedPoison(runLog, proseOut, "promote", skipped)
-	st, actions, err := promoteCorpus(ctx, *corpus, recs, p, persist, g, runLog, alerter, proseOut)
+	st, actions, err := promoteCorpus(ctx, *corpus, recs, p, persist, g, runLog, alerter, proseOut, journalPathForRun(*corpus, "promote", *effect))
 	if *effect {
 		if err != nil && !errors.Is(err, errAnomalyHalt) {
 			return err
@@ -987,13 +987,76 @@ func runRepromote(ctx context.Context, args []string, out io.Writer, getenv func
 	return nil
 }
 
+func journalPathForRun(corpus, stage string, effect bool) string {
+	if effect {
+		return ""
+	}
+	return promote.JournalPath(corpus, stage)
+}
+
+// corpusJournal incrementally persists promote/adapt decisions for resume (#0054).
+type corpusJournal struct {
+	j      *promote.Journal
+	path   string
+	resume map[string]bool
+}
+
+func startCorpusJournal(path, stage string) (*corpusJournal, []promote.RecordAction, error) {
+	if path == "" {
+		return nil, nil, nil
+	}
+	loaded, err := promote.LoadJournal(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	if loaded != nil && !loaded.Complete {
+		return &corpusJournal{j: loaded, path: path, resume: loaded.DoneIDs()},
+			append([]promote.RecordAction(nil), loaded.Actions...), nil
+	}
+	return &corpusJournal{
+		j:      &promote.Journal{Stage: stage, Actions: []promote.RecordAction{}},
+		path:   path,
+		resume: map[string]bool{},
+	}, nil, nil
+}
+
+func (cj *corpusJournal) skip(id string) bool {
+	return cj != nil && cj.resume[id]
+}
+
+func (cj *corpusJournal) record(action promote.RecordAction) {
+	if cj == nil {
+		return
+	}
+	cj.j.Actions = append(cj.j.Actions, action)
+	_ = cj.j.Save(cj.path)
+}
+
+func (cj *corpusJournal) abort(recordID string, err error) {
+	if cj == nil {
+		return
+	}
+	cj.j.StoppedAt = &promote.JournalStop{RecordID: recordID, Error: err.Error()}
+	cj.j.Complete = false
+	_ = cj.j.Save(cj.path)
+}
+
+func (cj *corpusJournal) complete() {
+	if cj == nil {
+		return
+	}
+	cj.j.Complete = true
+	cj.j.StoppedAt = nil
+	_ = cj.j.Save(cj.path)
+}
+
 // promoteCorpus is the testable core of `twiceshy promote`: it walks the records,
 // runs each through the promoter, and persists the records that were promoted
 // (the promoter mutated status/validated_at/provenance in place). run and persist
 // are injected so the walk is exercised without a sandbox or a live judge. A hard
 // promoter error (broker failure, an invalid promoted record) aborts; records
 // promoted before it stay written (each is an independently-valid delta).
-func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, run recordPromoter, persist func(string, *record.Record) error, g guard.Guardrails, logger *slog.Logger, alerter notify.Alerter, out io.Writer) (promoteStats, []promote.RecordAction, error) {
+func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, run recordPromoter, persist func(string, *record.Record) error, g guard.Guardrails, logger *slog.Logger, alerter notify.Alerter, out io.Writer, journalPath string) (promoteStats, []promote.RecordAction, error) {
 	log := loopLogger(logger).With("stage", "promote")
 	alert := loopAlerter(alerter)
 	start := time.Now()
@@ -1007,8 +1070,18 @@ func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, ru
 		log.Info("run complete", "outcome", "summary", "promoted", st.promoted, "held", st.held, "ineligible", st.ineligible, "anomaly", false, "duration_ms", time.Since(start).Milliseconds())
 		return st, actions, nil
 	}
+	journal, prior, err := startCorpusJournal(journalPath, "promote")
+	if err != nil {
+		return st, actions, fmt.Errorf("load promote journal: %w", err)
+	}
+	if prior != nil {
+		actions = prior
+	}
 	budget := g.Budget()
 	for _, rec := range recs {
+		if journal.skip(rec.ID) {
+			continue
+		}
 		// Anomaly HALT (ADR-0013 §D1): a promotion spike already past the alert
 		// threshold is the "judge approving everything" signal. Check BEFORE doing
 		// any further work — the old path persisted, then checked, then continued,
@@ -1024,7 +1097,9 @@ func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, ru
 		if ok, reason := promote.Eligible(rec); !ok {
 			st.ineligible++
 			log.Info("decision", "record_id", rec.ID, "outcome", "ineligible", "reason", reason)
-			actions = append(actions, promote.RecordAction{ID: rec.ID, Outcome: "ineligible", FromStatus: rec.Status, ToStatus: rec.Status, Reason: reason})
+			action := promote.RecordAction{ID: rec.ID, Outcome: "ineligible", FromStatus: rec.Status, ToStatus: rec.Status, Reason: reason}
+			actions = append(actions, action)
+			journal.record(action)
 			continue
 		}
 		// Budget cap: stop draining the sandbox past the per-run ceiling.
@@ -1042,18 +1117,24 @@ func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, ru
 		dur := time.Since(recStart).Milliseconds()
 		if err != nil {
 			log.Error("decision", "record_id", rec.ID, "outcome", "error", "reason", err.Error(), "duration_ms", dur)
-			return st, actions, fmt.Errorf("promote %s: %w", rec.ID, err)
+			promoteErr := fmt.Errorf("promote %s: %w", rec.ID, err)
+			journal.abort(rec.ID, promoteErr)
+			return st, actions, promoteErr
 		}
 		if !outcome.Promoted {
 			st.held++
 			_, _ = fmt.Fprintf(out, "  held %s (%s)\n", rec.ID, outcome.Reason)
 			log.Info("decision", "record_id", rec.ID, "outcome", "held", "reason", outcome.Reason, "duration_ms", dur)
-			actions = append(actions, promote.RecordAction{ID: rec.ID, Outcome: "held", FromStatus: from, ToStatus: rec.Status, Reason: outcome.Reason})
+			action := promote.RecordAction{ID: rec.ID, Outcome: "held", FromStatus: from, ToStatus: rec.Status, Reason: outcome.Reason}
+			actions = append(actions, action)
+			journal.record(action)
 			continue
 		}
 		if err := persist(corpus, rec); err != nil {
 			log.Error("decision", "record_id", rec.ID, "outcome", "error", "reason", err.Error(), "duration_ms", dur)
-			return st, actions, fmt.Errorf("persist %s: %w", rec.ID, err)
+			persistErr := fmt.Errorf("persist %s: %w", rec.ID, err)
+			journal.abort(rec.ID, persistErr)
+			return st, actions, persistErr
 		}
 		st.promoted++
 		budget.CountAction()
@@ -1068,14 +1149,21 @@ func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, ru
 			"attestation_ran_at", outcome.Attestation.RanAt,
 			"duration_ms", dur,
 		)
-		actions = append(actions, promote.RecordAction{
+		action := promote.RecordAction{
 			ID: rec.ID, Outcome: "promoted", FromStatus: from, ToStatus: rec.Status,
 			JudgeModel: outcome.Verdict.Model, JudgeDecision: string(outcome.Verdict.Decision),
 			ReproducedUnder: outcome.Attestation.ReproducedUnder,
-		})
+		}
+		actions = append(actions, action)
+		journal.record(action)
 	}
 	anomaly := budget.Anomalous()
 	log.Info("run complete", "outcome", "summary", "promoted", st.promoted, "held", st.held, "ineligible", st.ineligible, "anomaly", anomaly, "duration_ms", time.Since(start).Milliseconds())
+	// Marking complete here (including an anomaly halt or a budget-cap break) is
+	// deliberate: only a hard mid-record error is a resumable abort (it set
+	// StoppedAt). An anomaly halt is held for human review and a budget cap means
+	// "re-run to continue" with a fresh walk — neither should auto-resume.
+	journal.complete()
 	if anomaly {
 		return st, actions, errAnomalyHalt
 	}
@@ -1196,7 +1284,7 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 	// Sweep a crashed prior run's leaked sandbox resources before the walk (#0052).
 	startupReap(ctx, "adapt", *effect, runLog, proseOut)
 	logSkippedPoison(runLog, proseOut, "adapt", skipped)
-	st, actions, err := adaptCorpus(ctx, *corpus, recs, runner, adapter, persist, g, runLog, alerter, proseOut)
+	st, actions, err := adaptCorpus(ctx, *corpus, recs, runner, adapter, persist, g, runLog, alerter, proseOut, journalPathForRun(*corpus, "adapt", *effect))
 	if *effect {
 		if err != nil && !errors.Is(err, errAnomalyHalt) {
 			return err
@@ -1237,7 +1325,7 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 // demoted or disputed. The corroboration count (other reports disputing the same
 // record) is computed from the corpus. run and persist are injected so the walk
 // is exercised without a sandbox or a live judge.
-func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run counterRunner, adapter *promote.Adapter, persist func(string, *record.Record) error, g guard.Guardrails, logger *slog.Logger, alerter notify.Alerter, out io.Writer) (adaptStats, []promote.RecordAction, error) {
+func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run counterRunner, adapter *promote.Adapter, persist func(string, *record.Record) error, g guard.Guardrails, logger *slog.Logger, alerter notify.Alerter, out io.Writer, journalPath string) (adaptStats, []promote.RecordAction, error) {
 	log := loopLogger(logger).With("stage", "adapt")
 	alert := loopAlerter(alerter)
 	start := time.Now()
@@ -1260,6 +1348,13 @@ func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run 
 		log.Info("run complete", "outcome", "summary", "demoted", st.demoted, "disputed", st.disputed, "held", st.held, "orphan", st.orphan, "anomaly", false, "duration_ms", time.Since(start).Milliseconds())
 		return st, actions, nil
 	}
+	journal, prior, err := startCorpusJournal(journalPath, "adapt")
+	if err != nil {
+		return st, actions, fmt.Errorf("load adapt journal: %w", err)
+	}
+	if prior != nil {
+		actions = prior
+	}
 	budget := g.Budget()
 	for _, rep := range recs {
 		// Anomaly HALT (ADR-0013 §D1): a demote/dispute spike past the alert
@@ -1278,11 +1373,20 @@ func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run 
 			continue
 		}
 		original, ok := byID[origID]
+		skipID := origID
+		if !ok {
+			skipID = rep.ID
+		}
+		if journal.skip(skipID) {
+			continue
+		}
 		if !ok {
 			st.orphan++
 			_, _ = fmt.Fprintf(out, "  orphan report %s disputes unknown %s\n", rep.ID, origID)
 			log.Info("decision", "record_id", rep.ID, "outcome", "orphan", "reason", "disputes unknown "+origID)
-			actions = append(actions, promote.RecordAction{ID: rep.ID, Outcome: "orphan", FromStatus: rep.Status, ToStatus: rep.Status, Reason: "disputes unknown " + origID})
+			action := promote.RecordAction{ID: rep.ID, Outcome: "orphan", FromStatus: rep.Status, ToStatus: rep.Status, Reason: "disputes unknown " + origID}
+			actions = append(actions, action)
+			journal.record(action)
 			continue
 		}
 		// Budget cap: a report flood can't drain the broker/judge past the ceiling.
@@ -1299,46 +1403,63 @@ func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run 
 		ev, err := run.Run(ctx, original, rep)
 		if err != nil {
 			log.Error("decision", "record_id", original.ID, "outcome", "error", "reason", err.Error(), "duration_ms", time.Since(recStart).Milliseconds())
-			return st, actions, fmt.Errorf("adapt %s: %w", rep.ID, err)
+			adaptErr := fmt.Errorf("adapt %s: %w", rep.ID, err)
+			journal.abort(rep.ID, adaptErr)
+			return st, actions, adaptErr
 		}
 		outcome, err := adapter.Adapt(ctx, original, rep, ev, disputesCount[origID]-1)
 		dur := time.Since(recStart).Milliseconds()
 		if err != nil {
 			log.Error("decision", "record_id", original.ID, "outcome", "error", "reason", err.Error(), "duration_ms", dur)
-			return st, actions, fmt.Errorf("adapt %s: %w", rep.ID, err)
+			adaptErr := fmt.Errorf("adapt %s: %w", rep.ID, err)
+			journal.abort(rep.ID, adaptErr)
+			return st, actions, adaptErr
 		}
 		switch outcome.Action {
 		case promote.ActionDemote:
 			if err := persist(corpus, original); err != nil {
 				log.Error("decision", "record_id", original.ID, "outcome", "error", "reason", err.Error(), "duration_ms", dur)
-				return st, actions, fmt.Errorf("persist %s: %w", original.ID, err)
+				persistErr := fmt.Errorf("persist %s: %w", original.ID, err)
+				journal.abort(original.ID, persistErr)
+				return st, actions, persistErr
 			}
 			st.demoted++
 			budget.CountAction()
 			_, _ = fmt.Fprintf(out, "  demoted %s -> stale (report %s, judge %s)\n", original.ID, rep.ID, outcome.Verdict.Model)
 			log.Info("decision", "record_id", original.ID, "outcome", "demoted", "report_id", rep.ID,
 				"judge_model", outcome.Verdict.Model, "judge_decision", string(outcome.Verdict.Decision), "duration_ms", dur)
-			actions = append(actions, promote.RecordAction{ID: original.ID, Outcome: "demoted", FromStatus: from, ToStatus: original.Status,
-				JudgeModel: outcome.Verdict.Model, JudgeDecision: string(outcome.Verdict.Decision)})
+			action := promote.RecordAction{ID: original.ID, Outcome: "demoted", FromStatus: from, ToStatus: original.Status,
+				JudgeModel: outcome.Verdict.Model, JudgeDecision: string(outcome.Verdict.Decision)}
+			actions = append(actions, action)
+			journal.record(action)
 		case promote.ActionDispute:
 			if err := persist(corpus, original); err != nil {
 				log.Error("decision", "record_id", original.ID, "outcome", "error", "reason", err.Error(), "duration_ms", dur)
-				return st, actions, fmt.Errorf("persist %s: %w", original.ID, err)
+				persistErr := fmt.Errorf("persist %s: %w", original.ID, err)
+				journal.abort(original.ID, persistErr)
+				return st, actions, persistErr
 			}
 			st.disputed++
 			budget.CountAction()
 			_, _ = fmt.Fprintf(out, "  disputed %s (corroborated by %d reports)\n", original.ID, disputesCount[origID])
 			log.Info("decision", "record_id", original.ID, "outcome", "disputed", "report_id", rep.ID,
 				"reason", outcome.Reason, "corroborating", disputesCount[origID], "duration_ms", dur)
-			actions = append(actions, promote.RecordAction{ID: original.ID, Outcome: "disputed", FromStatus: from, ToStatus: original.Status, Reason: outcome.Reason})
+			action := promote.RecordAction{ID: original.ID, Outcome: "disputed", FromStatus: from, ToStatus: original.Status, Reason: outcome.Reason}
+			actions = append(actions, action)
+			journal.record(action)
 		default:
 			st.held++
 			log.Info("decision", "record_id", original.ID, "outcome", "held", "report_id", rep.ID, "reason", outcome.Reason, "duration_ms", dur)
-			actions = append(actions, promote.RecordAction{ID: original.ID, Outcome: "held", FromStatus: from, ToStatus: original.Status, Reason: outcome.Reason})
+			action := promote.RecordAction{ID: original.ID, Outcome: "held", FromStatus: from, ToStatus: original.Status, Reason: outcome.Reason}
+			actions = append(actions, action)
+			journal.record(action)
 		}
 	}
 	anomaly := budget.Anomalous()
 	log.Info("run complete", "outcome", "summary", "demoted", st.demoted, "disputed", st.disputed, "held", st.held, "orphan", st.orphan, "anomaly", anomaly, "duration_ms", time.Since(start).Milliseconds())
+	// Complete (incl. anomaly halt / budget-cap break) is deliberate: only a hard
+	// mid-record error is a resumable abort (StoppedAt set). See promoteCorpus.
+	journal.complete()
 	if anomaly {
 		return st, actions, errAnomalyHalt
 	}

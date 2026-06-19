@@ -1,14 +1,14 @@
 ---
 id: 0054
 title: "Run journal / resume cursor"
-status: open
+status: closed
 severity: medium
 group: 0034
 depends_on: [0036]
 forgejo: 144
 links:
   adr: ADR-0013
-  prs: []
+  prs: [170]
   issues: []
   regression:
 assets: []
@@ -26,8 +26,8 @@ Plan ref: `docs/GO_LIVE_HARDENING_PLAN.md` §D4.
 
 ## Acceptance
 
-- [ ] After a forced mid-run abort, a journal records what was done and where it stopped; the next run resumes.
-- [ ] Test-first; `make ci` green.
+- [x] After a forced mid-run abort, a journal records what was done and where it stopped; the next run resumes.
+- [x] Test-first; `make ci` green.
 
 ## Notes
 

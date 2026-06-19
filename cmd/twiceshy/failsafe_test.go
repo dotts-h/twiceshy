@@ -40,7 +40,7 @@ func TestFailsafe_BrokerOutageExitsNonZeroNothingBadPromoted(t *testing.T) {
 	var persisted []string
 	persist := func(_ string, rec *record.Record) error { persisted = append(persisted, rec.ID); return nil }
 
-	_, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, nil, nil, &bytes.Buffer{})
+	_, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, nil, nil, &bytes.Buffer{}, "")
 	if err == nil {
 		t.Fatal("a broker outage must abort the run")
 	}
@@ -65,7 +65,7 @@ func TestFailsafe_AdaptBrokerOutageExitsNonZeroNoDemote(t *testing.T) {
 	var persisted []string
 	persist := func(_ string, r *record.Record) error { persisted = append(persisted, r.ID); return nil }
 
-	_, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{}, nil, nil, &bytes.Buffer{})
+	_, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{}, nil, nil, &bytes.Buffer{}, "")
 	if err == nil {
 		t.Fatal("a broker outage during adapt must abort the run")
 	}
