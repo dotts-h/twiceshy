@@ -429,6 +429,13 @@ func (r *Record) validateGuard(fail func(string, ...any)) {
 	fail("validated %s requires guard.guarding_test or a positive guard repro", r.Kind)
 }
 
+// HasPositiveRepro reports whether r carries an executable positive
+// (fail-to-pass) proof — the legacy single guard.repro or a guard.repros entry
+// of kind "positive". A record with only a negative (dead-end) repro is NOT
+// proven. Exposed so corpus tooling (the drafter pipeline) applies the same
+// positive-proof rule the validator does, instead of re-deriving it.
+func HasPositiveRepro(r *Record) bool { return r.hasPositiveRepro() }
+
 // hasPositiveRepro reports whether the guard carries at least one positive
 // fail-to-pass repro (the legacy single guard.repro is a positive).
 func (r *Record) hasPositiveRepro() bool {

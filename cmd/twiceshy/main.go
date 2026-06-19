@@ -6,8 +6,10 @@
 //	twiceshy index  -corpus <dir> -db <file>          rebuild the derived index
 //	twiceshy serve  -corpus <dir> -db <file> -addr …  rebuild, then serve MCP
 //	twiceshy ingest <source> -corpus <dir> -db <file> import quarantined records
+//	twiceshy draft  -corpus <dir>                     draft+gate+attach repros (needs docker+runsc)
 //	twiceshy pack   -corpus <dir> -out <dir>          build a distributable pack
 //	twiceshy doctor <name> -corpus <dir>              run a doctor (staleness | revalidate)
+//	twiceshy eval   -corpus <dir> -db <file>          report retrieval recall@k / MRR
 //
 // serve requires the bearer token in TWICESHY_TOKEN. index and serve accept an
 // optional -embed-url (Ollama) to enable dense, pull-only retrieval (ADR-0009);
@@ -32,6 +34,7 @@ import (
 	"time"
 
 	"github.com/dotts-h/twiceshy/internal/doctor"
+	"github.com/dotts-h/twiceshy/internal/drafter"
 	"github.com/dotts-h/twiceshy/internal/eval"
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/ingest"
@@ -74,7 +77,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|ingest|pack|doctor> [flags]")
+		return errors.New("usage: twiceshy <index|serve|ingest|draft|pack|doctor|eval> [flags]")
 	}
 	switch args[0] {
 	case "index":
@@ -85,12 +88,14 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runPack(args[1:], out)
 	case "ingest":
 		return runIngest(ctx, args[1:], out)
+	case "draft":
+		return runDraft(ctx, args[1:], out)
 	case "doctor":
 		return runDoctor(ctx, args[1:], out)
 	case "eval":
 		return runEval(ctx, args[1:], out)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, pack, doctor, or eval)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, draft, pack, doctor, or eval)", args[0])
 	}
 }
 
@@ -361,10 +366,161 @@ func writeRecord(corpus string, rec *record.Record) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	return writeFileAtomic(dst, md, 0o644)
+}
+
+// writeFileAtomic writes data to a temp file in the destination directory and
+// renames it into place, so a crash or ENOSPC mid-write can never leave a
+// truncated, unparseable record where a valid one was (rename is atomic within a
+// directory). The draft command rewrites EXISTING records in place to attach a
+// proven repro, so a plain truncate-then-write would risk corrupting a
+// known-good record file on a partial write.
+func writeFileAtomic(dst string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(dst)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(dst, md, 0o644)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }() // harmless no-op after a successful rename
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, dst)
+}
+
+// pipelineRunner is the seam the draft command drives: drafter.Pipeline.Run
+// satisfies it. Abstracting it lets the corpus walk + selection + persistence be
+// unit-tested without Docker/runsc (the broker is the part that needs them).
+type pipelineRunner interface {
+	Run(ctx context.Context, rec *record.Record) (drafter.Outcome, error)
+}
+
+// draftStats summarizes a draft run.
+type draftStats struct {
+	attached    int // a drafted repro held under the gate and was attached
+	rejected    int // a drafted repro did not hold (auto-rejected, files removed)
+	unsupported int // no template covered the record (left for the model drafter)
+	skipped     int // a quarantined record already carried a positive proof (idempotent re-run)
+}
+
+// runDraft runs the deterministic drafter pipeline (ADR-0011 §8) over the corpus:
+// for each quarantined record without a repro, it drafts a candidate repro, gates
+// it in the gVisor broker (fail-pre / pass-post, offline), and attaches the proof
+// into the record's guard — still quarantined; promotion stays the human PR step
+// (#0020). The execute phase runs untrusted code, so this needs docker + the runsc
+// runtime (the brain); a bare checkout can use -dry-run to list candidates.
+func runDraft(ctx context.Context, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("draft", flag.ContinueOnError)
+	corpus := fs.String("corpus", ".", "corpus root (the directory containing experience/)")
+	dryRun := fs.Bool("dry-run", false, "list the quarantined candidate records; run no gate, write nothing")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+
+	recs, err := record.LoadCorpus(*corpus)
+	if err != nil {
+		return fmt.Errorf("loading corpus: %w", err)
+	}
+
+	if *dryRun {
+		n := 0
+		for _, rec := range recs {
+			if isCandidate(rec) {
+				n++
+				_, _ = fmt.Fprintf(out, "  candidate %s %s\n", rec.ID, rec.Path)
+			}
+		}
+		_, _ = fmt.Fprintf(out, "draft (dry-run): %d quarantined candidate(s); the drafter templates the supported subset and the broker gate proves each\n", n)
+		return nil
+	}
+
+	// DefaultLimits are the SAME caps the revalidate doctor (#0020) runs these
+	// repros under, so a repro proven here holds identically when the doctor
+	// re-checks it — no draft-vs-revalidate cap divergence.
+	b := repro.NewBroker([]string{repro.PinnedGoImage})
+	rv := repro.NewRevalidator(b, *corpus)
+	p := drafter.NewPipeline(drafter.NewGoDeprecationDrafter(), rv, *corpus)
+
+	st, err := draftCorpus(ctx, *corpus, recs, p, writeRecord, out)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(out, "draft: attached %d, rejected %d, unsupported %d, skipped %d (already proven)\n",
+		st.attached, st.rejected, st.unsupported, st.skipped)
+	return nil
+}
+
+// isCandidate reports whether the drafter should attempt rec: a quarantined
+// record that does not already carry a positive (fail-to-pass) proof. The same
+// predicate drives the -dry-run listing and the real walk, so the preview can
+// never diverge from what the gate actually touches. A record with only a
+// negative (dead-end) repro is still a candidate — it lacks a positive proof.
+func isCandidate(rec *record.Record) bool {
+	return rec.Status == "quarantined" && !record.HasPositiveRepro(rec)
+}
+
+// draftCorpus is the testable core of `twiceshy draft`: it walks the candidate
+// records, runs each through the pipeline, and persists the record whose drafted
+// repro held (the pipeline already wrote/removed the repro files and mutated the
+// guard in place). run and persist are injected so the walk is exercised without
+// a sandbox. A gate error aborts; records attached before it stay written (each
+// is an independently-valid proven repro, and a re-run resumes — already-proven
+// records are skipped).
+func draftCorpus(ctx context.Context, corpus string, recs []*record.Record, run pipelineRunner, persist func(string, *record.Record) error, out io.Writer) (draftStats, error) {
+	var st draftStats
+	for _, rec := range recs {
+		if !isCandidate(rec) {
+			if rec.Status == "quarantined" {
+				st.skipped++ // already carries a positive proof — re-running attaches nothing new
+			}
+			continue
+		}
+		outcome, err := run.Run(ctx, rec)
+		if err != nil {
+			return st, fmt.Errorf("draft %s: %w", rec.ID, err)
+		}
+		if !outcome.Drafted {
+			st.unsupported++
+			continue
+		}
+		if !outcome.Attached {
+			st.rejected++
+			_, _ = fmt.Fprintf(out, "  rejected %s (%s)\n", rec.ID, outcome.Reason)
+			continue
+		}
+		if err := persist(corpus, rec); err != nil {
+			// The drafter wrote the repro dir and the gate proved it, but the record
+			// that references it never landed — remove the now-orphan repro so a
+			// failed persist leaves no dangling files in the corpus.
+			removeRepro(corpus, outcome.ReproPath)
+			return st, fmt.Errorf("persist %s: %w", rec.ID, err)
+		}
+		st.attached++
+		_, _ = fmt.Fprintf(out, "  attached %s -> %s\n", rec.ID, outcome.ReproPath)
+	}
+	return st, nil
+}
+
+// removeRepro best-effort deletes a drafted repro directory under the corpus,
+// used to roll back a proven-but-unpersisted draft.
+func removeRepro(corpus, reproPath string) {
+	if reproPath == "" {
+		return
+	}
+	if dst, err := safeJoin(corpus, reproPath); err == nil {
+		_ = os.RemoveAll(dst)
+	}
 }
 
 // runPack builds a distributable experience pack (#0007, ADR-0002 §4). It
