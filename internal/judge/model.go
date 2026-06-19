@@ -21,6 +21,9 @@ const (
 	// judgeMaxRespBytes caps the response body we read — a misbehaving endpoint
 	// cannot flood us, and the cap is far above any honest verdict.
 	judgeMaxRespBytes = 1 << 20
+	// pingTimeout bounds the preflight liveness probe — short, since it only
+	// confirms the endpoint answers, not that it can judge.
+	pingTimeout = 10 * time.Second
 )
 
 // localFamilies are the cheap local model families twiceshy runs on the brain's
@@ -132,6 +135,26 @@ type wireVerdict struct {
 		Pass   bool   `json:"pass"`
 		Reason string `json:"reason"`
 	} `json:"checks"`
+}
+
+// Ping is the preflight liveness probe (ADR-0013 §A3): a HEAD to the endpoint.
+// Any HTTP response means the server is up; a transport error (connection
+// refused, timeout, DNS failure) means it is down. It deliberately does NOT
+// validate that the model can judge — only that the endpoint is reachable before
+// the loop commits to walking the corpus.
+func (j *ModelJudge) Ping(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, pingTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, j.endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("judge: build ping: %w", err)
+	}
+	resp, err := j.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("judge endpoint %s unreachable: %w", j.endpoint, err)
+	}
+	_ = resp.Body.Close()
+	return nil
 }
 
 // Judge POSTs the request as a prompt and parses the strict-JSON verdict. On any

@@ -23,6 +23,8 @@ func (f *fakeBroker) Run(_ context.Context, job Job) (Result, error) {
 	return f.run(job)
 }
 
+func (f *fakeBroker) Healthy(context.Context) error { return nil }
+
 func exit(code int) Result { return Result{Execute: PhaseResult{ExitCode: code}} }
 
 // writeRepro writes a repro script under root and returns its corpus-relative path.
