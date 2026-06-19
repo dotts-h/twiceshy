@@ -1,14 +1,14 @@
 ---
 id: 0028
 title: Judge seam — diverse-model verdict on a proven record (meaning/scope/license/poison)
-status: open
+status: closed
 severity: high
 group: 0027
 depends_on: []
 forgejo:
 links:
   adr: ADR-0013
-  prs: []
+  prs: [81]
   issues: [0029, 0032]
   regression:
 assets: []
