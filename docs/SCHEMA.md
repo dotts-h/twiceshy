@@ -39,7 +39,7 @@ Three fully-worked examples ship in this repo and double as test fixtures:
 | `schema_version` | int | yes | exactly `1` for this spec |
 | `id` | string | yes | `^exp-[0-9]{4,}$` |
 | `kind` | enum | yes | `trap` \| `fix` \| `dead-end` \| `convention` \| `workflow` |
-| `status` | enum | yes | `quarantined` \| `validated` \| `stale` \| `superseded` |
+| `status` | enum | yes | `quarantined` \| `validated` \| `stale` \| `superseded` \| `disputed` |
 | `title` | string | yes | 8–120 chars; written as the one-line trap card headline |
 | `symptom` | object | for `trap`/`fix`/`dead-end` | the retrieval surface |
 | `applies_to` | array | no | OSV-style stack fingerprint |
@@ -105,21 +105,32 @@ also carry a named Go unit test.
 | `superseded_by` | string\|null | when `status: superseded` | id of the replacement. **Supersede, never delete** |
 | `disputes` | string\|null | no | id of an existing record this one is **counter-evidence against** — set on an outcome-report counter-record (#0031). Additive, optional, `exp-NNNN`-shaped like `superseded_by`. It is evidence, not a verdict: #0032 follows it to re-run the original repro plus the counter, and a report never mutates its target |
 | `promotion` | object | no | the **audit trail of an autonomous promotion** (#0029, ADR-0013): `{attested_at, reproduced_under?, judge_model, judge_decision}` — the holding attestation and the diverse judge's verdict that flipped this record `quarantined → validated` with no human approver. Additive, optional; set only by the promoter |
+| `demotion` | object | no | the **audit trail of an autonomous demotion** (#0032, ADR-0013 §3): `{attested_at, judge_model, judge_decision, report}` — the counter-attestation that reproduced the failure, the judge's verdict, and the outcome-report (`exp-NNNN`) that flipped this record `validated → stale`. Additive, optional; set only by the counter-evidence gate |
 | `usage` | object | no | `{retrieved: int, confirmed_helpful: int, last_hit: date\|null}` — Doctor 4's signal; maintained by tooling, zero-valued at creation |
 
 ## Lifecycle
 
 ```
-            (sandbox F2P + human PR review)
-quarantined ───────────────────────────────► validated ──► stale
-                                                 │
-                                                 └────────► superseded
+   (sandbox F2P + human PR review, OR attestation + judge — ADR-0013 #0029)
+quarantined ───────────────────────────────────────────► validated ──► stale
+                                                             │  ▲          │
+                                          reproduced counter │  │ disputed │
+                                          + judge (#0032) ────┘  └──────────┘
+                                                             └──► superseded
 ```
 
 - Every agent-proposed record is born `quarantined`. Quarantined records
   never enter the push channel.
+- `quarantined → validated`: a human PR, **or** autonomously when a holding
+  attestation + a diverse-judge PASS approve it (ADR-0013 #0029).
 - `validated → stale`: Doctor 2/3 demotion (world drifted, repro stopped
-  reproducing). Stale records are re-validatable.
+  reproducing), **or** the counter-evidence gate when an outcome report's
+  failure reproduces and the judge approves (ADR-0013 #0032, recorded in
+  `provenance.demotion`). Stale records are re-validatable and not served.
+- `validated → disputed`: independent non-reproducing outcome reports accumulate
+  past a corroboration threshold — the card can't be reproduced-broken but enough
+  agents contest it, so it is flagged for a human and **escalated** (ADR-0013 §3,
+  #0032). Reversible; not served; distinct from `stale` (unproven, not demoted).
 - `validated → superseded`: a newer record replaces this one. Set
   `valid.until` and `superseded_by`; the file stays forever.
 - There is no delete transition, anywhere.

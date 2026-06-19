@@ -31,7 +31,7 @@ func ValidID(id string) bool { return reID.MatchString(id) }
 // Kinds and statuses, per docs/SCHEMA.md.
 var (
 	Kinds    = []string{"trap", "fix", "dead-end", "convention", "workflow"}
-	Statuses = []string{"quarantined", "validated", "stale", "superseded"}
+	Statuses = []string{"quarantined", "validated", "stale", "superseded", "disputed"}
 )
 
 // Record is a parsed experience record: frontmatter fields plus the
@@ -132,7 +132,12 @@ type Provenance struct {
 	// diverse judge's verdict. Set only by the promoter; nil on a human-validated
 	// or quarantined record.
 	Promotion *Promotion `yaml:"promotion,omitempty"`
-	Usage     *Usage     `yaml:"usage,omitempty"`
+	// Demotion is the symmetric audit trail an autonomous demotion (#0032,
+	// ADR-0013 §3) stamps in when reproduced counter-evidence + a judge PASS
+	// demoted this record to stale: the counter-attestation, the verdict, and the
+	// report that triggered it. Set only by the counter-evidence gate.
+	Demotion *Demotion `yaml:"demotion,omitempty"`
+	Usage    *Usage    `yaml:"usage,omitempty"`
 	// SecurityFlags records hazards the ingestion safety gate detected
 	// (#0011), e.g. "secret:aws-access-key". A flagged record is documented and
 	// quarantined but MUST NOT be promoted to validated (see validateProvenance).
@@ -169,6 +174,16 @@ type Promotion struct {
 	ReproducedUnder []string `yaml:"reproduced_under,omitempty"` // matrix labels the test-set held under
 	JudgeModel      string   `yaml:"judge_model"`                // the diverse model that approved
 	JudgeDecision   string   `yaml:"judge_decision"`             // the verdict decision (an approval)
+}
+
+// Demotion records why an autonomous validated→stale flip was allowed (#0032,
+// ADR-0013 §3): the counter-attestation that reproduced the failure, the diverse
+// judge's verdict, and the outcome-report that triggered it.
+type Demotion struct {
+	AttestedAt    string `yaml:"attested_at"`    // the counter-attestation's ran_at (RFC3339)
+	JudgeModel    string `yaml:"judge_model"`    // the diverse model that approved the demotion
+	JudgeDecision string `yaml:"judge_decision"` // the verdict decision
+	Report        string `yaml:"report"`         // the outcome-report (exp-NNNN) that triggered it
 }
 
 var (
@@ -522,6 +537,20 @@ func (r *Record) validateProvenance(fail func(string, ...any)) {
 		}
 		if strings.TrimSpace(pr.JudgeDecision) == "" {
 			fail("provenance.promotion.judge_decision is required")
+		}
+	}
+	if d := p.Demotion; d != nil {
+		if strings.TrimSpace(d.AttestedAt) == "" {
+			fail("provenance.demotion.attested_at is required")
+		}
+		if strings.TrimSpace(d.JudgeModel) == "" {
+			fail("provenance.demotion.judge_model is required")
+		}
+		if strings.TrimSpace(d.JudgeDecision) == "" {
+			fail("provenance.demotion.judge_decision is required")
+		}
+		if !reID.MatchString(d.Report) {
+			fail("provenance.demotion.report %q does not match %s", d.Report, reID)
 		}
 	}
 	if !validated.IsZero() && !recorded.IsZero() && validated.Before(recorded) {

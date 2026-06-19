@@ -62,7 +62,7 @@ func NewPromoter(attestor Attestor, j judge.Judge, root string, opts ...Option) 
 		attestor:  attestor,
 		judge:     j,
 		readRepro: func(rel string) (string, error) { return readReproFile(root, rel) },
-		now:       func() string { return time.Now().UTC().Format("2006-01-02") },
+		now:       todayUTC,
 	}
 	for _, o := range opts {
 		o(p)
@@ -79,6 +79,9 @@ type Outcome struct {
 }
 
 func skip(reason string) (Outcome, error) { return Outcome{Reason: reason}, nil }
+
+// todayUTC is the default clock for the audit dates (validated_at / valid.until).
+func todayUTC() string { return time.Now().UTC().Format("2006-01-02") }
 
 // Eligible reports whether a record is in the execution-provable class that can
 // be auto-promoted, and if not, why. It checks only the positive direction's
