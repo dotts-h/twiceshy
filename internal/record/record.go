@@ -166,14 +166,27 @@ type Usage struct {
 	LastHit          *string `yaml:"last_hit"`
 }
 
+// PanelVerdict records one member's verdict in an advisory-class panel
+// promotion (ADR-0016): no broker attestation, so the audit trail is the set
+// of diverse-family judge verdicts.
+type PanelVerdict struct {
+	JudgeModel    string `yaml:"judge_model"`
+	JudgeDecision string `yaml:"judge_decision"`
+}
+
 // Promotion records why an autonomous quarantined→validated flip was allowed
 // (#0029, ADR-0013 §1–2): the holding broker attestation and the diverse
 // judge's verdict, carried in the git commit itself as the audit trail.
 type Promotion struct {
-	AttestedAt      string   `yaml:"attested_at"`                // the attestation's ran_at (RFC3339)
+	AttestedAt      string   `yaml:"attested_at,omitempty"`      // proof path: attestation ran_at (RFC3339)
 	ReproducedUnder []string `yaml:"reproduced_under,omitempty"` // matrix labels the test-set held under
-	JudgeModel      string   `yaml:"judge_model"`                // the diverse model that approved
+	JudgeModel      string   `yaml:"judge_model"`                // the diverse model (or joined panel ids) that approved
 	JudgeDecision   string   `yaml:"judge_decision"`             // the verdict decision (an approval)
+	// Panel records each member verdict of an advisory-class panel promotion
+	// (ADR-0016): no broker attestation, so the audit trail is the set of
+	// diverse-family judge verdicts. Set only on the advisory path; nil on the
+	// proof-backed §1 path.
+	Panel []PanelVerdict `yaml:"panel,omitempty"`
 }
 
 // Demotion records why an autonomous validated→stale flip was allowed (#0032,
@@ -490,7 +503,7 @@ func (r *Record) validateGuard(fail func(string, ...any)) {
 			}
 		}
 	}
-	needsGuard := r.Status == "validated" && (r.Kind == "trap" || r.Kind == "fix")
+	needsGuard := r.Status == "validated" && (r.Kind == "trap" || r.Kind == "fix") && !IsAdvisoryClass(r)
 	if !needsGuard {
 		return
 	}
@@ -585,13 +598,31 @@ func (r *Record) validateProvenance(fail func(string, ...any)) {
 		fail("disputes %q does not match %s", *p.Disputes, reID)
 	}
 	if pr := p.Promotion; pr != nil {
-		if strings.TrimSpace(pr.AttestedAt) == "" {
-			fail("provenance.promotion.attested_at is required")
+		hasPanel := len(pr.Panel) > 0
+		hasAttestation := strings.TrimSpace(pr.AttestedAt) != ""
+		if !hasPanel && !hasAttestation {
+			fail("provenance.promotion requires either attested_at (proof) or panel (advisory)")
 		}
-		if strings.TrimSpace(pr.JudgeModel) == "" {
+		if hasPanel {
+			for i, pv := range pr.Panel {
+				if strings.TrimSpace(pv.JudgeModel) == "" {
+					fail("provenance.promotion.panel[%d].judge_model is required", i)
+				}
+				if strings.TrimSpace(pv.JudgeDecision) != "approve" {
+					fail("provenance.promotion.panel[%d].judge_decision must be approve (a recorded panel is an approval set)", i)
+				}
+			}
+		}
+		if hasAttestation {
+			if strings.TrimSpace(pr.JudgeModel) == "" {
+				fail("provenance.promotion.judge_model is required")
+			}
+			if strings.TrimSpace(pr.JudgeDecision) == "" {
+				fail("provenance.promotion.judge_decision is required")
+			}
+		} else if strings.TrimSpace(pr.JudgeModel) == "" {
 			fail("provenance.promotion.judge_model is required")
-		}
-		if strings.TrimSpace(pr.JudgeDecision) == "" {
+		} else if strings.TrimSpace(pr.JudgeDecision) == "" {
 			fail("provenance.promotion.judge_decision is required")
 		}
 	}

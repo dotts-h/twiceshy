@@ -44,9 +44,15 @@ func TestProvenance_PromotionAccepted(t *testing.T) {
 
 func TestProvenance_PromotionRejectsIncomplete(t *testing.T) {
 	cases := map[string]record.Promotion{
-		"missing attested_at":    {JudgeModel: "gemini-2.5-pro", JudgeDecision: "approve"},
-		"missing judge_model":    {AttestedAt: "2026-06-19T00:00:00Z", JudgeDecision: "approve"},
-		"missing judge_decision": {AttestedAt: "2026-06-19T00:00:00Z", JudgeModel: "gemini-2.5-pro"},
+		"neither attested_at nor panel": {JudgeModel: "gemini-2.5-pro", JudgeDecision: "approve"},
+		"missing judge_model (proof)":   {AttestedAt: "2026-06-19T00:00:00Z", JudgeDecision: "approve"},
+		"missing judge_decision (proof)": {
+			AttestedAt: "2026-06-19T00:00:00Z", JudgeModel: "gemini-2.5-pro",
+		},
+		"panel member empty model": {
+			JudgeModel: "gpt-oss:20b+gemini-2.5-pro", JudgeDecision: "approve",
+			Panel: []record.PanelVerdict{{JudgeModel: "", JudgeDecision: "approve"}},
+		},
 	}
 	for name, p := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -57,6 +63,21 @@ func TestProvenance_PromotionRejectsIncomplete(t *testing.T) {
 				t.Errorf("%s: an incomplete promotion block must be rejected", name)
 			}
 		})
+	}
+}
+
+func TestProvenance_PromotionPanelWithoutAttestationAccepted(t *testing.T) {
+	r := promotedDraft()
+	r.Provenance.Promotion = &record.Promotion{
+		JudgeModel:    "gpt-oss:20b+gemini-2.5-pro",
+		JudgeDecision: "approve",
+		Panel: []record.PanelVerdict{
+			{JudgeModel: "gpt-oss:20b", JudgeDecision: "approve"},
+			{JudgeModel: "gemini-2.5-pro", JudgeDecision: "approve"},
+		},
+	}
+	if err := record.Validate(r); err != nil {
+		t.Fatalf("a panel promotion without attested_at must validate: %v", err)
 	}
 }
 

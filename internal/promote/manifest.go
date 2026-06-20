@@ -23,6 +23,8 @@ type RecordAction struct {
 	JudgeDecision   string   `json:"judge_decision,omitempty"`
 	ReproducedUnder []string `json:"reproduced_under,omitempty"`
 	Reason          string   `json:"reason,omitempty"`
+	// Advisory is true when the promotion rode the ADR-0016 panel path (no attestation).
+	Advisory bool `json:"advisory,omitempty"`
 }
 
 // RunManifest is the machine-readable outcome of one loop-mutating run

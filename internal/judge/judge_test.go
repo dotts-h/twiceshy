@@ -248,3 +248,31 @@ func TestStubJudge(t *testing.T) {
 		t.Fatal("error-primed stub must return the error")
 	}
 }
+
+func TestBuildAdvisoryPrompt_IncludesSourceAndVulnID(t *testing.T) {
+	req := judge.Request{
+		Record: &record.Record{
+			ID: "exp-0007", Kind: "trap", Status: "quarantined",
+			Title: "GHSA advisory",
+			Symptom: &record.Symptom{
+				ErrorSignatures: []string{"GHSA-227x-7mh8-3cf6"},
+			},
+			AppliesTo: []record.AppliesTo{{
+				Ecosystem: "Go", Package: "example.com/pkg",
+				Versions: &record.VersionRange{Introduced: strPtr("0"), Fixed: strPtr("1.0")},
+			}},
+			Provenance: record.Provenance{
+				SourceLicense: "CC-BY-4.0",
+				SourceURL:     "https://example.com/advisory",
+			},
+		},
+	}
+	prompt := judge.BuildAdvisoryPrompt(req)
+	for _, want := range []string{"GHSA-227x-7mh8-3cf6", "source_url:", "cannot fetch the source_url", "meaning:"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("advisory prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func strPtr(s string) *string { return &s }
