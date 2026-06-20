@@ -793,12 +793,12 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 		logSkippedPoison(nil, out, "promote", skipped)
 		n := 0
 		for _, rec := range recs {
-			if ok, _ := promote.Eligible(rec); ok {
+			if ok, _ := promote.Promotable(rec); ok {
 				n++
 				_, _ = fmt.Fprintf(out, "  candidate %s %s\n", rec.ID, rec.Path)
 			}
 		}
-		_, _ = fmt.Fprintf(out, "promote (dry-run): %d execution-provable candidate(s); each needs a holding attestation + a judge PASS to flip\n", n)
+		_, _ = fmt.Fprintf(out, "promote (dry-run): %d promotable candidate(s); proof-path needs attestation+judge, advisory-path needs panel\n", n)
 		return nil
 	}
 
@@ -838,7 +838,33 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	// Ping for preflight; only the gate sees the voting wrapper. TimingJudge sits
 	// inside Majority so each inner HTTP call is timed, not the N-vote group.
 	tj := judge.NewTiming(j)
-	p := promote.NewPromoter(rv, judge.NewMajority(tj, *votes), *corpus)
+	promoterOpts := []promote.Option{}
+	if panelURL := getenv("TWICESHY_PANEL_JUDGE_URL"); panelURL != "" {
+		panelModel := getenv("TWICESHY_PANEL_JUDGE_MODEL")
+		aj1, err := judge.NewModelJudge(judge.Config{
+			Endpoint: judgeURL, Model: *judgeModel, DrafterModel: *drafterModel,
+			System: judge.AdvisorySystemV1, Advisory: true,
+		})
+		if err != nil {
+			return fmt.Errorf("configuring advisory panel primary judge: %w", err)
+		}
+		aj2, err := judge.NewModelJudge(judge.Config{
+			Endpoint: panelURL, Model: panelModel, DrafterModel: *drafterModel,
+			System: judge.AdvisorySystemV1, Advisory: true,
+		})
+		if err != nil {
+			return fmt.Errorf("configuring advisory panel secondary judge: %w", err)
+		}
+		panel, err := judge.NewPanel(
+			judge.PanelMember{Model: *judgeModel, Judge: judge.NewMajority(judge.NewTiming(aj1), *votes)},
+			judge.PanelMember{Model: panelModel, Judge: judge.NewMajority(judge.NewTiming(aj2), *votes)},
+		)
+		if err != nil {
+			return fmt.Errorf("configuring advisory panel: %w", err)
+		}
+		promoterOpts = append(promoterOpts, promote.WithAdvisoryPanel(panel))
+	}
+	p := promote.NewPromoter(rv, judge.NewMajority(tj, *votes), *corpus, promoterOpts...)
 
 	// Preflight (ADR-0013 §A3): abort before walking the corpus if the sandbox
 	// substrate or the judge endpoint is down, rather than failing mid-run.
@@ -1100,7 +1126,7 @@ func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, ru
 			alert.Alert(ctx, "anomaly", msg)
 			break
 		}
-		if ok, reason := promote.Eligible(rec); !ok {
+		if ok, reason := promote.Promotable(rec); !ok {
 			st.ineligible++
 			log.Info("decision", "record_id", rec.ID, "outcome", "ineligible", "reason", reason)
 			action := promote.RecordAction{ID: rec.ID, Outcome: "ineligible", FromStatus: rec.Status, ToStatus: rec.Status, Reason: reason}
@@ -1144,8 +1170,14 @@ func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, ru
 		}
 		st.promoted++
 		budget.CountAction()
-		_, _ = fmt.Fprintf(out, "  promoted %s -> validated (judge %s, reproduced under %s)\n",
-			rec.ID, outcome.Verdict.Model, strings.Join(outcome.Attestation.ReproducedUnder, ", "))
+		advisory := rec.Provenance.Promotion != nil && len(rec.Provenance.Promotion.Panel) > 0
+		if advisory {
+			_, _ = fmt.Fprintf(out, "  promoted %s -> validated (advisory panel %s)\n",
+				rec.ID, outcome.Verdict.Model)
+		} else {
+			_, _ = fmt.Fprintf(out, "  promoted %s -> validated (judge %s, reproduced under %s)\n",
+				rec.ID, outcome.Verdict.Model, strings.Join(outcome.Attestation.ReproducedUnder, ", "))
+		}
 		log.Info("decision",
 			"record_id", rec.ID,
 			"outcome", "promoted",
@@ -1153,12 +1185,14 @@ func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, ru
 			"judge_decision", string(outcome.Verdict.Decision),
 			"reproduced_under", outcome.Attestation.ReproducedUnder,
 			"attestation_ran_at", outcome.Attestation.RanAt,
+			"advisory", advisory,
 			"duration_ms", dur,
 		)
 		action := promote.RecordAction{
 			ID: rec.ID, Outcome: "promoted", FromStatus: from, ToStatus: rec.Status,
 			JudgeModel: outcome.Verdict.Model, JudgeDecision: string(outcome.Verdict.Decision),
 			ReproducedUnder: outcome.Attestation.ReproducedUnder,
+			Advisory:        advisory,
 		}
 		actions = append(actions, action)
 		journal.record(action)

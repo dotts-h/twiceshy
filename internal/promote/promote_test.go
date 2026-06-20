@@ -20,11 +20,13 @@ import (
 // stubAttestor returns a preset attestation (the revalidate doctor's role),
 // so the promoter can be exercised with no broker / Docker.
 type stubAttestor struct {
-	att repro.Attestation
-	err error
+	att   repro.Attestation
+	err   error
+	Calls int
 }
 
-func (s stubAttestor) RunWithAttestations(_ context.Context, _ []*record.Record) (doctor.Report, []repro.Attestation, error) {
+func (s *stubAttestor) RunWithAttestations(_ context.Context, _ []*record.Record) (doctor.Report, []repro.Attestation, error) {
+	s.Calls++
 	if s.err != nil {
 		return doctor.Report{}, nil, s.err
 	}
@@ -71,17 +73,41 @@ func provableRecord() *record.Record {
 	}
 }
 
-func newPromoter(t *testing.T, att stubAttestor, j judge.Judge) *promote.Promoter {
+func newPromoter(t *testing.T, att *stubAttestor, j judge.Judge, opts ...promote.Option) *promote.Promoter {
 	t.Helper()
-	return promote.NewPromoter(att, j, ".",
+	base := []promote.Option{
 		promote.WithReproReader(func(string) (string, error) { return "#!/bin/sh\ntrue", nil }),
 		promote.WithClock(func() string { return "2026-06-19" }),
-	)
+	}
+	return promote.NewPromoter(att, j, ".", append(base, opts...)...)
+}
+
+func advisoryRecord() *record.Record {
+	return &record.Record{
+		SchemaVersion: 1, ID: "exp-0007", Kind: "trap", Status: "quarantined",
+		Title: "GHSA advisory long enough title here",
+		Symptom: &record.Symptom{
+			Summary:         "known vulnerability",
+			ErrorSignatures: []string{"GHSA-227x-7mh8-3cf6"},
+		},
+		AppliesTo: []record.AppliesTo{{Ecosystem: "Go", Package: "example.com/pkg"}},
+		Resolution: &record.Resolution{
+			RootCause: "Known vulnerability per OSV.",
+			Fix:       "Upgrade past the fixed version.",
+		},
+		Provenance: record.Provenance{
+			Source: record.Source{Author: "twiceshy-importer"}, RecordedAt: "2026-06-18",
+			Valid: record.Validity{From: "2026-06-18"}, SourceLicense: "CC-BY-4.0",
+			SourceURL: "https://example.com/advisory",
+		},
+		Body: "OSV advisory body long enough to validate.",
+		Path: "experience/2026/0007-ghsa.md",
+	}
 }
 
 func TestPromote_HoldingPlusApprove_Promotes(t *testing.T) {
 	j := &captureJudge{verdict: judge.ApproveVerdict("gemini-2.5-pro")}
-	p := newPromoter(t, stubAttestor{att: holdingAtt()}, j)
+	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, j)
 	rec := provableRecord()
 
 	out, err := p.Promote(context.Background(), rec)
@@ -115,7 +141,7 @@ func TestPromote_HoldingPlusApprove_Promotes(t *testing.T) {
 
 func TestPromote_JudgeReject_StaysQuarantined(t *testing.T) {
 	j := &judge.StubJudge{Verdict: judge.Verdict{Decision: judge.Reject}}
-	p := newPromoter(t, stubAttestor{att: holdingAtt()}, j)
+	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, j)
 	rec := provableRecord()
 
 	out, err := p.Promote(context.Background(), rec)
@@ -132,7 +158,7 @@ func TestPromote_JudgeReject_StaysQuarantined(t *testing.T) {
 
 func TestPromote_JudgeError_FailSafe(t *testing.T) {
 	j := &judge.StubJudge{Err: errors.New("judge endpoint down")}
-	p := newPromoter(t, stubAttestor{att: holdingAtt()}, j)
+	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, j)
 	rec := provableRecord()
 
 	out, err := p.Promote(context.Background(), rec)
@@ -151,7 +177,7 @@ func TestPromote_NonHoldingOrInconclusive_StaysQuarantined(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			j := &captureJudge{verdict: judge.ApproveVerdict("gemini-2.5-pro")}
-			p := newPromoter(t, stubAttestor{att: att}, j)
+			p := newPromoter(t, &stubAttestor{att: att}, j)
 			rec := provableRecord()
 			out, _ := p.Promote(context.Background(), rec)
 			if out.Promoted || rec.Status != "quarantined" {
@@ -175,7 +201,7 @@ func TestPromote_IneligibleRecords_Skipped(t *testing.T) {
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
 			j := &captureJudge{verdict: judge.ApproveVerdict("gemini-2.5-pro")}
-			p := newPromoter(t, stubAttestor{att: holdingAtt()}, j)
+			p := newPromoter(t, &stubAttestor{att: holdingAtt()}, j)
 			rec := provableRecord()
 			mutate(rec)
 			out, err := p.Promote(context.Background(), rec)
@@ -194,7 +220,7 @@ func TestPromote_IneligibleRecords_Skipped(t *testing.T) {
 
 func TestPromote_AttestorError_IsHardError(t *testing.T) {
 	j := &captureJudge{verdict: judge.ApproveVerdict("gemini-2.5-pro")}
-	p := newPromoter(t, stubAttestor{err: errors.New("broker exploded")}, j)
+	p := newPromoter(t, &stubAttestor{err: errors.New("broker exploded")}, j)
 	rec := provableRecord()
 	if _, err := p.Promote(context.Background(), rec); err == nil {
 		t.Fatal("an attestor (broker) error must surface as an error, not a silent skip")
@@ -225,7 +251,7 @@ func TestPromote_DefaultReproReader_FileAndDir(t *testing.T) {
 			writeRepro(t, root, "experience/repro/d/repro.sh", "#!/bin/sh\necho hello-dir")
 
 			j := &captureJudge{verdict: judge.ApproveVerdict("gemini-2.5-pro")}
-			p := promote.NewPromoter(stubAttestor{att: holdingAtt()}, j, root,
+			p := promote.NewPromoter(&stubAttestor{att: holdingAtt()}, j, root,
 				promote.WithClock(func() string { return "2026-06-19" }))
 			rec := provableRecord()
 			path := rel
@@ -245,7 +271,7 @@ func TestPromote_DefaultReproReader_FileAndDir(t *testing.T) {
 // must hand the judge every script (the proof body), in order.
 func TestPromote_MultipleRepros_AllReachJudge(t *testing.T) {
 	j := &captureJudge{verdict: judge.ApproveVerdict("gemini-2.5-pro")}
-	p := promote.NewPromoter(stubAttestor{att: holdingAtt()}, j, ".",
+	p := promote.NewPromoter(&stubAttestor{att: holdingAtt()}, j, ".",
 		promote.WithReproReader(func(rel string) (string, error) { return "content-of:" + rel, nil }),
 		promote.WithClock(func() string { return "2026-06-19" }))
 	rec := provableRecord()
@@ -269,7 +295,7 @@ func TestPromote_MultipleRepros_AllReachJudge(t *testing.T) {
 func TestPromote_ReproPathEscape_IsHardError(t *testing.T) {
 	root := t.TempDir()
 	j := &judge.StubJudge{Verdict: judge.ApproveVerdict("gemini-2.5-pro")}
-	p := promote.NewPromoter(stubAttestor{att: holdingAtt()}, j, root,
+	p := promote.NewPromoter(&stubAttestor{att: holdingAtt()}, j, root,
 		promote.WithClock(func() string { return "2026-06-19" }))
 	rec := provableRecord()
 	esc := "../escape.sh"
@@ -280,5 +306,134 @@ func TestPromote_ReproPathEscape_IsHardError(t *testing.T) {
 	}
 	if rec.Status != "quarantined" {
 		t.Fatal("a failed repro read must not promote")
+	}
+}
+
+func TestPromote_AdvisoryPanelApproves_PromotesWithoutAttestor(t *testing.T) {
+	att := &stubAttestor{att: holdingAtt()}
+	panel, err := judge.NewPanel(
+		judge.PanelMember{Model: "gpt-oss:20b", Judge: &judge.StubJudge{Verdict: judge.ApproveVerdict("gpt-oss:20b")}},
+		judge.PanelMember{Model: "gemini-2.5-pro", Judge: &judge.StubJudge{Verdict: judge.ApproveVerdict("gemini-2.5-pro")}},
+	)
+	if err != nil {
+		t.Fatalf("NewPanel: %v", err)
+	}
+	proofJudge := &captureJudge{verdict: judge.ApproveVerdict("gemini-2.5-pro")}
+	p := newPromoter(t, att, proofJudge, promote.WithAdvisoryPanel(panel))
+	rec := advisoryRecord()
+
+	out, err := p.Promote(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	if !out.Promoted {
+		t.Fatalf("expected advisory promotion, got reason %q", out.Reason)
+	}
+	if att.Calls != 0 {
+		t.Fatalf("attestor must not be called on advisory path; calls=%d", att.Calls)
+	}
+	if proofJudge.last.Record != nil {
+		t.Fatal("proof judge must not be consulted for advisory records")
+	}
+	if rec.Status != "validated" {
+		t.Fatalf("status = %q, want validated", rec.Status)
+	}
+	pr := rec.Provenance.Promotion
+	if pr == nil || pr.AttestedAt != "" || len(pr.Panel) != 2 {
+		t.Fatalf("promotion audit block wrong: %+v", pr)
+	}
+	if pr.JudgeModel != "gpt-oss:20b+gemini-2.5-pro" || pr.JudgeDecision != "approve" {
+		t.Fatalf("top-level promotion fields wrong: %+v", pr)
+	}
+	if err := record.Validate(rec); err != nil {
+		t.Fatalf("promoted advisory must validate: %v", err)
+	}
+}
+
+func TestPromote_AdvisoryPanelRejects_StaysQuarantined(t *testing.T) {
+	panel, err := judge.NewPanel(
+		judge.PanelMember{Model: "gpt-oss:20b", Judge: &judge.StubJudge{Verdict: judge.ApproveVerdict("gpt-oss:20b")}},
+		judge.PanelMember{Model: "gemini-2.5-pro", Judge: &judge.StubJudge{Verdict: judge.Verdict{Decision: judge.Reject}}},
+	)
+	if err != nil {
+		t.Fatalf("NewPanel: %v", err)
+	}
+	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, &judge.StubJudge{}, promote.WithAdvisoryPanel(panel))
+	rec := advisoryRecord()
+
+	out, err := p.Promote(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	if out.Promoted || rec.Status != "quarantined" {
+		t.Fatal("one panel dissent must not promote")
+	}
+}
+
+func TestPromote_AdvisoryNoPanel_Skips(t *testing.T) {
+	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, &judge.StubJudge{})
+	rec := advisoryRecord()
+
+	out, err := p.Promote(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	if out.Promoted {
+		t.Fatal("advisory without panel must not promote")
+	}
+	if out.Reason != "no advisory panel configured — left for a human" {
+		t.Fatalf("reason = %q", out.Reason)
+	}
+}
+
+func TestPromotable_AdvisoryAndProofPaths(t *testing.T) {
+	if ok, _ := promote.Promotable(advisoryRecord()); !ok {
+		t.Fatal("advisory quarantined record must be promotable")
+	}
+	if ok, _ := promote.Promotable(provableRecord()); !ok {
+		t.Fatal("execution-provable record must be promotable")
+	}
+	if ok, reason := promote.Promotable(provableRecord()); ok {
+		_ = reason
+	}
+	r := advisoryRecord()
+	r.Status = "validated"
+	if ok, _ := promote.Promotable(r); ok {
+		t.Fatal("non-quarantined record must not be promotable")
+	}
+}
+
+func TestPromote_AdvisoryPanelError_FailSafe(t *testing.T) {
+	panel, err := judge.NewPanel(
+		judge.PanelMember{Model: "gpt-oss:20b", Judge: &judge.StubJudge{Err: errors.New("down")}},
+		judge.PanelMember{Model: "gemini-2.5-pro", Judge: &judge.StubJudge{Verdict: judge.ApproveVerdict("gemini-2.5-pro")}},
+	)
+	if err != nil {
+		t.Fatalf("NewPanel: %v", err)
+	}
+	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, &judge.StubJudge{}, promote.WithAdvisoryPanel(panel))
+	rec := advisoryRecord()
+
+	out, err := p.Promote(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("panel error is fail-safe, not hard error: %v", err)
+	}
+	if out.Promoted || rec.Status != "quarantined" {
+		t.Fatal("panel outage must leave advisory quarantined")
+	}
+}
+
+func TestPromote_NonAdvisory_UnchangedProofPath(t *testing.T) {
+	j := &captureJudge{verdict: judge.ApproveVerdict("gemini-2.5-pro")}
+	att := &stubAttestor{att: holdingAtt()}
+	p := newPromoter(t, att, j)
+	rec := provableRecord()
+
+	out, err := p.Promote(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	if !out.Promoted || att.Calls != 1 {
+		t.Fatalf("non-advisory must use proof path: promoted=%v attestor_calls=%d", out.Promoted, att.Calls)
 	}
 }

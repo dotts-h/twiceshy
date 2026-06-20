@@ -37,10 +37,11 @@ type Attestor interface {
 
 // Promoter decides and applies an autonomous promotion.
 type Promoter struct {
-	attestor  Attestor
-	judge     judge.Judge
-	readRepro func(reproPath string) (string, error) // corpus-relative repro path → content
-	now       func() string                          // validated_at date, "YYYY-MM-DD"
+	attestor      Attestor
+	judge         judge.Judge
+	advisoryPanel judge.Judge                            // ADR-0016: diverse panel for advisory-class records; nil = skip
+	readRepro     func(reproPath string) (string, error) // corpus-relative repro path → content
+	now           func() string                          // validated_at date, "YYYY-MM-DD"
 }
 
 // Option configures a Promoter.
@@ -54,6 +55,12 @@ func WithReproReader(f func(string) (string, error)) Option {
 
 // WithClock injects the validated_at clock (tests pin it).
 func WithClock(now func() string) Option { return func(p *Promoter) { p.now = now } }
+
+// WithAdvisoryPanel wires the diverse judge panel for advisory-class promotions
+// (ADR-0016). When nil, advisory records skip with a human-left reason.
+func WithAdvisoryPanel(j judge.Judge) Option {
+	return func(p *Promoter) { p.advisoryPanel = j }
+}
 
 // NewPromoter builds a Promoter. attestor proves the repro, j is the diverse
 // judge, root is the corpus root used to resolve repro scripts for the judge.
@@ -102,12 +109,42 @@ func Eligible(rec *record.Record) (bool, string) {
 	return true, ""
 }
 
+// EligibleAdvisory reports whether a quarantined advisory-class record may be
+// auto-promoted via the diverse judge panel (ADR-0016), without broker proof.
+func EligibleAdvisory(rec *record.Record) (bool, string) {
+	switch {
+	case rec.Status != "quarantined":
+		return false, "not quarantined"
+	case rec.Provenance.Disputes != nil:
+		return false, "record is an outcome report (#0031), not a promotable lesson"
+	case len(rec.Provenance.SecurityFlags) > 0:
+		return false, "security-flagged record cannot be validated"
+	case !record.IsAdvisoryClass(rec):
+		return false, "not advisory-class"
+	}
+	return true, ""
+}
+
+// Promotable reports whether Promote should attempt this record (proof path or
+// advisory panel path).
+func Promotable(rec *record.Record) (bool, string) {
+	if ok, _ := EligibleAdvisory(rec); ok {
+		return true, ""
+	}
+	return Eligible(rec)
+}
+
 // Promote attempts to flip a single quarantined record to validated. It mutates
 // rec in place ONLY on a successful promotion (the caller then persists the
 // delta); on any non-promotion path rec is left untouched. A hard error
 // (attestor/broker failure, an invalid promoted record) is returned distinct
 // from a fail-safe non-promotion, which returns (Outcome{Promoted:false}, nil).
 func (p *Promoter) Promote(ctx context.Context, rec *record.Record) (Outcome, error) {
+	// Advisory-class panel path (ADR-0016) — before the proof path.
+	if ok, _ := EligibleAdvisory(rec); ok {
+		return p.promoteAdvisory(ctx, rec)
+	}
+
 	// Eligibility — only the execution-provable class is auto-promotable; the
 	// rest stay for a human (ADR-0013 §5). This short-circuits BEFORE the costly
 	// attestation + judge calls.
@@ -159,6 +196,55 @@ func (p *Promoter) Promote(ctx context.Context, rec *record.Record) (Outcome, er
 		return Outcome{}, fmt.Errorf("promote %s: promoted record is invalid (not persisted): %w", rec.ID, err)
 	}
 	return Outcome{Promoted: true, Attestation: att, Verdict: verdict}, nil
+}
+
+func (p *Promoter) promoteAdvisory(ctx context.Context, rec *record.Record) (Outcome, error) {
+	if p.advisoryPanel == nil {
+		return skip("no advisory panel configured — left for a human")
+	}
+	verdict, err := p.advisoryPanel.Judge(ctx, judge.Request{Record: rec})
+	if err != nil {
+		return Outcome{Reason: "advisory panel unavailable — stays quarantined (fail-safe): " + err.Error(), Verdict: verdict}, nil
+	}
+	if !verdict.Approved() {
+		return Outcome{Reason: "advisory panel did not approve — stays quarantined", Verdict: verdict}, nil
+	}
+
+	panel := panelVerdicts(p.advisoryPanel)
+	origStatus, origValidatedAt, origPromotion := rec.Status, rec.Provenance.ValidatedAt, rec.Provenance.Promotion
+	validatedAt := p.now()
+	rec.Status = "validated"
+	rec.Provenance.ValidatedAt = &validatedAt
+	rec.Provenance.Promotion = &record.Promotion{
+		Panel:         panel,
+		JudgeModel:    verdict.Model,
+		JudgeDecision: string(verdict.Decision),
+	}
+	if err := record.Validate(rec); err != nil {
+		rec.Status, rec.Provenance.ValidatedAt, rec.Provenance.Promotion = origStatus, origValidatedAt, origPromotion
+		return Outcome{}, fmt.Errorf("promote %s: promoted record is invalid (not persisted): %w", rec.ID, err)
+	}
+	return Outcome{Promoted: true, Verdict: verdict}, nil
+}
+
+type panelMemberRecorder interface {
+	PanelMembers() []judge.Verdict
+}
+
+func panelVerdicts(j judge.Judge) []record.PanelVerdict {
+	pr, ok := j.(panelMemberRecorder)
+	if !ok {
+		return nil
+	}
+	members := pr.PanelMembers()
+	out := make([]record.PanelVerdict, 0, len(members))
+	for _, mv := range members {
+		out = append(out, record.PanelVerdict{
+			JudgeModel:    mv.Model,
+			JudgeDecision: string(mv.Decision),
+		})
+	}
+	return out
 }
 
 // RepromoteEligible reports whether a record is a demoted execution-provable

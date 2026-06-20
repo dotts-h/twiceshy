@@ -1,0 +1,18 @@
+[Unit]
+Description=twiceshy gemini judge shim — advisory-panel second family (ADR-0016)
+Documentation=https://git.radulescu.app/claude/twiceshy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ori
+ExecStart=/usr/bin/python3 /home/ori/work/twiceshy-judge-gemini/gemini_judge_shim.py
+Environment=GEMINI_MODEL=gemini-2.5-flash
+Environment=JUDGE_PORT=8724
+Environment=JUDGE_TIMEOUT=55
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

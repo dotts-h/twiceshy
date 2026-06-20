@@ -55,7 +55,7 @@ func untilCleared(u *string) bool { return u == nil || *u == "" }
 
 func TestRepromote_HoldingPlusApprove_RestoresStale(t *testing.T) {
 	j := &captureJudge{verdict: judge.ApproveVerdict("gemini-2.5-pro")}
-	p := newPromoter(t, stubAttestor{att: holdingAtt()}, j)
+	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, j)
 	rec := demotedRecord()
 
 	out, err := p.Repromote(context.Background(), rec)
@@ -88,7 +88,7 @@ func TestRepromote_HoldingPlusApprove_RestoresStale(t *testing.T) {
 
 func TestRepromote_HoldingPlusApprove_RestoresDisputed(t *testing.T) {
 	j := &captureJudge{verdict: judge.ApproveVerdict("gemini-2.5-pro")}
-	p := newPromoter(t, stubAttestor{att: holdingAtt()}, j)
+	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, j)
 	rec := disputedRecord()
 
 	out, err := p.Repromote(context.Background(), rec)
@@ -114,7 +114,7 @@ func TestRepromote_HoldingPlusApprove_RestoresDisputed(t *testing.T) {
 
 func TestRepromote_JudgeReject_StaysDemoted(t *testing.T) {
 	j := &judge.StubJudge{Verdict: judge.Verdict{Decision: judge.Reject}}
-	p := newPromoter(t, stubAttestor{att: holdingAtt()}, j)
+	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, j)
 	rec := demotedRecord()
 	orig := *rec
 
@@ -155,7 +155,7 @@ func TestRepromote_NonHoldingOrInconclusive_StaysDemoted(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			j := &captureJudge{verdict: judge.ApproveVerdict("gemini-2.5-pro")}
-			p := newPromoter(t, stubAttestor{att: att}, j)
+			p := newPromoter(t, &stubAttestor{att: att}, j)
 			rec := demotedRecord()
 			origStatus := rec.Status
 			out, _ := p.Repromote(context.Background(), rec)
@@ -171,7 +171,7 @@ func TestRepromote_NonHoldingOrInconclusive_StaysDemoted(t *testing.T) {
 
 func TestRepromote_AttestorError_IsHardError(t *testing.T) {
 	j := &captureJudge{verdict: judge.ApproveVerdict("gemini-2.5-pro")}
-	p := newPromoter(t, stubAttestor{err: errors.New("broker exploded")}, j)
+	p := newPromoter(t, &stubAttestor{err: errors.New("broker exploded")}, j)
 	rec := demotedRecord()
 	if _, err := p.Repromote(context.Background(), rec); err == nil {
 		t.Fatal("an attestor (broker) error must surface as an error, not a silent skip")
