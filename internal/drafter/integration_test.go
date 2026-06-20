@@ -36,6 +36,9 @@ func TestIntegration_DraftedDeprecationReproHoldsUnderGate(t *testing.T) {
 	}{
 		{"exp-9100", "io/ioutil", "SA1019: ioutil.ReadFile is deprecated: As of Go 1.16, this function simply calls os.ReadFile."},
 		{"exp-9101", "math/rand", "SA1019: rand.Seed is deprecated: As of Go 1.20 there is no reason to call Seed with a random value."},
+		// Third-party fix class: the prepare phase warms golang.org/x/text (networked)
+		// so staticcheck type-checks the cases.Title fix offline in execute (#0026).
+		{"exp-9102", "strings", "SA1019: strings.Title is deprecated: The rule Title uses for word boundaries does not handle Unicode punctuation properly."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.pkg, func(t *testing.T) {

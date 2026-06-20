@@ -17,6 +17,13 @@ applies_to:
 resolution:
     root_cause: strings.Title uses a naive ASCII word-boundary rule that is wrong for Unicode punctuation and is not locale-aware.
     fix: Use cases.Title from golang.org/x/text/cases with an explicit language tag for correct, locale-aware title casing.
+guard:
+    repro: null
+    repros:
+        - path: experience/repro/exp-0044-strings
+          kind: positive
+          label: auto-generated go-deprecation-template repro
+    guarding_test: null
 provenance:
     source:
         author: twiceshy-importer
