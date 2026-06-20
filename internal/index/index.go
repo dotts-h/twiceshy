@@ -12,6 +12,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"unicode"
 
@@ -51,6 +52,48 @@ const fingerprintScore = 1000.0
 
 // maxQueryTokens bounds OR-query cost on long pasted error texts.
 const maxQueryTokens = 24
+
+// Push-channel discriminative gate (ADR-0001 §4: embedding-free; BM25 + fingerprint
+// only). A magnitude floor cannot separate off-topic from on-topic on the live
+// corpus — BM25 is corpus-relative, so off-topic prose ("buy milk") scores as high
+// as a weak genuine hit. What separates cleanly is document frequency: every
+// off-topic content token is absent from the validated corpus (df=0) or generic
+// (df>=maxDF), while every genuine error query carries a rare, discriminative token
+// (df<=maxDF). RetrievePush injects a card only when such a token is present and the
+// card clears pushFloor on that discriminative subset. Calibrated on the live corpus
+// (9 validated); push-only, leaving DefaultFloor / pull / Assess untouched.
+const (
+	// pushFloor is the positive BM25 floor for push, applied to the
+	// discriminative-token subset so an off-topic prose token can't contribute a card.
+	pushFloor = 3.0
+	// pushMaxDF is the absolute df ceiling on a small corpus.
+	pushMaxDF = 2
+	// pushMaxDFFrac generalizes the ceiling as the corpus grows: a token in more
+	// than this fraction of validated records is too generic to be discriminative.
+	// Effective ceiling = max(pushMaxDF, ceil(pushMaxDFFrac * nValidated)).
+	pushMaxDFFrac = 0.25
+)
+
+// pushStopwords are common English function words and measured-generic coding
+// filler that must never count as a discriminative token. It is a cheap pre-filter
+// (skips a df query) and a backstop for df=1 prose words like "works"; the df gate
+// and pushFloor do the real work. Deliberately excludes any token that is a genuine
+// signal in a validated record (http, session, mcp, permission, method, …).
+var pushStopwords = map[string]bool{
+	"a": true, "an": true, "and": true, "are": true, "as": true, "at": true,
+	"be": true, "but": true, "by": true, "can": true, "do": true, "does": true,
+	"for": true, "from": true, "great": true, "how": true, "i": true, "if": true,
+	"in": true, "into": true, "is": true, "it": true, "its": true, "me": true,
+	"my": true, "no": true, "not": true, "of": true, "on": true, "or": true,
+	"please": true, "so": true, "that": true, "the": true, "then": true,
+	"this": true, "to": true, "up": true, "we": true, "what": true, "when": true,
+	"where": true, "which": true, "why": true, "with": true, "you": true,
+	"your": true,
+	// measured-generic dev filler (df>=3 over the validated corpus, or df=1 prose):
+	"go": true, "test": true, "tests": true, "code": true, "write": true,
+	"implement": true, "feature": true, "fails": true, "fail": true, "failed": true,
+	"works": true, "work": true, "working": true, "software": true, "shipping": true,
+}
 
 // ErrNotFound is returned by Get for an unknown record id.
 var ErrNotFound = errors.New("record not found")
@@ -265,6 +308,131 @@ func (ix *Index) Retrieve(ctx context.Context, q Query) ([]Hit, error) {
 	return ix.Search(ctx, floorPolicy(q))
 }
 
+// RetrievePush is the push-channel retrieval (POST /push). Unlike Retrieve it
+// injects NOTHING unless the query carries a discriminative token — a content
+// token in 1..maxDF validated records, with stopwords and ecosystem names
+// excluded — and then searches only that subset at pushFloor, so off-topic prose
+// can never contribute a card. A fingerprint-exact match (a deterministic stack
+// signature) always bypasses the gate: it is real context by construction.
+// Embedding-free; quarantined records are never surfaced (ADR-0001 §4, §6).
+func (ix *Index) RetrievePush(ctx context.Context, q Query) ([]Hit, error) {
+	q.IncludeQuarantined = false // push never surfaces quarantined records
+
+	// 1) fingerprint-exact bypass — a deterministic match is always real context.
+	if fp, err := ix.fingerprintHits(ctx, q, MaxK); err != nil {
+		return nil, err
+	} else if len(fp) > 0 {
+		q.Floor = pushFloor
+		return ix.Retrieve(ctx, q)
+	}
+
+	// 2) discriminative-token precondition.
+	disc, err := ix.discriminativeTokens(ctx, q.Text)
+	if err != nil {
+		return nil, err
+	}
+	if len(disc) == 0 {
+		return nil, nil // generic / off-topic -> inject nothing ("empty is an answer")
+	}
+
+	// 3) retrieve + floor on the discriminative subset only.
+	pq := q
+	pq.Text = strings.Join(disc, " ")
+	pq.Floor = pushFloor
+	return ix.Retrieve(ctx, pq)
+}
+
+// discriminativeTokens returns the query's content tokens (lowercased, alnum,
+// not a stopword, not a corpus ecosystem name) whose validated document
+// frequency is in [1, maxDF], where maxDF = max(pushMaxDF, ceil(pushMaxDFFrac *
+// nValidated)). It reuses the ftsQuery tokenization and quoting so df counts
+// agree with what the lexical search later matches (exp-0001).
+func (ix *Index) discriminativeTokens(ctx context.Context, text string) ([]string, error) {
+	eco, err := ix.ecosystemNames(ctx)
+	if err != nil {
+		return nil, err
+	}
+	nVal, err := ix.validatedCount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	maxDF := pushMaxDF
+	if f := int(math.Ceil(pushMaxDFFrac * float64(nVal))); f > maxDF {
+		maxDF = f
+	}
+
+	var out []string
+	seen := map[string]bool{}
+	for _, field := range strings.Fields(strings.ToLower(text)) {
+		tok := stripControl(field)
+		if tok == "" || !hasAlnum(tok) || pushStopwords[tok] || eco[tok] || seen[tok] {
+			continue
+		}
+		seen[tok] = true
+		df, err := ix.validatedDF(ctx, tok)
+		if err != nil {
+			return nil, err
+		}
+		if df >= 1 && df <= maxDF {
+			out = append(out, tok)
+		}
+		if len(out) >= maxQueryTokens {
+			break
+		}
+	}
+	return out, nil
+}
+
+// validatedDF counts how many VALIDATED records contain the token in any indexed
+// field. Quarantine scope matters: counting the OSV stubs would dilute df and mask
+// the discriminative gap, so the count is validated-only.
+func (ix *Index) validatedDF(ctx context.Context, tok string) (int, error) {
+	var n int
+	err := ix.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM records_fts m JOIN records r ON r.id = m.id
+		 WHERE records_fts MATCH ? AND r.status = 'validated'`, ftsPhrase(tok)).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("validated df: %w", err)
+	}
+	return n, nil
+}
+
+// ecosystemNames is the lowercased set of ecosystem labels on validated records.
+// A query token equal to one (e.g. "docker") is structural noise, never a
+// discriminative signal, so it is stoplisted. Corpus-derived, self-maintaining.
+func (ix *Index) ecosystemNames(ctx context.Context) (map[string]bool, error) {
+	rows, err := ix.db.QueryContext(ctx,
+		`SELECT DISTINCT lower(a.ecosystem) FROM applies_to a
+		 JOIN records r ON r.id = a.record_id
+		 WHERE r.status = 'validated' AND a.ecosystem != ''`)
+	if err != nil {
+		return nil, fmt.Errorf("ecosystem names: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := map[string]bool{}
+	for rows.Next() {
+		var e string
+		if err := rows.Scan(&e); err != nil {
+			return nil, err
+		}
+		out[e] = true
+	}
+	return out, rows.Err()
+}
+
+// validatedCount is the number of validated records — the denominator the df
+// ceiling scales against.
+func (ix *Index) validatedCount(ctx context.Context) (int, error) {
+	var n int
+	err := ix.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM records WHERE status = 'validated'`).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("validated count: %w", err)
+	}
+	return n, nil
+}
+
 // Search runs the embedding-free retrieval pipeline: fingerprint-exact
 // hits first, then lexical BM25 hits, deduplicated, capped at MaxK.
 func (ix *Index) Search(ctx context.Context, q Query) ([]Hit, error) {
@@ -449,12 +617,20 @@ func ftsQuery(text string) string {
 		if !hasAlnum(tok) {
 			continue // a token with no letters or digits can't match anything
 		}
-		quoted = append(quoted, `"`+strings.ReplaceAll(tok, `"`, `""`)+`"`)
+		quoted = append(quoted, ftsPhrase(tok))
 		if len(quoted) == maxQueryTokens {
 			break
 		}
 	}
 	return strings.Join(quoted, " OR ")
+}
+
+// ftsPhrase quotes one token as an FTS5 phrase literal — embedded quotes doubled,
+// wrapped in double quotes — so nothing in the token is parsed as FTS5 syntax
+// (exp-0001). Shared by ftsQuery (the OR match) and validatedDF (the push df
+// count) so the two tokenize a token identically.
+func ftsPhrase(tok string) string {
+	return `"` + strings.ReplaceAll(tok, `"`, `""`) + `"`
 }
 
 // stripControl drops control runes (e.g. a NUL byte) from a token. They match
