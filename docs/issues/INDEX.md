@@ -77,3 +77,5 @@ never a cycle).
 | [0056](0056-positive-outcome-mcp-path-confirmed-helpful.md) | Positive-outcome MCP path (confirmed_helpful) | closed | medium | 0034 | ADR-0013; deps — |
 | [0057](0057-adaptive-confirm-mode-in-judge-eval.md) | Adaptive `-confirm` mode in judge-eval | closed | low | 0034 | ADR-0013; deps — |
 | [0058](0058-grow-the-gold-set-from-daily-audit-misses-ongoing.md) | Grow the gold set from daily-audit misses (ongoing) | closed | low | 0034 | ADR-0013; deps [#0044] |
+| [0059](0059-record-experience-id-allocator-returns-colliding-ids-indexes-fewer-records-than-the-filesystem.md) | record_experience id allocator returns colliding ids (indexes fewer records than the filesystem) | open | medium | 0008 | |
+| [0060](0060-automate-corpus-sync-to-the-nas-volume-live-corpus-drifts-from-the-repo-drift-crash-looped-serve.md) | Automate corpus sync to the NAS volume (live corpus drifts from the repo; drift crash-looped serve) | in-progress | high | 0008 | |
