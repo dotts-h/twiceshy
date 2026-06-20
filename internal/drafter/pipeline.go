@@ -24,22 +24,29 @@ type Outcome struct {
 }
 
 // Pipeline composes the three steps of ADR-0011 §8: Drafter → broker Gate →
-// attach-or-reject. The drafter writes a candidate repro under root, the gate
+// attach-or-reject. A drafter writes a candidate repro under root, the gate
 // PROVES it (fail-pre / pass-post, offline), and a holding attestation attaches
 // the repro into the record's guard — still quarantined; promotion stays the
 // human PR step (#0020). A rejected draft is dropped and its files removed.
 //
+// Drafters are tried in order; the first that does not return ErrUnsupported
+// produces the candidate (deterministic templates first, the model drafter as a
+// fallback for what they can't cover). The winning drafter's Name is recorded on
+// the attached repro's label, so a model-origin repro is auditably distinct.
+//
 // The revalidator MUST be constructed with the same corpus root, so its gate
 // resolves the path the drafter just wrote.
 type Pipeline struct {
-	drafter Drafter
-	rv      *repro.Revalidator
-	root    string
+	drafters []Drafter
+	rv       *repro.Revalidator
+	root     string
 }
 
-// NewPipeline wires a drafter and a revalidator over a shared corpus root.
-func NewPipeline(d Drafter, rv *repro.Revalidator, root string) *Pipeline {
-	return &Pipeline{drafter: d, rv: rv, root: root}
+// NewPipeline wires an ordered set of drafters and a revalidator over a shared
+// corpus root. At least one drafter should be supplied; with none, every record
+// is reported unsupported.
+func NewPipeline(rv *repro.Revalidator, root string, drafters ...Drafter) *Pipeline {
+	return &Pipeline{drafters: drafters, rv: rv, root: root}
 }
 
 // Run drafts a repro for rec, gates it, and attaches it on a holding attestation.
@@ -50,13 +57,26 @@ func NewPipeline(d Drafter, rv *repro.Revalidator, root string) *Pipeline {
 func (p *Pipeline) Run(ctx context.Context, rec *record.Record) (Outcome, error) {
 	out := Outcome{RecordID: rec.ID}
 
-	dir, err := p.drafter.Draft(ctx, p.root, rec)
-	if errors.Is(err, ErrUnsupported) {
-		out.Reason = "unsupported by " + p.drafter.Name()
-		return out, nil
+	// Try drafters in order: the first that does not decline (ErrUnsupported) owns
+	// the candidate. A non-ErrUnsupported error is a hard failure and surfaces.
+	var dir, drafterName string
+	for _, d := range p.drafters {
+		rp, err := d.Draft(ctx, p.root, rec)
+		if errors.Is(err, ErrUnsupported) {
+			continue
+		}
+		if err != nil {
+			return out, fmt.Errorf("draft %s: %w", rec.ID, err)
+		}
+		if rp == "" {
+			continue // defensive: a drafter that returns no path has declined
+		}
+		dir, drafterName = rp, d.Name()
+		break
 	}
-	if err != nil {
-		return out, fmt.Errorf("draft %s: %w", rec.ID, err)
+	if drafterName == "" {
+		out.Reason = "unsupported by all drafters"
+		return out, nil
 	}
 	out.Drafted, out.ReproPath = true, dir
 
@@ -67,7 +87,7 @@ func (p *Pipeline) Run(ctx context.Context, rec *record.Record) (Outcome, error)
 	rec.Guard.Repros = append(rec.Guard.Repros, record.Repro{
 		Path:  dir,
 		Kind:  "positive",
-		Label: "auto-generated " + p.drafter.Name() + " repro",
+		Label: "auto-generated " + drafterName + " repro",
 	})
 
 	_, atts, err := p.rv.RunWithAttestations(ctx, []*record.Record{rec})

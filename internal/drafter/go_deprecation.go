@@ -102,8 +102,18 @@ func (d *GoDeprecationDrafter) Draft(_ context.Context, root string, rec *record
 		return "", fmt.Errorf("record %s diagnostic does not mention %s — fact drifted from the %q template",
 			rec.ID, tmpl.check, pkg)
 	}
+	return emitGoDeprecationRepro(root, rec, tmpl)
+}
 
-	dir := path.Join("experience", "repro", slug(rec.ID, pkg))
+// emitGoDeprecationRepro writes a gateable repro directory for a Go-deprecation
+// template — a trap module + a fix module + prepare.sh + repro.sh — under root and
+// returns its corpus-relative path. It is shared by the deterministic catalog
+// drafter and the model drafter: both build a goDeprecation and emit it
+// identically, so the proven script scaffolding (offline TMPDIR per exp-0017,
+// staticcheck install, the fix's third-party warm) is never re-implemented per
+// drafter, and the broker gate validates whatever is emitted regardless of origin.
+func emitGoDeprecationRepro(root string, rec *record.Record, tmpl goDeprecation) (string, error) {
+	dir := path.Join("experience", "repro", slug(rec.ID, goPackage(rec)))
 	abs := filepath.Join(root, filepath.FromSlash(dir))
 	files := map[string]struct {
 		body string
