@@ -75,6 +75,25 @@ func TestStaleness_FlagsEOLFixedCycle(t *testing.T) {
 	}
 }
 
+func TestStaleness_SkipsThirdPartyModuleCycleCollision(t *testing.T) {
+	// A third-party module's own version must NOT be read as a runtime release
+	// cycle just because its major.minor collides with an EOL'd one. kyverno
+	// "fixed in v1.16.2" is module version 1.16, not Go 1.16 — flagging it stale
+	// because Go 1.16 is EOL is a false positive (regression: OSV import PR #180).
+	eol := stubEOL{"go": {{Cycle: "1.16", EOL: "2022-08-01"}, {Cycle: "1.20", EOL: "2024-02-01"}}}
+	d := doctor.NewStaleness(eol, fixedNow)
+	recs := []*record.Record{
+		// domain-qualified module path → its version is a module version, skip.
+		recWith("0001", []record.AppliesTo{{Ecosystem: "Go", Package: "github.com/kyverno/kyverno", Versions: &record.VersionRange{Fixed: ptr("1.16.2")}}}, nil),
+		// runtime/stdlib record (no domain) on the same EOL cycle → still flagged.
+		recWith("0002", []record.AppliesTo{{Ecosystem: "Go", Package: "io/ioutil", Versions: &record.VersionRange{Fixed: ptr("1.16.0")}}}, nil),
+	}
+	rep, _ := d.Run(context.Background(), recs)
+	if got := ids(rep); len(got) != 1 || got[0] != "0002" {
+		t.Fatalf("module-collision flags = %v, want [0002] (module skipped, runtime flagged)", got)
+	}
+}
+
 func TestStaleness_SkipsUnmappedOrNoVersion(t *testing.T) {
 	eol := stubEOL{"go": {{Cycle: "1.16", EOL: "2022-08-01"}}}
 	d := doctor.NewStaleness(eol, fixedNow)

@@ -60,6 +60,26 @@ func majorMinor(v string) string {
 	return m[1]
 }
 
+// isRuntimePackage reports whether a record's applies_to package denotes the
+// language/runtime itself — the only case where a Fixed version is a runtime
+// release cycle comparable to endoflife.date cycles. A third-party library's
+// own version merely shares digits with a cycle by coincidence (kyverno v1.16
+// vs Go 1.16), so signal 2 must not read it as one. Third-party Go modules are
+// domain-qualified import paths (a host in the first segment, e.g.
+// github.com/…, k8s.io/…); the runtime is the empty package or a bare,
+// non-domain token (the stdlib import paths like io/ioutil, or "go").
+func isRuntimePackage(pkg string) bool {
+	p := strings.TrimSpace(pkg)
+	if p == "" {
+		return true // whole-ecosystem/runtime record
+	}
+	first := p
+	if i := strings.IndexByte(p, '/'); i >= 0 {
+		first = p[:i]
+	}
+	return !strings.Contains(first, ".")
+}
+
 func parseDate(s string) (time.Time, bool) {
 	t, err := time.Parse("2006-01-02", strings.TrimSpace(s))
 	return t, err == nil
@@ -100,6 +120,9 @@ func (s *Staleness) staleByEOL(ctx context.Context, r *record.Record, cache map[
 		product := s.products[strings.ToLower(at.Ecosystem)]
 		if product == "" || at.Versions == nil || at.Versions.Fixed == nil {
 			continue // no confident mapping / no version-bound → skip
+		}
+		if !isRuntimePackage(at.Package) {
+			continue // a third-party module's version is not a runtime cycle
 		}
 		cyc := majorMinor(*at.Versions.Fixed)
 		if cyc == "" {
