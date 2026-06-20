@@ -1,7 +1,12 @@
 {
-  "run_id": "",
+  "run_id": "run-20260620T173534Z",
   "stage": "promote",
-  "complete": true,
+  "anomaly": false,
+  "counts": {
+    "held": 84,
+    "ineligible": 16,
+    "promoted": 1
+  },
   "actions": [
     {
       "id": "exp-0001",
