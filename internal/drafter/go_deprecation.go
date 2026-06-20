@@ -30,13 +30,26 @@ type goDeprecation struct {
 	check string // the staticcheck code the trap must raise, e.g. "SA1019"
 	trap  string // full source of trap/main.go (imports the deprecated package)
 	fix   string // full source of fix/main.go (imports the replacement only)
+	// fixReqs are third-party modules the fix imports (e.g. golang.org/x/text).
+	// They are declared in the fix module's go.mod and warmed into the offline
+	// module cache by the networked prepare phase, so the offline execute phase
+	// can still type-check the fix. Empty for the stdlib→stdlib class.
+	fixReqs []goRequire
 }
 
-// goDeprecationCatalog keys templates by applies_to package. It deliberately
-// covers only the cleanest class — stdlib-deprecated → stdlib-replacement, so the
-// fix compiles offline with no third-party module. Harder cases (e.g. a fix that
-// needs golang.org/x/text) are out of scope for the deterministic drafter and
-// fall to the model drafter (#0026 slice 3).
+// goRequire is one pinned third-party module a fix needs. Pinning the version
+// keeps the generated repro's verdict reproducible across runs.
+type goRequire struct {
+	path    string
+	version string
+}
+
+// goDeprecationCatalog keys templates by applies_to package. It covers the clean,
+// deterministically-templatable classes: stdlib-deprecated → stdlib-replacement
+// (no third-party module), AND curated stdlib → single-third-party-replacement
+// cases (e.g. strings.Title → golang.org/x/text), where the networked prepare
+// phase warms the dependency so the offline gate still holds. Arbitrary or
+// uncataloged cases fall to the model drafter (#0026 slice 3).
 var goDeprecationCatalog = map[string]goDeprecation{
 	"io/ioutil": {
 		check: "SA1019",
@@ -47,6 +60,14 @@ var goDeprecationCatalog = map[string]goDeprecation{
 		check: "SA1019",
 		trap:  "package main\n\nimport \"math/rand\"\n\nfunc main() {\n\trand.Seed(1)\n}\n",
 		fix:   "package main\n\nimport \"math/rand\"\n\nfunc main() {\n\t_ = rand.New(rand.NewSource(1))\n}\n",
+	},
+	// strings.Title (Go 1.18) → golang.org/x/text/cases — the first third-party
+	// fix class. The fix module declares the x/text require; prepare warms it.
+	"strings": {
+		check:   "SA1019",
+		trap:    "package main\n\nimport \"strings\"\n\nfunc main() {\n\t_ = strings.Title(\"hello world\")\n}\n",
+		fix:     "package main\n\nimport (\n\t\"golang.org/x/text/cases\"\n\t\"golang.org/x/text/language\"\n)\n\nfunc main() {\n\t_ = cases.Title(language.English).String(\"hello world\")\n}\n",
+		fixReqs: []goRequire{{path: "golang.org/x/text", version: "v0.21.0"}},
 	},
 }
 
@@ -90,9 +111,9 @@ func (d *GoDeprecationDrafter) Draft(_ context.Context, root string, rec *record
 	}{
 		"trap/go.mod":  {goMod("deptrap"), false},
 		"trap/main.go": {tmpl.trap, false},
-		"fix/go.mod":   {goMod("depfix"), false},
+		"fix/go.mod":   {goModWithReqs("depfix", tmpl.fixReqs), false},
 		"fix/main.go":  {tmpl.fix, false},
-		"prepare.sh":   {prepareScript(), true},
+		"prepare.sh":   {prepareScript(len(tmpl.fixReqs) > 0), true},
 		"repro.sh":     {reproScript(tmpl.check), true},
 	}
 	for rel, f := range files {
@@ -152,14 +173,39 @@ func goMod(name string) string {
 	return fmt.Sprintf("module %s\n\ngo %s\n", name, goModVersion)
 }
 
+// goModWithReqs renders a module go.mod, adding a require directive for each
+// pinned third-party module the fix needs. With no reqs it is identical to goMod,
+// so the stdlib→stdlib entries are byte-for-byte unchanged.
+func goModWithReqs(name string, reqs []goRequire) string {
+	mod := goMod(name)
+	if len(reqs) == 0 {
+		return mod
+	}
+	var b strings.Builder
+	b.WriteString(mod)
+	b.WriteByte('\n')
+	for _, r := range reqs {
+		fmt.Fprintf(&b, "require %s %s\n", r.path, r.version)
+	}
+	return b.String()
+}
+
 // scriptEnv pins the Go caches and an exec-able TMPDIR under the work volume.
 // /tmp is mounted noexec and the Go toolchain compiles-then-execs from TMPDIR
 // (exp-0017 / #0026 slice 1), so both phases point HOME/TMPDIR/caches at /work.
 const scriptEnv = "export GOTOOLCHAIN=local GOCACHE=/work/.gocache GOPATH=/work/.gopath GOBIN=/work/bin TMPDIR=/work\n"
 
-func prepareScript() string {
-	return "#!/bin/sh\nset -e\n" + scriptEnv +
+func prepareScript(warmFixDeps bool) string {
+	s := "#!/bin/sh\nset -e\n" + scriptEnv +
 		"go install honnef.co/go/tools/cmd/staticcheck@" + staticcheckVersion + "\n"
+	if warmFixDeps {
+		// The fix imports a third-party module. Warm it (and complete go.sum) into
+		// the /work module cache NOW, while the network is up (PREPARE phase), so the
+		// offline EXECUTE phase can type-check the fix with no download. `go mod tidy`
+		// resolves the fix's imports against its pinned require and writes go.sum.
+		s += "(cd /work/fix && go mod tidy)\n"
+	}
+	return s
 }
 
 func reproScript(check string) string {

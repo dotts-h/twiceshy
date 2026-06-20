@@ -96,6 +96,60 @@ func TestGoDeprecation_DraftsCatalogedPackage(t *testing.T) {
 	}
 }
 
+func TestGoDeprecation_DraftsThirdPartyFix(t *testing.T) {
+	root := t.TempDir()
+	d := drafter.NewGoDeprecationDrafter()
+	// strings.Title (Go 1.18): unlike the stdlib→stdlib entries, the fix needs a
+	// THIRD-PARTY module (golang.org/x/text/cases). The networked prepare phase must
+	// warm that module so the offline execute phase can still type-check the fix
+	// (exp-0044). This is the slice-2.5 extension to the deterministic catalog.
+	rec := goDeprecationRecord("exp-0044", "strings",
+		"SA1019: strings.Title is deprecated: The rule Title uses for word boundaries does not handle Unicode punctuation properly.")
+
+	dir, err := d.Draft(context.Background(), root, rec)
+	if err != nil {
+		t.Fatalf("Draft: %v", err)
+	}
+	abs := filepath.Join(root, filepath.FromSlash(dir))
+	read := func(rel string) string {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(abs, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		return string(b)
+	}
+
+	// The trap uses the deprecated stdlib symbol; the fix uses the third-party replacement.
+	if !strings.Contains(read("trap/main.go"), `"strings"`) {
+		t.Errorf("trap should import the deprecated package strings; got:\n%s", read("trap/main.go"))
+	}
+	if !strings.Contains(read("fix/main.go"), "golang.org/x/text") {
+		t.Errorf("fix should import the third-party replacement golang.org/x/text; got:\n%s", read("fix/main.go"))
+	}
+	// The fix module must DECLARE the third-party require so it resolves.
+	if !strings.Contains(read("fix/go.mod"), "require golang.org/x/text") {
+		t.Errorf("fix/go.mod must require golang.org/x/text; got:\n%s", read("fix/go.mod"))
+	}
+	// prepare (networked) must warm the fix's third-party module into the offline-
+	// readable module cache AND still install staticcheck.
+	prep := read("prepare.sh")
+	if !strings.Contains(prep, "staticcheck") {
+		t.Errorf("prepare.sh should install staticcheck; got:\n%s", prep)
+	}
+	if !strings.Contains(prep, "go mod") || !strings.Contains(prep, "fix") {
+		t.Errorf("prepare.sh should warm the fix module (go mod …) so execute builds offline; got:\n%s", prep)
+	}
+	// repro keyed on the staticcheck code, with the clean-exit fix assertion.
+	repro := read("repro.sh")
+	if !strings.Contains(repro, "SA1019") {
+		t.Errorf("repro.sh should grep SA1019; got:\n%s", repro)
+	}
+	if !strings.Contains(repro, "fixrc") || !strings.Contains(repro, "-ne 0") {
+		t.Errorf("repro.sh fix-check must assert a clean staticcheck exit; got:\n%s", repro)
+	}
+}
+
 func TestGoDeprecation_UnsupportedPackageReturnsErrUnsupported(t *testing.T) {
 	root := t.TempDir()
 	d := drafter.NewGoDeprecationDrafter()
