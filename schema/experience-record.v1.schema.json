@@ -78,34 +78,52 @@
         }
       },
       "then": {
-        "required": ["guard"],
-        "properties": {
-          "guard": {
-            "anyOf": [
-              {
-                "required": ["guarding_test"],
-                "properties": { "guarding_test": { "type": "string", "minLength": 1 } }
-              },
-              {
-                "required": ["repro"],
-                "properties": { "repro": { "type": "string", "minLength": 1 } }
-              },
-              {
-                "required": ["repros"],
-                "properties": {
-                  "repros": {
-                    "type": "array",
-                    "contains": {
-                      "type": "object",
-                      "required": ["kind"],
-                      "properties": { "kind": { "const": "positive" } }
+        "anyOf": [
+          {
+            "required": ["guard"],
+            "properties": {
+              "guard": {
+                "anyOf": [
+                  {
+                    "required": ["guarding_test"],
+                    "properties": { "guarding_test": { "type": "string", "minLength": 1 } }
+                  },
+                  {
+                    "required": ["repro"],
+                    "properties": { "repro": { "type": "string", "minLength": 1 } }
+                  },
+                  {
+                    "required": ["repros"],
+                    "properties": {
+                      "repros": {
+                        "type": "array",
+                        "contains": {
+                          "type": "object",
+                          "required": ["kind"],
+                          "properties": { "kind": { "const": "positive" } }
+                        }
+                      }
                     }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "required": ["provenance"],
+            "properties": {
+              "provenance": {
+                "required": ["promotion"],
+                "properties": {
+                  "promotion": {
+                    "required": ["panel"],
+                    "properties": { "panel": { "type": "array", "minItems": 1 } }
                   }
                 }
               }
-            ]
+            }
           }
-        }
+        ]
       }
     },
     {
@@ -277,12 +295,29 @@
         "promotion": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["attested_at", "judge_model", "judge_decision"],
+          "required": ["judge_model", "judge_decision"],
+          "anyOf": [
+            { "required": ["attested_at"] },
+            { "required": ["panel"] }
+          ],
           "properties": {
             "attested_at": { "type": "string", "minLength": 1 },
             "reproduced_under": { "type": "array", "items": { "type": "string" } },
             "judge_model": { "type": "string", "minLength": 1 },
-            "judge_decision": { "type": "string", "minLength": 1 }
+            "judge_decision": { "type": "string", "minLength": 1 },
+            "panel": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["judge_model", "judge_decision"],
+                "properties": {
+                  "judge_model": { "type": "string", "minLength": 1 },
+                  "judge_decision": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
           }
         },
         "demotion": {

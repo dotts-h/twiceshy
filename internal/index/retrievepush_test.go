@@ -82,10 +82,12 @@ func TestRetrievePushPrecisionRecall(t *testing.T) {
 // TestRetrievePushExcludesQuarantined pins two invariants at once: quarantined
 // records never reach the push channel, and document-frequency is counted over
 // VALIDATED records only — so a token living only in a quarantined OSV advisory
-// (kyverno) is non-discriminative and injects nothing.
+// is non-discriminative and injects nothing. The query targets a record that
+// STAYS quarantined (exp-0010 libheif, an importer-bug reject — #0061), so the
+// test is stable when other advisories get promoted to validated.
 func TestRetrievePushExcludesQuarantined(t *testing.T) {
 	ix := openIndex(t, corpus(t))
-	hits, err := ix.RetrievePush(context.Background(), index.Query{Text: "kyverno vulnerability advisory"})
+	hits, err := ix.RetrievePush(context.Background(), index.Query{Text: "libheif strukturag heif image vulnerability"})
 	if err != nil {
 		t.Fatalf("RetrievePush: %v", err)
 	}
