@@ -82,8 +82,21 @@ behavioural records.
   `io/ioutil` repro installs staticcheck in prepare and holds offline, attaching
   into the guard. Fixes needing a third-party module (e.g. `strings.Title` →
   `golang.org/x/text`) are deliberately out of scope here.
-- [ ] **3 — model drafter** (Ollama on-demand) for cases templates can't cover;
-  same execution gate; frontier/human judge survivors.
+- [x] **3 — model drafter** (Ollama on-demand) for cases templates can't cover;
+  same execution gate; frontier/human judge survivors. **Done 2026-06-20:** new
+  `internal/drafter` `ModelDrafter` asks an off-pool local model
+  (qwen2.5-coder:14b, VM 101) for only the moving parts (trap/fix/check + optional
+  third-party require) and assembles them with the SAME proven script scaffolding
+  (`emitGoDeprecationRepro`) — the model never writes the fragile offline scripts.
+  Wired as a fallback after the deterministic drafter: the `Pipeline` now tries a
+  drafter chain (deterministic first, model for what it can't cover) and stamps the
+  winning drafter's name on the attached repro, so a model-origin repro is auditably
+  distinct. Env-gated (`TWICESHY_DRAFTER_URL`/`TWICESHY_DRAFTER_MODEL`); absent it,
+  drafting stays deterministic-only (CI/bare checkout unchanged). Unit-tested with a
+  stubbed Ollama endpoint; **proven live on the brain** — qwen drafted an uncataloged
+  `os.SEEK_SET`→`io.SeekStart` repro (`os.Stdin.Seek(0, os.SEEK_SET)` trap) that the
+  real-runsc gate proved (fail-pre SA1019 / pass-post clean) and attached. Also added
+  in slice 2.5: a deterministic third-party-fix class (strings.Title → x/text, PR #190).
 
 ## Notes
 

@@ -49,7 +49,7 @@ func TestIntegration_DraftedDeprecationReproHoldsUnderGate(t *testing.T) {
 					Timeout: 5 * time.Minute,
 				}))
 			rv := repro.NewRevalidator(b, root)
-			p := drafter.NewPipeline(drafter.NewGoDeprecationDrafter(), rv, root)
+			p := drafter.NewPipeline(rv, root, drafter.NewGoDeprecationDrafter())
 
 			rec := &record.Record{
 				ID:        tc.id,

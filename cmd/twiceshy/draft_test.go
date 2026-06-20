@@ -178,3 +178,34 @@ func TestRunDraftRejectsInvalidCorpus(t *testing.T) {
 		t.Error("a corpus without experience/ must fail")
 	}
 }
+
+// TestDraftersFrom covers the env-gated drafter chain (#0026 slice 3):
+// deterministic-only by default, with the model drafter appended (model id
+// defaulted, then honored) when TWICESHY_DRAFTER_URL is configured.
+func TestDraftersFrom(t *testing.T) {
+	// No model endpoint → deterministic-only (a bare checkout is unchanged).
+	ds := draftersFrom(noEnv)
+	if len(ds) != 1 {
+		t.Fatalf("no env → deterministic drafter only; got %d", len(ds))
+	}
+	if ds[0].Name() != "go-deprecation-template" {
+		t.Errorf("first drafter should be the deterministic template; got %q", ds[0].Name())
+	}
+
+	// TWICESHY_DRAFTER_URL set → model drafter appended; model id defaults.
+	env := map[string]string{"TWICESHY_DRAFTER_URL": "http://localhost:11434"}
+	ds = draftersFrom(func(k string) string { return env[k] })
+	if len(ds) != 2 {
+		t.Fatalf("with drafter url → deterministic + model; got %d", len(ds))
+	}
+	if got := ds[1].Name(); got != "model-drafter(qwen2.5-coder:14b)" {
+		t.Errorf("model drafter should default the model id; got %q", got)
+	}
+
+	// An explicit model id is honored.
+	env["TWICESHY_DRAFTER_MODEL"] = "custom:7b"
+	ds = draftersFrom(func(k string) string { return env[k] })
+	if got := ds[1].Name(); got != "model-drafter(custom:7b)" {
+		t.Errorf("explicit model id should be used; got %q", got)
+	}
+}

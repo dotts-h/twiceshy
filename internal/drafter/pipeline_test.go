@@ -34,7 +34,7 @@ func newPipeline(t *testing.T, root string, res repro.Result) (*drafter.Pipeline
 	t.Helper()
 	b := &fakeBroker{result: res}
 	rv := repro.NewRevalidator(b, root)
-	return drafter.NewPipeline(drafter.NewGoDeprecationDrafter(), rv, root), b
+	return drafter.NewPipeline(rv, root, drafter.NewGoDeprecationDrafter()), b
 }
 
 func TestPipeline_AttachesProvenRepro(t *testing.T) {

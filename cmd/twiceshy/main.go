@@ -202,7 +202,7 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	case "ingest":
 		return runIngest(ctx, args[1:], out)
 	case "draft":
-		return runDraft(ctx, args[1:], out)
+		return runDraft(ctx, args[1:], out, getenv)
 	case "promote":
 		return runPromote(ctx, args[1:], out, getenv)
 	case "repromote":
@@ -550,7 +550,7 @@ type draftStats struct {
 // into the record's guard — still quarantined; promotion stays the human PR step
 // (#0020). The execute phase runs untrusted code, so this needs docker + the runsc
 // runtime (the brain); a bare checkout can use -dry-run to list candidates.
-func runDraft(ctx context.Context, args []string, out io.Writer) error {
+func runDraft(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	fs := flag.NewFlagSet("draft", flag.ContinueOnError)
 	corpus := fs.String("corpus", ".", "corpus root (the directory containing experience/)")
 	dryRun := fs.Bool("dry-run", false, "list the quarantined candidate records; run no gate, write nothing")
@@ -580,7 +580,7 @@ func runDraft(ctx context.Context, args []string, out io.Writer) error {
 	// re-checks it — no draft-vs-revalidate cap divergence.
 	b := repro.NewBroker([]string{repro.PinnedGoImage})
 	rv := repro.NewRevalidator(b, *corpus)
-	p := drafter.NewPipeline(drafter.NewGoDeprecationDrafter(), rv, *corpus)
+	p := drafter.NewPipeline(rv, *corpus, draftersFrom(getenv)...)
 
 	st, err := draftCorpus(ctx, *corpus, recs, p, writeRecord, out)
 	if err != nil {
@@ -589,6 +589,23 @@ func runDraft(ctx context.Context, args []string, out io.Writer) error {
 	_, _ = fmt.Fprintf(out, "draft: attached %d, rejected %d, unsupported %d, skipped %d (already proven)\n",
 		st.attached, st.rejected, st.unsupported, st.skipped)
 	return nil
+}
+
+// draftersFrom builds the drafter chain for `twiceshy draft`: the deterministic
+// template drafter always, plus the model drafter (#0026 slice 3) when
+// TWICESHY_DRAFTER_URL is configured (off-pool Ollama, e.g. qwen2.5-coder on VM
+// 101). Deterministic is tried first; the model covers what templates can't. With
+// no env the run is deterministic-only, so a bare checkout needs no model.
+func draftersFrom(getenv func(string) string) []drafter.Drafter {
+	ds := []drafter.Drafter{drafter.NewGoDeprecationDrafter()}
+	if url := strings.TrimSpace(getenv("TWICESHY_DRAFTER_URL")); url != "" {
+		model := strings.TrimSpace(getenv("TWICESHY_DRAFTER_MODEL"))
+		if model == "" {
+			model = "qwen2.5-coder:14b"
+		}
+		ds = append(ds, drafter.NewModelDrafter(url, model))
+	}
+	return ds
 }
 
 // isCandidate reports whether the drafter should attempt rec: a quarantined
