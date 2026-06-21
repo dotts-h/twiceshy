@@ -164,13 +164,23 @@ type Pusher interface {
 func PushNegatives() []PushCase {
 	return []PushCase{
 		{Query: "make the svelte component re-render when the writable store changes", Note: "frontend"},
-		{Query: "parse the fastapi request body and validate the pydantic transcript model", Note: "backend; request leaks today"},
-		{Query: "close out the recipe and bump the changelog version for this release", Note: "recipe+version leak today"},
-		{Query: "the http handler returns the wrong status code for this request method", Note: "http+handler+method+request all leak today"},
-		{Query: "add a cache layer and a permission check to the user settings page", Note: "cache+permission leak today"},
-		{Query: "refactor the react props drilling into a context provider with hooks", Note: "frontend, off-corpus"},
-		{Query: "update the kubernetes deployment replicas then roll out the new image", Note: "ops, off-corpus"},
+		{Query: "parse the fastapi request body and validate the pydantic transcript model", Note: "backend"},
+		{Query: "close out the recipe and bump the changelog version for this release", Note: "recipe+version"},
+		{Query: "the http handler returns the wrong status code for this request method", Note: "http+handler+method+request"},
+		{Query: "add a cache layer and a permission check to the user settings page", Note: "cache+permission"},
+		{Query: "refactor the react props drilling into a context provider with hooks", Note: "frontend"},
+		{Query: "update the kubernetes deployment replicas then roll out the new image", Note: "ops"},
 		{Query: "what is a good birthday gift to buy for my mother this year", Note: "pure prose"},
+		// Adversarial sentences that the first stoplist pass still leaked (a reviewer
+		// found "build"/"data"/"function"/"value"/"fails" et al. unlisted) — these are
+		// the honest threat model: realistic off-domain prose, not words fitted to the list.
+		{Query: "my react component re-renders on every keystroke and the build is slow", Note: "build"},
+		{Query: "the python function returns the wrong value for an empty data file", Note: "function/value/data/file"},
+		{Query: "write a bash script to read the config file and start the service", Note: "read/config/file/service"},
+		{Query: "my unit test for the date parser fails on a leap year", Note: "unit/date/fails"},
+		{Query: "deploy to aws with terraform and check the ci pipeline logs", Note: "aws/terraform/ci"},
+		{Query: "add a graphql endpoint and a redis cache behind the nginx proxy", Note: "graphql/redis/nginx"},
+		{Query: "the css grid layout breaks on mobile when a large image loads", Note: "css/layout/mobile"},
 	}
 }
 

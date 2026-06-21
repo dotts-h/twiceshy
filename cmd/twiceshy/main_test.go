@@ -415,6 +415,26 @@ func TestRunServeReloadsCorpusOnSIGHUP(t *testing.T) {
 	}
 }
 
+// eval -push runs the push-precision eval over the real corpus: off-domain
+// prompts must inject nothing (precision) and genuine traps must surface (recall).
+// End-to-end guard for the CLI path the push channel is gated on.
+func TestRunEvalPush(t *testing.T) {
+	var out bytes.Buffer
+	err := run(context.Background(), []string{
+		"eval", "-push", "-corpus", "../..", "-db", filepath.Join(t.TempDir(), "pe.db"),
+	}, &out, noEnv)
+	if err != nil {
+		t.Fatalf("eval -push: %v\n%s", err, out.String())
+	}
+	s := out.String()
+	if !strings.Contains(s, "precision: 100.0%") {
+		t.Errorf("want precision 100%%, got:\n%s", s)
+	}
+	if !strings.Contains(s, "recall:    100.0%") {
+		t.Errorf("want recall 100%%, got:\n%s", s)
+	}
+}
+
 // doctor staleness runs over a corpus and reports (offline: -endoflife-url ""
 // means only the valid.until signal runs, so a fresh import yields no findings).
 func TestRunDoctorStaleness(t *testing.T) {

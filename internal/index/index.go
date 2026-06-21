@@ -80,51 +80,89 @@ const (
 	pushMaxDF = 3
 )
 
-// pushStopwords are common English function words and common dev/web/ops
-// vocabulary that must never count as a discriminative token. A genuine error
-// query is carried by RARE identifiers (fts5, bm25, servemux, tmpdir, rand.Seed,
-// setup-go), not by common words — which are rare in THIS corpus only because it
-// is small, and which leaked unrelated cards into off-domain sessions (the #0005
-// push-precision eval reproduced "http"/"request"/"version"/"cache"/"permission"
-// surfacing Go/SQLite cards for a Svelte+FastAPI prompt). Stoplisting a common word
-// never silences a genuine query, because that query still carries its specific
-// tokens. Earlier this list deliberately KEPT http/method/permission as "signals";
-// the eval showed that was the leak, so they are stoplisted now. Guarded by
-// eval.TestPushPrecisionOnLiveCorpus; grow it (with the eval) as new leakers surface.
-var pushStopwords = map[string]bool{
-	"a": true, "an": true, "and": true, "are": true, "as": true, "at": true,
-	"be": true, "but": true, "by": true, "can": true, "do": true, "does": true,
-	"for": true, "from": true, "great": true, "how": true, "i": true, "if": true,
-	"in": true, "into": true, "is": true, "it": true, "its": true, "me": true,
-	"my": true, "no": true, "not": true, "of": true, "on": true, "or": true,
-	"please": true, "so": true, "that": true, "the": true, "then": true,
-	"this": true, "to": true, "up": true, "we": true, "what": true, "when": true,
-	"where": true, "which": true, "why": true, "with": true, "you": true,
-	"your": true, "a's": true, "new": true, "old": true, "out": true, "wrong": true,
-	"good": true, "bad": true, "year": true, "buy": true, "gift": true,
-	// measured-generic dev filler (df>=3 over the validated corpus, or df=1 prose):
-	"go": true, "test": true, "tests": true, "code": true, "write": true,
-	"implement": true, "feature": true, "fails": true, "fail": true, "failed": true,
-	"works": true, "work": true, "working": true, "software": true, "shipping": true,
-	// common dev/web/ops vocabulary — leak sources in the #0005 push-precision eval,
-	// plus their inflections and near siblings (all common words, never a rare signal):
-	"add": true, "added": true, "api": true, "cache": true, "caches": true,
-	"cached": true, "change": true, "changed": true, "changes": true, "check": true,
-	"checks": true, "client": true, "component": true, "components": true,
-	"config": true, "container": true, "containers": true, "context": true,
-	"deploy": true, "deployment": true, "deployments": true, "endpoint": true,
-	"endpoints": true, "handler": true, "handlers": true, "http": true, "https": true,
-	"image": true, "images": true, "kubernetes": true, "layer": true, "layers": true,
-	"make": true, "makes": true, "method": true, "methods": true, "model": true,
-	"models": true, "page": true, "pages": true, "permission": true,
-	"permissions": true, "props": true, "provider": true, "providers": true,
-	"recipe": true, "recipes": true, "release": true, "releases": true,
-	"render": true, "request": true, "requests": true, "response": true,
-	"responses": true, "return": true, "returns": true, "route": true, "routes": true,
-	"server": true, "settings": true, "status": true, "store": true, "stores": true,
-	"update": true, "updates": true, "user": true, "users": true, "validate": true,
-	"version": true, "versions": true, "writable": true,
+// pushStopwords are common English words and common dev/web/ops/data vocabulary
+// that must never count as a discriminative token. The principle (validated by the
+// #0005 push-precision eval): a genuine error query is carried by RARE identifiers
+// (fts5, bm25, servemux, tmpdir, rand.Seed, setup-go), never by common words —
+// which are rare in THIS tiny corpus only by accident of its size, and which leaked
+// unrelated cards into off-domain sessions (a Svelte+FastAPI prompt surfacing
+// Go/SQLite cards). Stoplisting a common word never silences a genuine query,
+// because that query still carries its specific tokens. So this is deliberately
+// broad — it is the "common vocabulary" half of the gate, where df is the "rare in
+// the corpus" half, and BOTH are required. It must cover common words generally,
+// not just ones observed leaking, because the corpus grows: a word at df 0 today
+// can reach the [1,pushMaxDF] band tomorrow. Guarded two ways: the behavioral
+// eval.TestPushPrecisionOnLiveCorpus (realistic off-domain prompts inject nothing)
+// and the mechanical TestPushGateExcludesCommonVocabulary (no common word is ever
+// discriminative). Grow it — with both guards — as new common words surface.
+var pushStopwords = wordSet(commonWords)
+
+// wordSet splits whitespace-separated words into a lookup set.
+func wordSet(s string) map[string]bool {
+	m := map[string]bool{}
+	for _, w := range strings.Fields(s) {
+		m[w] = true
+	}
+	return m
 }
+
+// commonWords is the stoplist source: English function words, high-frequency
+// English content words, and common software/web/ops/data vocabulary (plus the
+// inflections a prompt actually uses). None is a discriminative signal; every
+// genuine trap query carries a rarer identifier alongside these.
+const commonWords = `
+a an and any are as at be been being but by can cant could did do does doing done
+dont for from had has have how i if in into is it its just like may me might my no
+nor not of off on once only or our out over please should so some such than that the
+their them then there these they this those to too up us very was we were what when
+where which while who why will with would you your yours
+
+about above after again all also always another around because before below best better
+between both come comes down during each either else enough even ever every few first
+get gets getting give given go going gone good got great here high its keep know last
+least left less let lets long made make makes making many more most much must need
+needs never new next now old once one only open other our own part put puts ready real
+right run runs same see seen set sets show shows side since small start starts still
+stop stops sure take takes tell than that thing things think three time times today try
+trying turn two use used uses using want wants way ways well went what why work works
+working wrong year years bad buy gift mother birthday milk
+
+add added adds api app apps async await backend base bash branch buffer build builds
+building cache cached caches call called calls case cases cd change changed changes
+check checked checks class classes cli client clients close cloud cluster code column
+command commands commit component components compose config configure connection console
+container containers content context controller cookie copy create created css data
+database day default delete dependency deploy deployed deployment deployments dev develop
+development directory disk docker document does download edit element email empty endpoint
+endpoints env environment error errors event events example exception export feature
+fetch field fields file files filter fix fixed flag folder form format frontend function
+functions get getter git global handle handled handler handlers hash header headers hook
+hooks host html http https icon id image images implement import index input install
+instance integration interface issue item items job json key keys kubernetes label
+layer layers level library line lines link links lint list lists load loaded loader local
+log logged logging login logs loop main map margin merge message method methods middleware
+migration mobile mock mode model models module modules name names namespace network node
+nodes null number object objects open option options order output package packages page
+pages parse parser password patch path pause permission permissions pipeline pod pods
+port post print private process production prop props provider providers proxy public
+query queries queue react read reads recipe recipes record refactor reference register
+release releases reload render rendered replica replicas repo repository request requests
+reset resolve resource resources response responses rest result results return returns
+role rollout route router routes row rows run running runtime save scale schema scope
+score screen script scroll search secret select send series server servers service
+services session set settings setup shell side signal size slow socket source span split
+sql ssl stack staging state status stderr stdin stdout step steps storage store stored
+stores stream string style submit subscribe svelte sync system table tag tags target task
+tasks template test tests text theme thread threads timeout title token tokens transcript
+type types ui update updated updates upgrade upload url use user users util value values
+variable version versions view views volume web webhook widget worker workflow wrapper
+write writable writes yaml
+
+aws gcp azure gke eks terraform ansible helm ingress vpc cdn dns ssh tls nginx redis
+kafka grpc graphql websocket ci cd binding bindings fast fastapi vue angular numpy pandas
+guard guards helper helpers join joins joined mount mounts mounted pull pulls pulled push
+pushes pushed fail fails failed failing date dates software shipping implements unit units
+`
 
 // ErrNotFound is returned by Get for an unknown record id.
 var ErrNotFound = errors.New("record not found")
