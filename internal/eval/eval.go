@@ -129,3 +129,136 @@ func Run(ctx context.Context, s Searcher, cases []Case, k int) (Report, error) {
 	}
 	return rep, nil
 }
+
+// --- Push-channel precision eval (#0005, the push half / ADR-0001 §4) ---
+//
+// The pull eval above measures recall — does the right card surface. The push
+// channel's binding failure mode is the opposite: PRECISION. Push injects
+// unprompted on every prompt, so an off-domain prompt that surfaces ANY card is
+// pure noise (the "near-zero value" the per-prompt hook produced — a Svelte +
+// FastAPI session drowning in Go/SQLite/MCP cards). This is the measurement that
+// was missing: off-domain prompts MUST inject zero cards, while genuine in-domain
+// error queries MUST still surface their trap. It is the gate that justifies the
+// push channel being on at all (CLAUDE.md: don't re-enable push without it).
+
+// PushCase is one push probe. A non-empty ExpectID is a POSITIVE — a genuine
+// query whose trap must be injected. An empty ExpectID is a NEGATIVE — an
+// off-domain prompt that must inject nothing (the precision assertion).
+type PushCase struct {
+	Query    string
+	ExpectID string // "" = negative (expect zero injection)
+	Note     string
+}
+
+// Pusher is the push-retrieval seam the eval drives (satisfied by *index.Index).
+type Pusher interface {
+	RetrievePush(ctx context.Context, q index.Query) ([]index.Hit, error)
+}
+
+// PushNegatives are realistic off-domain prompts — the Svelte / FastAPI / recipe /
+// prose sessions that drowned in irrelevant cards. Each is adversarial: it carries
+// common dev vocabulary (http, method, request, handler, status, version, cache,
+// permission, recipe) that the document-frequency gate mistook for a discriminative
+// signal because those words are merely rare in a tiny curated corpus, not specific.
+// Every one MUST inject zero cards.
+func PushNegatives() []PushCase {
+	return []PushCase{
+		{Query: "make the svelte component re-render when the writable store changes", Note: "frontend"},
+		{Query: "parse the fastapi request body and validate the pydantic transcript model", Note: "backend"},
+		{Query: "close out the recipe and bump the changelog version for this release", Note: "recipe+version"},
+		{Query: "the http handler returns the wrong status code for this request method", Note: "http+handler+method+request"},
+		{Query: "add a cache layer and a permission check to the user settings page", Note: "cache+permission"},
+		{Query: "refactor the react props drilling into a context provider with hooks", Note: "frontend"},
+		{Query: "update the kubernetes deployment replicas then roll out the new image", Note: "ops"},
+		{Query: "what is a good birthday gift to buy for my mother this year", Note: "pure prose"},
+		// Adversarial sentences that the first stoplist pass still leaked (a reviewer
+		// found "build"/"data"/"function"/"value"/"fails" et al. unlisted) — these are
+		// the honest threat model: realistic off-domain prose, not words fitted to the list.
+		{Query: "my react component re-renders on every keystroke and the build is slow", Note: "build"},
+		{Query: "the python function returns the wrong value for an empty data file", Note: "function/value/data/file"},
+		{Query: "write a bash script to read the config file and start the service", Note: "read/config/file/service"},
+		{Query: "my unit test for the date parser fails on a leap year", Note: "unit/date/fails"},
+		{Query: "deploy to aws with terraform and check the ci pipeline logs", Note: "aws/terraform/ci"},
+		{Query: "add a graphql endpoint and a redis cache behind the nginx proxy", Note: "graphql/redis/nginx"},
+		{Query: "the css grid layout breaks on mobile when a large image loads", Note: "css/layout/mobile"},
+	}
+}
+
+// PushPositives are genuine in-domain error queries that MUST still surface their
+// trap. Each carries a token that is specific, not common dev vocabulary (fts5,
+// bm25, servemux, tmpdir/noexec, rand/seed, setup-go) — the signal the gate should
+// key on. Ids are the validated engineering traps (the original 9).
+func PushPositives() []PushCase {
+	return []PushCase{
+		{Query: `fts5 match throws a syntax error near "." when the query has a dotted module path`, ExpectID: "exp-0001"},
+		{Query: "fts5 bm25 scores are negative so order by rank desc returns the worst rows", ExpectID: "exp-0002"},
+		{Query: "go servemux POST pattern lets other methods fall through to the catch-all not a 405", ExpectID: "exp-0006"},
+		{Query: "go test fork/exec permission denied because TMPDIR is a noexec mount", ExpectID: "exp-0017"},
+		{Query: "rand.Seed is deprecated since go 1.20, staticcheck flags the global source", ExpectID: "exp-0045"},
+		{Query: "actions/setup-go cache step hangs for five minutes on a self-hosted forgejo runner", ExpectID: "exp-0005"},
+	}
+}
+
+// PushReport aggregates a push precision/recall run.
+type PushReport struct {
+	Negatives       int
+	FalseInjections int // negatives that injected >=1 card — MUST be 0
+	Positives       int
+	Recalled        int      // positives whose expected card was injected
+	Leaks           []string // "query -> [ids]" for each false injection
+	Misses          []string // "query (want id, got [...])" for each unrecalled positive
+}
+
+// Precision is 1 - falseInjectionRate over the negatives (1.0 = no off-domain noise).
+func (r PushReport) Precision() float64 {
+	if r.Negatives == 0 {
+		return 1
+	}
+	return 1 - float64(r.FalseInjections)/float64(r.Negatives)
+}
+
+// Recall is the fraction of positives whose trap was injected.
+func (r PushReport) Recall() float64 {
+	if r.Positives == 0 {
+		return 1
+	}
+	return float64(r.Recalled) / float64(r.Positives)
+}
+
+// RunPush drives the push gate (RetrievePush, with its discriminative-token
+// precondition) over the precision/recall set and aggregates the report.
+func RunPush(ctx context.Context, p Pusher, cases []PushCase) (PushReport, error) {
+	var rep PushReport
+	for _, c := range cases {
+		hits, err := p.RetrievePush(ctx, index.Query{Text: c.Query})
+		if err != nil {
+			return PushReport{}, err
+		}
+		ids := make([]string, 0, len(hits))
+		for _, h := range hits {
+			ids = append(ids, h.ID)
+		}
+		if c.ExpectID == "" { // negative: must inject nothing
+			rep.Negatives++
+			if len(hits) > 0 {
+				rep.FalseInjections++
+				rep.Leaks = append(rep.Leaks, c.Query+" -> ["+strings.Join(ids, " ")+"]")
+			}
+			continue
+		}
+		rep.Positives++
+		found := false
+		for _, id := range ids {
+			if id == c.ExpectID {
+				found = true
+				break
+			}
+		}
+		if found {
+			rep.Recalled++
+		} else {
+			rep.Misses = append(rep.Misses, c.Query+" (want "+c.ExpectID+", got ["+strings.Join(ids, " ")+"])")
+		}
+	}
+	return rep, nil
+}

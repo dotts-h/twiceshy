@@ -12,7 +12,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"unicode"
 
@@ -56,44 +55,114 @@ const maxQueryTokens = 24
 // Push-channel discriminative gate (ADR-0001 §4: embedding-free; BM25 + fingerprint
 // only). A magnitude floor cannot separate off-topic from on-topic on the live
 // corpus — BM25 is corpus-relative, so off-topic prose ("buy milk") scores as high
-// as a weak genuine hit. What separates cleanly is document frequency: every
-// off-topic content token is absent from the validated corpus (df=0) or generic
-// (df>=maxDF), while every genuine error query carries a rare, discriminative token
-// (df<=maxDF). RetrievePush injects a card only when such a token is present and the
-// card clears pushFloor on that discriminative subset. Calibrated on the live corpus
-// (9 validated); push-only, leaving DefaultFloor / pull / Assess untouched.
+// as a weak genuine hit. Two signals do separate, and BOTH are required:
+//
+//   - Document frequency: a discriminative token sits in 1..pushMaxDF validated
+//     records. Absent tokens (df=0) and corpus-generic tokens (df>pushMaxDF) are out.
+//   - Common-word exclusion (pushStopwords): low df in a SMALL curated corpus is not
+//     specificity — common dev vocabulary ("http", "request", "version", "cache") is
+//     rare here only because the corpus is tiny, and leaked cards into off-domain
+//     sessions (the #0005 push-precision eval reproduces it). So a token must also
+//     not be a common word. The genuine signals are the rare identifiers a real
+//     error query carries (fts5, bm25, servemux, tmpdir, rand.Seed, setup-go).
+//
+// pushMaxDF is a FIXED ceiling, not a fraction of the corpus: an earlier
+// ceil(0.25·nValidated) rule loosened the gate as the corpus grew (3→19 once the
+// OSV/GHSA advisories were promoted), which is exactly the leak the eval caught.
+// Push-only — leaves DefaultFloor / pull / Assess untouched. Guarded by
+// eval.TestPushPrecisionOnLiveCorpus.
 const (
 	// pushFloor is the positive BM25 floor for push, applied to the
 	// discriminative-token subset so an off-topic prose token can't contribute a card.
 	pushFloor = 3.0
-	// pushMaxDF is the absolute df ceiling on a small corpus.
-	pushMaxDF = 2
-	// pushMaxDFFrac generalizes the ceiling as the corpus grows: a token in more
-	// than this fraction of validated records is too generic to be discriminative.
-	// Effective ceiling = max(pushMaxDF, ceil(pushMaxDFFrac * nValidated)).
-	pushMaxDFFrac = 0.25
+	// pushMaxDF is the df ceiling: a discriminative token is in 1..pushMaxDF validated
+	// records. Fixed (not corpus-scaled) so corpus growth can never loosen the gate.
+	pushMaxDF = 3
 )
 
-// pushStopwords are common English function words and measured-generic coding
-// filler that must never count as a discriminative token. It is a cheap pre-filter
-// (skips a df query) and a backstop for df=1 prose words like "works"; the df gate
-// and pushFloor do the real work. Deliberately excludes any token that is a genuine
-// signal in a validated record (http, session, mcp, permission, method, …).
-var pushStopwords = map[string]bool{
-	"a": true, "an": true, "and": true, "are": true, "as": true, "at": true,
-	"be": true, "but": true, "by": true, "can": true, "do": true, "does": true,
-	"for": true, "from": true, "great": true, "how": true, "i": true, "if": true,
-	"in": true, "into": true, "is": true, "it": true, "its": true, "me": true,
-	"my": true, "no": true, "not": true, "of": true, "on": true, "or": true,
-	"please": true, "so": true, "that": true, "the": true, "then": true,
-	"this": true, "to": true, "up": true, "we": true, "what": true, "when": true,
-	"where": true, "which": true, "why": true, "with": true, "you": true,
-	"your": true,
-	// measured-generic dev filler (df>=3 over the validated corpus, or df=1 prose):
-	"go": true, "test": true, "tests": true, "code": true, "write": true,
-	"implement": true, "feature": true, "fails": true, "fail": true, "failed": true,
-	"works": true, "work": true, "working": true, "software": true, "shipping": true,
+// pushStopwords are common English words and common dev/web/ops/data vocabulary
+// that must never count as a discriminative token. The principle (validated by the
+// #0005 push-precision eval): a genuine error query is carried by RARE identifiers
+// (fts5, bm25, servemux, tmpdir, rand.Seed, setup-go), never by common words —
+// which are rare in THIS tiny corpus only by accident of its size, and which leaked
+// unrelated cards into off-domain sessions (a Svelte+FastAPI prompt surfacing
+// Go/SQLite cards). Stoplisting a common word never silences a genuine query,
+// because that query still carries its specific tokens. So this is deliberately
+// broad — it is the "common vocabulary" half of the gate, where df is the "rare in
+// the corpus" half, and BOTH are required. It must cover common words generally,
+// not just ones observed leaking, because the corpus grows: a word at df 0 today
+// can reach the [1,pushMaxDF] band tomorrow. Guarded two ways: the behavioral
+// eval.TestPushPrecisionOnLiveCorpus (realistic off-domain prompts inject nothing)
+// and the mechanical TestPushGateExcludesCommonVocabulary (no common word is ever
+// discriminative). Grow it — with both guards — as new common words surface.
+var pushStopwords = wordSet(commonWords)
+
+// wordSet splits whitespace-separated words into a lookup set.
+func wordSet(s string) map[string]bool {
+	m := map[string]bool{}
+	for _, w := range strings.Fields(s) {
+		m[w] = true
+	}
+	return m
 }
+
+// commonWords is the stoplist source: English function words, high-frequency
+// English content words, and common software/web/ops/data vocabulary (plus the
+// inflections a prompt actually uses). None is a discriminative signal; every
+// genuine trap query carries a rarer identifier alongside these.
+const commonWords = `
+a an and any are as at be been being but by can cant could did do does doing done
+dont for from had has have how i if in into is it its just like may me might my no
+nor not of off on once only or our out over please should so some such than that the
+their them then there these they this those to too up us very was we were what when
+where which while who why will with would you your yours
+
+about above after again all also always another around because before below best better
+between both come comes down during each either else enough even ever every few first
+get gets getting give given go going gone good got great here high its keep know last
+least left less let lets long made make makes making many more most much must need
+needs never new next now old once one only open other our own part put puts ready real
+right run runs same see seen set sets show shows side since small start starts still
+stop stops sure take takes tell than that thing things think three time times today try
+trying turn two use used uses using want wants way ways well went what why work works
+working wrong year years bad buy gift mother birthday milk
+
+add added adds api app apps async await backend base bash branch buffer build builds
+building cache cached caches call called calls case cases cd change changed changes
+check checked checks class classes cli client clients close cloud cluster code column
+command commands commit component components compose config configure connection console
+container containers content context controller cookie copy create created css data
+database day default delete dependency deploy deployed deployment deployments dev develop
+development directory disk docker document does download edit element email empty endpoint
+endpoints env environment error errors event events example exception export feature
+fetch field fields file files filter fix fixed flag folder form format frontend function
+functions get getter git global handle handled handler handlers hash header headers hook
+hooks host html http https icon id image images implement import index input install
+instance integration interface issue item items job json key keys kubernetes label
+layer layers level library line lines link links lint list lists load loaded loader local
+log logged logging login logs loop main map margin merge message method methods middleware
+migration mobile mock mode model models module modules name names namespace network node
+nodes null number object objects open option options order output package packages page
+pages parse parser password patch path pause permission permissions pipeline pod pods
+port post print private process production prop props provider providers proxy public
+query queries queue react read reads recipe recipes record refactor reference register
+release releases reload render rendered replica replicas repo repository request requests
+reset resolve resource resources response responses rest result results return returns
+role rollout route router routes row rows run running runtime save scale schema scope
+score screen script scroll search secret select send series server servers service
+services session set settings setup shell side signal size slow socket source span split
+sql ssl stack staging state status stderr stdin stdout step steps storage store stored
+stores stream string style submit subscribe svelte sync system table tag tags target task
+tasks template test tests text theme thread threads timeout title token tokens transcript
+type types ui update updated updates upgrade upload url use user users util value values
+variable version versions view views volume web webhook widget worker workflow wrapper
+write writable writes yaml
+
+aws gcp azure gke eks terraform ansible helm ingress vpc cdn dns ssh tls nginx redis
+kafka grpc graphql websocket ci cd binding bindings fast fastapi vue angular numpy pandas
+guard guards helper helpers join joins joined mount mounts mounted pull pulls pulled push
+pushes pushed fail fails failed failing date dates software shipping implements unit units
+`
 
 // ErrNotFound is returned by Get for an unknown record id.
 var ErrNotFound = errors.New("record not found")
@@ -343,22 +412,13 @@ func (ix *Index) RetrievePush(ctx context.Context, q Query) ([]Hit, error) {
 }
 
 // discriminativeTokens returns the query's content tokens (lowercased, alnum,
-// not a stopword, not a corpus ecosystem name) whose validated document
-// frequency is in [1, maxDF], where maxDF = max(pushMaxDF, ceil(pushMaxDFFrac *
-// nValidated)). It reuses the ftsQuery tokenization and quoting so df counts
-// agree with what the lexical search later matches (exp-0001).
+// not a stopword, not a corpus ecosystem name) whose validated document frequency
+// is in [1, pushMaxDF]. It reuses the ftsQuery tokenization and quoting so df
+// counts agree with what the lexical search later matches (exp-0001).
 func (ix *Index) discriminativeTokens(ctx context.Context, text string) ([]string, error) {
 	eco, err := ix.ecosystemNames(ctx)
 	if err != nil {
 		return nil, err
-	}
-	nVal, err := ix.validatedCount(ctx)
-	if err != nil {
-		return nil, err
-	}
-	maxDF := pushMaxDF
-	if f := int(math.Ceil(pushMaxDFFrac * float64(nVal))); f > maxDF {
-		maxDF = f
 	}
 
 	var out []string
@@ -373,7 +433,7 @@ func (ix *Index) discriminativeTokens(ctx context.Context, text string) ([]strin
 		if err != nil {
 			return nil, err
 		}
-		if df >= 1 && df <= maxDF {
+		if df >= 1 && df <= pushMaxDF {
 			out = append(out, tok)
 		}
 		if len(out) >= maxQueryTokens {
@@ -419,18 +479,6 @@ func (ix *Index) ecosystemNames(ctx context.Context) (map[string]bool, error) {
 		out[e] = true
 	}
 	return out, rows.Err()
-}
-
-// validatedCount is the number of validated records — the denominator the df
-// ceiling scales against.
-func (ix *Index) validatedCount(ctx context.Context) (int, error) {
-	var n int
-	err := ix.db.QueryRowContext(ctx,
-		`SELECT count(*) FROM records WHERE status = 'validated'`).Scan(&n)
-	if err != nil {
-		return 0, fmt.Errorf("validated count: %w", err)
-	}
-	return n, nil
 }
 
 // Search runs the embedding-free retrieval pipeline: fingerprint-exact
