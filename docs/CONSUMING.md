@@ -19,7 +19,9 @@ get consulted is **two consumer-side config steps**, and neither ships in the re
 ## Step 1 — register the MCP server
 
 twiceshy speaks **streamable HTTP** MCP (single endpoint; not SSE — exp-0003).
-Pick your client. (All three recipes are validated.)
+Pick your client. (The Claude Code and Cursor recipes are validated end-to-end; the
+Antigravity recipe uses the binary-verified config format — verify it with `/mcp` in
+the agy TUI.)
 
 **Claude Code** (user scope → available in every session, any directory):
 ```sh
@@ -40,12 +42,21 @@ claude mcp add twiceshy --scope user --transport http \
 ```
 Then approve it: `cursor-agent mcp enable twiceshy` (verify: `cursor-agent mcp list-tools twiceshy`).
 
-**Grok** (`grok-build`):
-```sh
-grok mcp add twiceshy http://192.168.50.244:8722/ --transport http --scope user \
-  --header "Authorization: Bearer $TWICESHY_TOKEN"
+**Antigravity** (`agy`) — `~/.gemini/config/mcp_config.json`:
+```json
+{
+  "mcpServers": {
+    "twiceshy": {
+      "httpUrl": "http://192.168.50.244:8722/",
+      "headers": { "Authorization": "Bearer ${TWICESHY_TOKEN}" }
+    }
+  }
+}
 ```
-Verify: `grok mcp doctor` → handshake OK, 3 tools discovered.
+Verify in the agy TUI with `/mcp` (lists active servers + their tools). Note: MCP loads in
+Antigravity's **interactive** TUI/IDE, not in headless `agy -p` print mode — so consult twiceshy
+from an interactive agy session. (If your build doesn't expand `${TWICESHY_TOKEN}` in headers,
+inline the literal token.)
 
 ## Step 2 — harden the affordance (so the agent reaches for it)
 
