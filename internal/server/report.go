@@ -75,7 +75,7 @@ func (h *handlers) reportOutcome(ctx context.Context, _ *mcp.CallToolRequest, ar
 		return nil, ReportResult{}, fmt.Errorf("cannot report against %s: %w", args.RecordID, err)
 	}
 
-	id, err := h.ix.NextID(ctx)
+	id, err := ingest.NextID(ctx, h.ix, h.corpus)
 	if err != nil {
 		h.logToolError(tool, start, err)
 		return nil, ReportResult{}, err

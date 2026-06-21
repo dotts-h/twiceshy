@@ -1,14 +1,14 @@
 ---
 id: 0059
 title: record_experience id allocator returns colliding ids (indexes fewer records than the filesystem)
-status: open
+status: closed
 severity: medium
 group: 0008
 depends_on: []
 forgejo: 186
 links:
   adr:
-  prs: []
+  prs: [261]
   issues: [0060]
   regression:
 assets: []

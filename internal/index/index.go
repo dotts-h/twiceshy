@@ -639,7 +639,11 @@ func appendStackFilter(sb *strings.Builder, args []any, q Query) []any {
 // highest currently indexed. The write path uses it to allocate an id for a
 // new quarantined record. An empty corpus yields "exp-0001".
 //
-// This is a MAX+1 read, NOT an atomic allocation: two concurrent
+// This is a MAX+1 read over the index, NOT an atomic allocation, and it trusts
+// the index to be current. Write paths must use ingest.NextID instead, which
+// also consults the source-of-truth corpus tree on disk so a live index that
+// has drifted behind the committed records cannot hand back an id that already
+// exists (#0059). Even ingest.NextID is not atomic: two concurrent
 // record_experience calls can be handed the same id. That is acceptable only
 // because the write path is propose-only — it returns a draft for a human to
 // open as a PR (the trust boundary), where a colliding id is caught in review

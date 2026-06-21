@@ -130,8 +130,9 @@ func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args Reco
 		}
 	}
 
-	// Allocate a new ID.
-	id, err := h.ix.NextID(ctx)
+	// Allocate a new ID against the source-of-truth corpus, robust to a live
+	// index that has drifted behind the committed records (#0059).
+	id, err := ingest.NextID(ctx, h.ix, h.corpus)
 	if err != nil {
 		h.logToolError(tool, start, err)
 		return nil, RecordResult{}, err

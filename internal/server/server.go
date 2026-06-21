@@ -52,6 +52,11 @@ type Config struct {
 	// (ADR-0013 §E1, #0042). Empty keeps the legacy behavior: report_outcome
 	// returns the counter-record markdown for a human to PR, and writes nothing.
 	ReportQueue string
+	// Corpus is the corpus root (the directory containing experience/) the index
+	// was built from. The write path scans it to allocate record ids robustly
+	// against a live index that has drifted behind the committed corpus (#0059).
+	// Empty falls back to index-only allocation.
+	Corpus string
 }
 
 // Tool descriptions are load-bearing: description text alone produces
@@ -98,7 +103,7 @@ func New(cfg Config) (*Server, error) {
 		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	}
 
-	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue}
+	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, corpus: cfg.Corpus}
 	h.recordCount.Store(int64(cfg.RecordCount))
 	h.usage = newUsageRecorder(cfg.Index, logger, time.Now)
 	srv := mcp.NewServer(&mcp.Implementation{
@@ -172,6 +177,7 @@ type handlers struct {
 	logger      *slog.Logger
 	usage       *usageRecorder // records retrieval usage off the latency budget (ADR-0013 §4)
 	reportQueue string         // optional; report_outcome enqueues here for intake-reports (ADR-0013 §E1)
+	corpus      string         // corpus root for robust id allocation against the source of truth (#0059)
 }
 
 // SearchArgs is the search_experience input.
