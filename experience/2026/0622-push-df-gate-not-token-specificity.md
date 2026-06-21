@@ -1,6 +1,6 @@
 ---
 schema_version: 1
-id: exp-0458
+id: exp-0622
 kind: trap
 status: validated
 title: "Low document-frequency in a small corpus is not token specificity — a df-gated push gate leaks common words"
