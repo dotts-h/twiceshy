@@ -21,3 +21,7 @@ accepted ADR's decision — supersede it (`Status: superseded-by-NNNN`).
 | [0011](ADR-0011-corpus-growth-and-validation-engine.md) | Corpus growth as a live feed, with execution-validation as the moat | Proposed |
 | [0012](ADR-0012-cicd-trust-posture-and-runner-isolation.md) | CI/CD trust posture — self-merge gate + an isolated hardened runner for twiceshy CI | Accepted |
 | [0013](ADR-0013-closed-loop-autonomous-validation.md) | Closed-loop autonomous validation — proof + a diverse-model judge replace the human approver for provable records | Accepted |
+| [0014](ADR-0014-shared-result-aggregation-in-judgeeval.md) | Share the judge-eval result-aggregation logic between Run and RunConfirm | Accepted |
+| [0015](ADR-0015-push-discriminative-term-gate.md) | The push channel gates on a discriminative term, not a magnitude floor | Accepted |
+| [0016](ADR-0016-advisory-class-panel-promotion.md) | Advisory-class records auto-promote via a diverse judge-panel (no repro) | Accepted |
+| [0017](ADR-0017-global-idf-push-gate-specificity.md) | A global dev/code IDF replaces the hand-maintained stoplist as the push gate's specificity signal | Proposed |
