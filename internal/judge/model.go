@@ -306,13 +306,17 @@ func BuildAdvisoryPrompt(req Request) string {
 		}
 		for _, at := range r.AppliesTo {
 			fmt.Fprintf(&b, "applies_to: ecosystem=%s package=%s\n", at.Ecosystem, at.Package)
-			if at.Versions != nil {
-				if at.Versions.Introduced != nil {
-					fmt.Fprintf(&b, "  introduced: %s\n", *at.Versions.Introduced)
-				}
-				if at.Versions.Fixed != nil {
-					fmt.Fprintf(&b, "  fixed: %s\n", *at.Versions.Fixed)
-				}
+			if at.Versions != nil && at.Versions.Introduced != nil {
+				fmt.Fprintf(&b, "  introduced: %s\n", *at.Versions.Introduced)
+			}
+			// Always render fixed: as an explicit field, never an omitted line. The
+			// cheap advisory judge sees only this prompt, so a fixed:null record's
+			// "upgrade past the fixed version, but none exists" contradiction must be
+			// visible, not inferable from absence (#0062 — the largest #0061 class).
+			if at.Versions != nil && at.Versions.Fixed != nil {
+				fmt.Fprintf(&b, "  fixed: %s\n", *at.Versions.Fixed)
+			} else {
+				b.WriteString("  fixed: (none published)\n")
 			}
 		}
 		if r.Resolution != nil {

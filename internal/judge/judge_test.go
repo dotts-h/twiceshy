@@ -275,4 +275,42 @@ func TestBuildAdvisoryPrompt_IncludesSourceAndVulnID(t *testing.T) {
 	}
 }
 
+// A fixed:null advisory must render an EXPLICIT "no fix" marker, not omit the
+// line — otherwise the cheap advisory judge cannot see the "upgrade past the
+// fixed version, but none exists" contradiction, the single largest #0061
+// defect class (10 of 19). It only saw it before because a Sonnet audit read
+// the raw YAML; the production judge sees only this rendered prompt.
+func TestBuildAdvisoryPrompt_MarksMissingFixedVersion(t *testing.T) {
+	t.Run("fixed: null renders an explicit marker", func(t *testing.T) {
+		req := judge.Request{Record: &record.Record{
+			ID: "exp-0012", Kind: "trap", Status: "quarantined", Title: "advisory with no published fix",
+			AppliesTo: []record.AppliesTo{{
+				Ecosystem: "Go", Package: "example.com/pkg",
+				Versions: &record.VersionRange{Introduced: strPtr("0"), Fixed: nil},
+			}},
+		}}
+		prompt := judge.BuildAdvisoryPrompt(req)
+		if !strings.Contains(prompt, "fixed: (none published)") {
+			t.Fatalf("fixed:null must render an explicit no-fix marker; got:\n%s", prompt)
+		}
+	})
+
+	t.Run("a real fixed version is still rendered verbatim", func(t *testing.T) {
+		req := judge.Request{Record: &record.Record{
+			ID: "exp-0013", Kind: "trap", Status: "quarantined", Title: "advisory with a published fix",
+			AppliesTo: []record.AppliesTo{{
+				Ecosystem: "Go", Package: "example.com/pkg",
+				Versions: &record.VersionRange{Introduced: strPtr("0"), Fixed: strPtr("1.2.3")},
+			}},
+		}}
+		prompt := judge.BuildAdvisoryPrompt(req)
+		if !strings.Contains(prompt, "fixed: 1.2.3") {
+			t.Fatalf("a real fixed version must render verbatim; got:\n%s", prompt)
+		}
+		if strings.Contains(prompt, "none published") {
+			t.Fatalf("a record with a fix must not show the no-fix marker:\n%s", prompt)
+		}
+	})
+}
+
 func strPtr(s string) *string { return &s }
