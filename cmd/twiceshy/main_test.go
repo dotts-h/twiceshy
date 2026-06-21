@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -323,6 +324,84 @@ func TestRunServeServesUntilCancelled(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", resp.StatusCode)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("serve returned %v after cancel", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not shut down after cancel")
+	}
+}
+
+// SIGHUP hot-reloads the corpus in place (#0060): serve starts on an empty
+// corpus (/readyz 503), a record is written to the corpus dir, and a SIGHUP
+// makes serve rebuild its index without a restart — /readyz flips to ready. This
+// is what lets the corpus-sync timer signal instead of `docker restart`.
+func TestRunServeReloadsCorpusOnSIGHUP(t *testing.T) {
+	dir := tempCorpus(t) // empty corpus: serves nothing until a reload
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var out lockedBuffer
+	done := make(chan error, 1)
+	go func() {
+		done <- run(ctx, []string{
+			"serve", "-corpus", dir,
+			"-db", filepath.Join(t.TempDir(), "ix.db"),
+			"-addr", "127.0.0.1:0",
+		}, &out, func(k string) string {
+			if k == "TWICESHY_TOKEN" {
+				return "test-token"
+			}
+			return ""
+		})
+	}()
+
+	// Wait until serve reports its address — by then the SIGHUP handler is
+	// registered, so the signal we send below can't terminate the process.
+	addrRe := regexp.MustCompile(`listening on (\S+)`)
+	var addr string
+	deadline := time.Now().Add(10 * time.Second)
+	for addr == "" {
+		if time.Now().After(deadline) {
+			t.Fatalf("server never reported its address; output: %q", out.String())
+		}
+		if m := addrRe.FindStringSubmatch(out.String()); m != nil {
+			addr = m[1]
+		} else {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	readyz := func() int {
+		resp, err := http.Get("http://" + addr + "/readyz") // unauthenticated probe
+		if err != nil {
+			t.Fatalf("GET /readyz: %v", err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if code := readyz(); code != http.StatusServiceUnavailable {
+		t.Fatalf("/readyz on empty corpus = %d, want 503", code)
+	}
+
+	// Drop a validated record into the live corpus and signal a reload.
+	writeFixture(t, dir, packFixture("0301", "validated", "MIT", ""))
+	if err := syscall.Kill(syscall.Getpid(), syscall.SIGHUP); err != nil {
+		t.Fatalf("send SIGHUP: %v", err)
+	}
+
+	deadline = time.Now().Add(10 * time.Second)
+	for readyz() != http.StatusOK {
+		if time.Now().After(deadline) {
+			t.Fatalf("/readyz never became ready after SIGHUP; output: %q", out.String())
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 
 	cancel()

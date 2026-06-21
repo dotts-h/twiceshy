@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -71,8 +72,20 @@ const (
 		"Read it before acting on the lesson."
 )
 
-// New returns the HTTP handler serving the MCP pull channel.
-func New(cfg Config) (http.Handler, error) {
+// Server is the running pull+push handler. It is an http.Handler; SetRecordCount
+// lets a hot-reload (#0060) update the readiness count the probes report after
+// rebuilding the index in place, without reconstructing the server.
+type Server struct {
+	http.Handler
+	h *handlers
+}
+
+// SetRecordCount updates the record count /healthz and /readyz report, after a
+// hot-reload rebuilds the index. Concurrency-safe with in-flight probes.
+func (s *Server) SetRecordCount(n int) { s.h.recordCount.Store(int64(n)) }
+
+// New returns the Server handling the MCP pull channel and the push channel.
+func New(cfg Config) (*Server, error) {
 	if cfg.Index == nil {
 		return nil, errors.New("server: an index is required")
 	}
@@ -85,7 +98,8 @@ func New(cfg Config) (http.Handler, error) {
 		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	}
 
-	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, recordCount: cfg.RecordCount}
+	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue}
+	h.recordCount.Store(int64(cfg.RecordCount))
 	h.usage = newUsageRecorder(cfg.Index, logger, time.Now)
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "twiceshy",
@@ -124,7 +138,7 @@ func New(cfg Config) (http.Handler, error) {
 	outer.HandleFunc("/healthz", h.healthz)
 	outer.HandleFunc("/readyz", h.readyz)
 	outer.Handle("/", authed)
-	return outer, nil
+	return &Server{Handler: outer, h: h}, nil
 }
 
 // healthz is liveness: 200 as long as the process serves HTTP. Unauthenticated,
@@ -132,7 +146,7 @@ func New(cfg Config) (http.Handler, error) {
 func (h *handlers) healthz(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprintf(w, `{"status":"ok","records":%d}`+"\n", h.recordCount)
+	_, _ = fmt.Fprintf(w, `{"status":"ok","records":%d}`+"\n", h.recordCount.Load())
 }
 
 // readyz is readiness: 200 only when the index has records, else 503. An empty
@@ -140,18 +154,19 @@ func (h *handlers) healthz(w http.ResponseWriter, _ *http.Request) {
 // the outage produced — so it must read as NOT-ready to an external monitor.
 func (h *handlers) readyz(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	if h.recordCount <= 0 {
+	n := h.recordCount.Load()
+	if n <= 0 {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = fmt.Fprint(w, `{"status":"empty","records":0}`+"\n")
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprintf(w, `{"status":"ready","records":%d}`+"\n", h.recordCount)
+	_, _ = fmt.Fprintf(w, `{"status":"ready","records":%d}`+"\n", n)
 }
 
 type handlers struct {
 	ix          *index.Index
-	recordCount int // records indexed at startup; drives /healthz + /readyz
+	recordCount atomic.Int64 // current indexed record count; drives /healthz + /readyz, updated on hot-reload
 	repo        string
 	emb         index.Embedder // optional; enables pull-channel dense retrieval
 	logger      *slog.Logger

@@ -257,16 +257,18 @@ func embedderFor(c *commonFlags) index.Embedder {
 	return index.NewOllamaEmbedder(c.embedURL, c.embedModel)
 }
 
-// buildIndex loads + validates the corpus and rebuilds the derived index.
-// Rebuild-on-start keeps the index trivially consistent with the records —
-// the index is never the source of truth.
-// buildIndex loads the corpus and rebuilds the derived index. When resilient is
-// set (the long-running serve read path), it loads with the tolerant reader
-// (LoadCorpusForServe): an additive unknown field or a single unparseable record is
-// logged + skipped, never fatal — a server must stay up and serve the good records,
-// not crash-loop on one it cannot parse (#0064). One-shot commands (index, etc.)
-// pass false: strict load, fail loud, the operator/CI sees it.
-func buildIndex(ctx context.Context, c *commonFlags, resilient bool) (*index.Index, int, error) {
+// loadAndRebuild (re)loads the corpus and rebuilds ix in place, returning the
+// record count. When resilient is set (the long-running serve read path) it uses
+// the tolerant reader (LoadCorpusForServe): an additive unknown field or a single
+// unparseable record is logged + skipped, never fatal — a server must stay up and
+// serve the good records, not crash-loop on one it cannot parse (#0064). One-shot
+// commands (index, etc.) pass false: strict load, fail loud, the operator/CI sees it.
+//
+// This is the body of both the startup build and every SIGHUP hot-reload (#0060):
+// ix.Rebuild is a single transaction, so concurrent readers keep the prior snapshot
+// until it commits (no torn reads), and a failed load rolls back leaving the live
+// index intact.
+func loadAndRebuild(ctx context.Context, c *commonFlags, ix *index.Index, resilient bool) (int, error) {
 	var (
 		recs []*record.Record
 		err  error
@@ -275,7 +277,7 @@ func buildIndex(ctx context.Context, c *commonFlags, resilient bool) (*index.Ind
 		var skipped []string
 		recs, skipped, err = record.LoadCorpusForServe(c.corpus)
 		if err != nil {
-			return nil, 0, fmt.Errorf("loading corpus: %w", err)
+			return 0, fmt.Errorf("loading corpus: %w", err)
 		}
 		for _, s := range skipped {
 			slog.Warn("serve: skipped an unloadable record, serving the rest", "record", s)
@@ -284,25 +286,35 @@ func buildIndex(ctx context.Context, c *commonFlags, resilient bool) (*index.Ind
 			slog.Warn("serve: corpus had unloadable records", "skipped", len(skipped))
 		}
 	} else if recs, err = record.LoadCorpus(c.corpus); err != nil {
-		return nil, 0, fmt.Errorf("loading corpus: %w", err)
-	}
-	ix, err := index.Open(c.db)
-	if err != nil {
-		return nil, 0, err
+		return 0, fmt.Errorf("loading corpus: %w", err)
 	}
 	if err := ix.Rebuild(ctx, recs, c.repo); err != nil {
-		_ = ix.Close()
-		return nil, 0, err
+		return 0, err
 	}
 	// Dense retrieval (pull-only) — populate embeddings when configured; cached
 	// by content hash so a rebuild only re-embeds changed records (ADR-0009).
 	if emb := embedderFor(c); emb != nil {
 		if err := ix.EmbedCorpus(ctx, recs, emb); err != nil {
-			_ = ix.Close()
-			return nil, 0, fmt.Errorf("embedding corpus: %w", err)
+			return 0, fmt.Errorf("embedding corpus: %w", err)
 		}
 	}
-	return ix, len(recs), nil
+	return len(recs), nil
+}
+
+// buildIndex opens the derived index and loads + rebuilds it from the corpus.
+// Rebuild-on-start keeps the index trivially consistent with the records — the
+// index is never the source of truth.
+func buildIndex(ctx context.Context, c *commonFlags, resilient bool) (*index.Index, int, error) {
+	ix, err := index.Open(c.db)
+	if err != nil {
+		return nil, 0, err
+	}
+	n, err := loadAndRebuild(ctx, c, ix, resilient)
+	if err != nil {
+		_ = ix.Close()
+		return nil, 0, err
+	}
+	return ix, n, nil
 }
 
 func runIndex(ctx context.Context, args []string, out io.Writer) error {
@@ -351,6 +363,32 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 		alerter.Alert(ctx, "serve-fatal", fmt.Sprintf("serve could not build the handler: %v", err))
 		return err
 	}
+
+	// SIGHUP hot-reloads the corpus in place — no restart, no dropped listener
+	// (#0060). The corpus-sync timer signals instead of `docker restart`, so a
+	// corpus update never blips the service. A reload that fails to load/rebuild
+	// keeps the prior good index serving (ix.Rebuild rolls back) and alerts.
+	// Registered before the address is reported so an early SIGHUP can't terminate.
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	defer signal.Stop(hup)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-hup:
+				rn, err := loadAndRebuild(ctx, c, ix, true)
+				if err != nil {
+					logger.Error("serve: SIGHUP reload failed; serving prior corpus", "err", err)
+					alerter.Alert(ctx, "serve-reload-failed", fmt.Sprintf("SIGHUP reload failed, still serving prior corpus: %v", err))
+					continue
+				}
+				handler.SetRecordCount(rn)
+				logger.Info("serve: hot-reloaded corpus on SIGHUP", "records", rn)
+			}
+		}
+	}()
 
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {
