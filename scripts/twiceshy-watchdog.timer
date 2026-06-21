@@ -1,0 +1,10 @@
+[Unit]
+Description=run the twiceshy watchdog every minute (decoupled recovery + alerting)
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=60s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
