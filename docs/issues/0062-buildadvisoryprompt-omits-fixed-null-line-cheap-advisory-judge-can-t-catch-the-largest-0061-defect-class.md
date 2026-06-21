@@ -1,14 +1,14 @@
 ---
 id: 0062
 title: BuildAdvisoryPrompt omits fixed:null line — cheap advisory judge can't catch the largest #0061 defect class
-status: open
+status: closed
 severity: medium
 group: 0015
 depends_on: []
 forgejo: 194
 links:
   adr: ADR-0016
-  prs: []
+  prs: [263]
   issues: [0061]
   regression:
 assets: []
