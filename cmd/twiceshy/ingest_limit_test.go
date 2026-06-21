@@ -13,7 +13,7 @@ import (
 // osv-live is a wired ingest source. NewOSVLiveSource performs no network I/O
 // until Drafts() is called, so resolving + naming it needs no fixture.
 func TestImportSourceOSVLive(t *testing.T) {
-	src, err := importSource("osv-live")
+	src, err := importSource("osv-live", "")
 	if err != nil {
 		t.Fatalf("osv-live must be a known source: %v", err)
 	}

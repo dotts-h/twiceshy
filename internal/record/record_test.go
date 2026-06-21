@@ -261,6 +261,77 @@ func TestParseRejectsUnknownFrontmatterFields(t *testing.T) {
 	}
 }
 
+// ParseLenient is the read/serve path: an ADDITIVE frontmatter field written by a
+// newer writer must NOT make an older server fail to load the record (the outage:
+// the corpus got `panel`, the deployed binary's struct lacked it, strict unmarshal
+// crash-looped serve). Strict Parse still rejects it (write/CI catches typos).
+func TestParseLenientToleratesUnknownFrontmatterField(t *testing.T) {
+	front := fm()
+	front["future_schema_field"] = "a field an older binary does not know"
+	src := render(t, front)
+	if _, err := record.Parse(fmPath, src); err == nil {
+		t.Fatal("strict Parse must still reject an unknown field")
+	}
+	rec, err := record.ParseLenient(fmPath, src)
+	if err != nil {
+		t.Fatalf("ParseLenient must tolerate an additive field, got: %v", err)
+	}
+	if rec.ID != "exp-0042" {
+		t.Fatalf("want exp-0042 loaded, got %q", rec.ID)
+	}
+}
+
+// LoadCorpusForServe must keep the read path AVAILABLE: serve every loadable
+// record (including ones with additive unknown fields) and skip+report the rest,
+// never aborting the whole load on one bad file.
+func TestLoadCorpusForServeSkipsBadAndToleratesUnknown(t *testing.T) {
+	good := fm()
+	withUnknown := fm()
+	withUnknown["id"] = "exp-0043"
+	withUnknown["future_schema_field"] = "additive field an older server rejects"
+	root := writeCorpus(t, map[string][]byte{
+		"experience/2026/0042-good-record.md":   render(t, good),
+		"experience/2026/0043-unknown-field.md": render(t, withUnknown),
+		"experience/2026/0044-broken-record.md": []byte("---\n\tnot: [valid yaml\n---\nbody text\n"),
+	})
+	recs, skipped, err := record.LoadCorpusForServe(root)
+	if err != nil {
+		t.Fatalf("LoadCorpusForServe must not hard-fail on one bad record: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, r := range recs {
+		ids[r.ID] = true
+	}
+	if !ids["exp-0042"] || !ids["exp-0043"] {
+		t.Fatalf("both the good and the unknown-field record must be served, got %v", ids)
+	}
+	if len(skipped) != 1 || !strings.Contains(skipped[0], "0044-broken") {
+		t.Fatalf("want exactly the malformed file skipped+reported, got %d: %v", len(skipped), skipped)
+	}
+}
+
+// A duplicate id is the OTHER serve-fatal class (#0060): the id is a PRIMARY KEY,
+// so a second record with the same id would abort the index rebuild → crash-loop.
+// The serve loader must keep the first and skip+report the dup, staying up.
+func TestLoadCorpusForServeSkipsDuplicateID(t *testing.T) {
+	a := fm()
+	b := fm() // same id exp-0042, different file
+	root := writeCorpus(t, map[string][]byte{
+		"experience/2026/0042-first.md":  render(t, a),
+		"experience/2026/0042-second.md": render(t, b),
+	})
+	recs, skipped, err := record.LoadCorpusForServe(root)
+	if err != nil {
+		t.Fatalf("LoadCorpusForServe must not hard-fail on a duplicate id: %v", err)
+	}
+	if len(recs) != 1 || recs[0].ID != "exp-0042" {
+		t.Fatalf("want exactly one exp-0042 served, got %d: %v", len(recs), recs)
+	}
+	if len(skipped) != 1 || !strings.Contains(skipped[0], "duplicate id exp-0042") {
+		t.Fatalf("want the duplicate skipped+reported, got %d: %v", len(skipped), skipped)
+	}
+}
+
 func TestParseRejectsStructuralBreakage(t *testing.T) {
 	cases := map[string]string{
 		"no frontmatter fence": "schema_version: 1\n",
