@@ -12,7 +12,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"unicode"
 
@@ -56,29 +55,42 @@ const maxQueryTokens = 24
 // Push-channel discriminative gate (ADR-0001 §4: embedding-free; BM25 + fingerprint
 // only). A magnitude floor cannot separate off-topic from on-topic on the live
 // corpus — BM25 is corpus-relative, so off-topic prose ("buy milk") scores as high
-// as a weak genuine hit. What separates cleanly is document frequency: every
-// off-topic content token is absent from the validated corpus (df=0) or generic
-// (df>=maxDF), while every genuine error query carries a rare, discriminative token
-// (df<=maxDF). RetrievePush injects a card only when such a token is present and the
-// card clears pushFloor on that discriminative subset. Calibrated on the live corpus
-// (9 validated); push-only, leaving DefaultFloor / pull / Assess untouched.
+// as a weak genuine hit. Two signals do separate, and BOTH are required:
+//
+//   - Document frequency: a discriminative token sits in 1..pushMaxDF validated
+//     records. Absent tokens (df=0) and corpus-generic tokens (df>pushMaxDF) are out.
+//   - Common-word exclusion (pushStopwords): low df in a SMALL curated corpus is not
+//     specificity — common dev vocabulary ("http", "request", "version", "cache") is
+//     rare here only because the corpus is tiny, and leaked cards into off-domain
+//     sessions (the #0005 push-precision eval reproduces it). So a token must also
+//     not be a common word. The genuine signals are the rare identifiers a real
+//     error query carries (fts5, bm25, servemux, tmpdir, rand.Seed, setup-go).
+//
+// pushMaxDF is a FIXED ceiling, not a fraction of the corpus: an earlier
+// ceil(0.25·nValidated) rule loosened the gate as the corpus grew (3→19 once the
+// OSV/GHSA advisories were promoted), which is exactly the leak the eval caught.
+// Push-only — leaves DefaultFloor / pull / Assess untouched. Guarded by
+// eval.TestPushPrecisionOnLiveCorpus.
 const (
 	// pushFloor is the positive BM25 floor for push, applied to the
 	// discriminative-token subset so an off-topic prose token can't contribute a card.
 	pushFloor = 3.0
-	// pushMaxDF is the absolute df ceiling on a small corpus.
-	pushMaxDF = 2
-	// pushMaxDFFrac generalizes the ceiling as the corpus grows: a token in more
-	// than this fraction of validated records is too generic to be discriminative.
-	// Effective ceiling = max(pushMaxDF, ceil(pushMaxDFFrac * nValidated)).
-	pushMaxDFFrac = 0.25
+	// pushMaxDF is the df ceiling: a discriminative token is in 1..pushMaxDF validated
+	// records. Fixed (not corpus-scaled) so corpus growth can never loosen the gate.
+	pushMaxDF = 3
 )
 
-// pushStopwords are common English function words and measured-generic coding
-// filler that must never count as a discriminative token. It is a cheap pre-filter
-// (skips a df query) and a backstop for df=1 prose words like "works"; the df gate
-// and pushFloor do the real work. Deliberately excludes any token that is a genuine
-// signal in a validated record (http, session, mcp, permission, method, …).
+// pushStopwords are common English function words and common dev/web/ops
+// vocabulary that must never count as a discriminative token. A genuine error
+// query is carried by RARE identifiers (fts5, bm25, servemux, tmpdir, rand.Seed,
+// setup-go), not by common words — which are rare in THIS corpus only because it
+// is small, and which leaked unrelated cards into off-domain sessions (the #0005
+// push-precision eval reproduced "http"/"request"/"version"/"cache"/"permission"
+// surfacing Go/SQLite cards for a Svelte+FastAPI prompt). Stoplisting a common word
+// never silences a genuine query, because that query still carries its specific
+// tokens. Earlier this list deliberately KEPT http/method/permission as "signals";
+// the eval showed that was the leak, so they are stoplisted now. Guarded by
+// eval.TestPushPrecisionOnLiveCorpus; grow it (with the eval) as new leakers surface.
 var pushStopwords = map[string]bool{
 	"a": true, "an": true, "and": true, "are": true, "as": true, "at": true,
 	"be": true, "but": true, "by": true, "can": true, "do": true, "does": true,
@@ -88,11 +100,30 @@ var pushStopwords = map[string]bool{
 	"please": true, "so": true, "that": true, "the": true, "then": true,
 	"this": true, "to": true, "up": true, "we": true, "what": true, "when": true,
 	"where": true, "which": true, "why": true, "with": true, "you": true,
-	"your": true,
+	"your": true, "a's": true, "new": true, "old": true, "out": true, "wrong": true,
+	"good": true, "bad": true, "year": true, "buy": true, "gift": true,
 	// measured-generic dev filler (df>=3 over the validated corpus, or df=1 prose):
 	"go": true, "test": true, "tests": true, "code": true, "write": true,
 	"implement": true, "feature": true, "fails": true, "fail": true, "failed": true,
 	"works": true, "work": true, "working": true, "software": true, "shipping": true,
+	// common dev/web/ops vocabulary — leak sources in the #0005 push-precision eval,
+	// plus their inflections and near siblings (all common words, never a rare signal):
+	"add": true, "added": true, "api": true, "cache": true, "caches": true,
+	"cached": true, "change": true, "changed": true, "changes": true, "check": true,
+	"checks": true, "client": true, "component": true, "components": true,
+	"config": true, "container": true, "containers": true, "context": true,
+	"deploy": true, "deployment": true, "deployments": true, "endpoint": true,
+	"endpoints": true, "handler": true, "handlers": true, "http": true, "https": true,
+	"image": true, "images": true, "kubernetes": true, "layer": true, "layers": true,
+	"make": true, "makes": true, "method": true, "methods": true, "model": true,
+	"models": true, "page": true, "pages": true, "permission": true,
+	"permissions": true, "props": true, "provider": true, "providers": true,
+	"recipe": true, "recipes": true, "release": true, "releases": true,
+	"render": true, "request": true, "requests": true, "response": true,
+	"responses": true, "return": true, "returns": true, "route": true, "routes": true,
+	"server": true, "settings": true, "status": true, "store": true, "stores": true,
+	"update": true, "updates": true, "user": true, "users": true, "validate": true,
+	"version": true, "versions": true, "writable": true,
 }
 
 // ErrNotFound is returned by Get for an unknown record id.
@@ -343,22 +374,13 @@ func (ix *Index) RetrievePush(ctx context.Context, q Query) ([]Hit, error) {
 }
 
 // discriminativeTokens returns the query's content tokens (lowercased, alnum,
-// not a stopword, not a corpus ecosystem name) whose validated document
-// frequency is in [1, maxDF], where maxDF = max(pushMaxDF, ceil(pushMaxDFFrac *
-// nValidated)). It reuses the ftsQuery tokenization and quoting so df counts
-// agree with what the lexical search later matches (exp-0001).
+// not a stopword, not a corpus ecosystem name) whose validated document frequency
+// is in [1, pushMaxDF]. It reuses the ftsQuery tokenization and quoting so df
+// counts agree with what the lexical search later matches (exp-0001).
 func (ix *Index) discriminativeTokens(ctx context.Context, text string) ([]string, error) {
 	eco, err := ix.ecosystemNames(ctx)
 	if err != nil {
 		return nil, err
-	}
-	nVal, err := ix.validatedCount(ctx)
-	if err != nil {
-		return nil, err
-	}
-	maxDF := pushMaxDF
-	if f := int(math.Ceil(pushMaxDFFrac * float64(nVal))); f > maxDF {
-		maxDF = f
 	}
 
 	var out []string
@@ -373,7 +395,7 @@ func (ix *Index) discriminativeTokens(ctx context.Context, text string) ([]strin
 		if err != nil {
 			return nil, err
 		}
-		if df >= 1 && df <= maxDF {
+		if df >= 1 && df <= pushMaxDF {
 			out = append(out, tok)
 		}
 		if len(out) >= maxQueryTokens {
@@ -419,18 +441,6 @@ func (ix *Index) ecosystemNames(ctx context.Context) (map[string]bool, error) {
 		out[e] = true
 	}
 	return out, rows.Err()
-}
-
-// validatedCount is the number of validated records — the denominator the df
-// ceiling scales against.
-func (ix *Index) validatedCount(ctx context.Context) (int, error) {
-	var n int
-	err := ix.db.QueryRowContext(ctx,
-		`SELECT count(*) FROM records WHERE status = 'validated'`).Scan(&n)
-	if err != nil {
-		return 0, fmt.Errorf("validated count: %w", err)
-	}
-	return n, nil
 }
 
 // Search runs the embedding-free retrieval pipeline: fingerprint-exact

@@ -2193,6 +2193,7 @@ func runEval(ctx context.Context, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("eval", flag.ContinueOnError)
 	c := addCommonFlags(fs)
 	asJSON := fs.Bool("json", false, "emit the report as JSON")
+	push := fs.Bool("push", false, "run the push-precision eval (off-domain prompts must inject nothing) instead of pull recall")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -2207,6 +2208,9 @@ func runEval(ctx context.Context, args []string, out io.Writer) error {
 	defer func() { _ = ix.Close() }()
 	if err := ix.Rebuild(ctx, recs, c.repo); err != nil {
 		return err
+	}
+	if *push {
+		return runEvalPush(ctx, ix, out, *asJSON)
 	}
 	cases := eval.Cases(recs)
 	rep, err := eval.Run(ctx, ix, cases, index.MaxK)
@@ -2233,6 +2237,41 @@ func runEval(ctx context.Context, args []string, out io.Writer) error {
 			}
 			_, _ = fmt.Fprintf(out, "    [%s] %s (%s) %q -> %v\n", status, r.RecordID, r.Source, truncate(r.Query, 50), r.Returned)
 		}
+	}
+	return nil
+}
+
+// runEvalPush reports the push channel's precision (off-domain prompts must inject
+// nothing) and recall (genuine traps must surface) — the #0005 measurement that
+// gates the push channel. Returns a non-zero error on any false injection so a
+// script/CI can fail on a precision regression.
+func runEvalPush(ctx context.Context, ix *index.Index, out io.Writer, asJSON bool) error {
+	cases := append(eval.PushNegatives(), eval.PushPositives()...)
+	rep, err := eval.RunPush(ctx, ix, cases)
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		b, err := json.MarshalIndent(rep, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(out, string(b))
+	} else {
+		_, _ = fmt.Fprintf(out, "push eval over the validated corpus\n")
+		_, _ = fmt.Fprintf(out, "  precision: %.1f%% (%d/%d off-domain prompts injected — want 0)\n",
+			rep.Precision()*100, rep.FalseInjections, rep.Negatives)
+		_, _ = fmt.Fprintf(out, "  recall:    %.1f%% (%d/%d traps surfaced)\n",
+			rep.Recall()*100, rep.Recalled, rep.Positives)
+		for _, l := range rep.Leaks {
+			_, _ = fmt.Fprintf(out, "    [LEAK] %s\n", l)
+		}
+		for _, m := range rep.Misses {
+			_, _ = fmt.Fprintf(out, "    [MISS] %s\n", m)
+		}
+	}
+	if rep.FalseInjections > 0 {
+		return fmt.Errorf("push precision regression: %d/%d off-domain prompts injected a card", rep.FalseInjections, rep.Negatives)
 	}
 	return nil
 }
