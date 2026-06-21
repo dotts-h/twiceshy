@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -70,6 +71,55 @@ func connect(t *testing.T, ts *httptest.Server) *mcp.ClientSession {
 	}
 	t.Cleanup(func() { _ = session.Close() })
 	return session
+}
+
+// /healthz and /readyz must be reachable WITHOUT the bearer (a probe can't carry
+// it), and /readyz must read NOT-ready on an empty corpus — the "serving nothing"
+// state the crash-loop outage produced, so an external monitor can page on it.
+func TestHealthEndpointsBypassAuthAndReflectReadiness(t *testing.T) {
+	ix, err := index.Open(filepath.Join(t.TempDir(), "ix.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ix.Close() })
+	if err := ix.Rebuild(context.Background(), nil, testRepo); err != nil {
+		t.Fatal(err)
+	}
+	get := func(ts *httptest.Server, path string) (int, string) {
+		resp, err := http.Get(ts.URL + path) // no Authorization header on purpose
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+
+	ready, err := server.New(server.Config{Index: ix, Token: token, Repo: testRepo, RecordCount: 42})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tsReady := httptest.NewServer(ready)
+	t.Cleanup(tsReady.Close)
+	if code, body := get(tsReady, "/healthz"); code != http.StatusOK || !strings.Contains(body, `"records":42`) {
+		t.Fatalf("/healthz unauthenticated = %d %q, want 200 with records:42", code, body)
+	}
+	if code, _ := get(tsReady, "/readyz"); code != http.StatusOK {
+		t.Fatalf("/readyz (populated) = %d, want 200", code)
+	}
+
+	empty, err := server.New(server.Config{Index: ix, Token: token, Repo: testRepo, RecordCount: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tsEmpty := httptest.NewServer(empty)
+	t.Cleanup(tsEmpty.Close)
+	if code, _ := get(tsEmpty, "/readyz"); code != http.StatusServiceUnavailable {
+		t.Fatalf("/readyz (empty corpus) = %d, want 503", code)
+	}
+	if code, _ := get(tsEmpty, "/healthz"); code != http.StatusOK {
+		t.Fatalf("/healthz (empty) = %d, want 200 — process is alive even with an empty index", code)
+	}
 }
 
 func TestNewRequiresIndexAndToken(t *testing.T) {
