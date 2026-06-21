@@ -1,0 +1,12 @@
+[Unit]
+Description=twiceshy watchdog — restart the MCP container if /healthz is down, and alert
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ori
+# Alert channel is discovered from the container's TWICESHY_ALERT_URL at runtime
+# (no secret in git). Override paths/cooldown via /etc/twiceshy/watchdog.env if present.
+EnvironmentFile=-/etc/twiceshy/watchdog.env
+ExecStart=/home/ori/.local/bin/twiceshy-watchdog.sh
