@@ -8,7 +8,7 @@ depends_on: []
 forgejo: 253
 links:
   adr: docs/adr/ADR-0015-push-discriminative-term-gate.md
-  prs: []
+  prs: [269]
   issues: [0064, 0005, 0065]
   regression:
 assets: []
