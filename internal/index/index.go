@@ -254,10 +254,21 @@ CREATE TABLE IF NOT EXISTS embedding_cache (
 CREATE TABLE IF NOT EXISTS usage (
   record_id         TEXT PRIMARY KEY,
   retrieved         INTEGER NOT NULL DEFAULT 0,
+  pushed            INTEGER NOT NULL DEFAULT 0,
   confirmed_helpful INTEGER NOT NULL DEFAULT 0,
   last_hit          TEXT
 );
 `
+
+// migrations are additive, idempotent in-place schema changes for index files
+// that predate a column. The index is derived state (delete + Rebuild recovers
+// it), but the usage table accumulates counters that survive Rebuild and only
+// flush to provenance periodically — so a live db must gain a new usage column
+// in place rather than be dropped. ADD COLUMN is the one safe SQLite migration;
+// the "duplicate column" error on an already-migrated db is expected and ignored.
+var migrations = []string{
+	`ALTER TABLE usage ADD COLUMN pushed INTEGER NOT NULL DEFAULT 0`,
+}
 
 // maxOpenConns bounds the SQLite connection pool to the documented
 // ≤4-concurrent budget. WAL makes concurrent reads safe; the cap stops an
@@ -275,6 +286,12 @@ func Open(path string) (*Index, error) {
 	if _, err := db.Exec(ddl); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("creating index schema: %w", err)
+	}
+	for _, m := range migrations {
+		if _, err := db.Exec(m); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			_ = db.Close()
+			return nil, fmt.Errorf("migrating index schema: %w", err)
+		}
 	}
 	return &Index{db: db}, nil
 }

@@ -106,7 +106,7 @@ also carry a named Go unit test.
 | `disputes` | string\|null | no | id of an existing record this one is **counter-evidence against** — set on an outcome-report counter-record (#0031). Additive, optional, `exp-NNNN`-shaped like `superseded_by`. It is evidence, not a verdict: #0032 follows it to re-run the original repro plus the counter, and a report never mutates its target |
 | `promotion` | object | no | the **audit trail of an autonomous promotion** (#0029, ADR-0013): `{attested_at, reproduced_under?, judge_model, judge_decision}` — the holding attestation and the diverse judge's verdict that flipped this record `quarantined → validated` with no human approver. Additive, optional; set only by the promoter |
 | `demotion` | object | no | the **audit trail of an autonomous demotion** (#0032, ADR-0013 §3): `{attested_at, judge_model, judge_decision, report}` — the counter-attestation that reproduced the failure, the judge's verdict, and the outcome-report (`exp-NNNN`) that flipped this record `validated → stale`. Additive, optional; set only by the counter-evidence gate |
-| `usage` | object | no | `{retrieved: int, confirmed_helpful: int, last_hit: date\|null}` — Doctor 4's signal; maintained by tooling, zero-valued at creation |
+| `usage` | object | no | `{retrieved: int, pushed: int, confirmed_helpful: int, last_hit: date\|null}` — Doctor 4's signal; maintained by tooling, zero-valued at creation. `pushed` counts push-channel impressions (distinct from `retrieved`, a deliberate pull); the closed loop is `pushed` (denominator) vs `confirmed_helpful` (numerator) |
 
 ## Lifecycle
 

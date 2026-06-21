@@ -24,9 +24,13 @@ type PushArgs struct {
 }
 
 // PushResult is the POST /push response: ready-to-inject additionalContext text.
+// IDs lists the injected record ids so a client can close the feedback loop —
+// call confirm_helpful (or report_outcome) on a pushed card that helped or
+// misled. The push impression itself is recorded server-side as `pushed`.
 type PushResult struct {
-	Count   int    `json:"count"`
-	Context string `json:"context"`
+	Count   int      `json:"count"`
+	Context string   `json:"context"`
+	IDs     []string `json:"ids,omitempty"`
 }
 
 func (h *handlers) pushHTTP(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +82,7 @@ func (h *handlers) pushHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cards := make([]string, 0, len(hits))
+	ids := make([]string, 0, len(hits))
 	for _, hit := range hits {
 		stored, err := h.ix.Get(ctx, hit.ID)
 		if err != nil {
@@ -100,11 +105,18 @@ func (h *handlers) pushHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cards = append(cards, RenderTrapCard(rec))
+		ids = append(ids, hit.ID)
 	}
+
+	// Record the push impression off the latency budget (ADR-0013 §4), the same
+	// seam pull uses for `retrieved` — closing the feedback loop (#0058): `pushed`
+	// is the denominator a later confirm_helpful (numerator) is measured against.
+	h.usage.recordPush(ids)
 
 	out := PushResult{
 		Count:   len(cards),
 		Context: RenderPushContext(cards),
+		IDs:     ids,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(out); err != nil {

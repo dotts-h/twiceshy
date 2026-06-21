@@ -19,6 +19,7 @@ const usageWriteTimeout = 5 * time.Second
 // usage influence which records are returned (CONVENTIONS, memory-poisoning).
 type usageStore interface {
 	RecordHits(ctx context.Context, ids []string, date string) error
+	RecordPushes(ctx context.Context, ids []string) error
 }
 
 // usageRecorder writes retrieval usage off the request's latency budget
@@ -68,6 +69,31 @@ func (u *usageRecorder) record(ids []string) {
 		defer cancel()
 		if err := u.store.RecordHits(ctx, owned, date); err != nil {
 			u.log.Warn("usage record failed", slog.Int("ids", len(owned)), slog.String("error", err.Error()))
+		}
+	}()
+}
+
+// recordPush schedules an async push-impression bump for the injected ids
+// (POST /push). Non-blocking; an empty list (or a nil recorder) is a no-op.
+// Mirrors record() but increments `pushed`, keeping push impressions distinct
+// from deliberate-pull `retrieved`.
+func (u *usageRecorder) recordPush(ids []string) {
+	if u == nil || len(ids) == 0 {
+		return
+	}
+	owned := append([]string(nil), ids...) // own the slice; the caller may reuse it
+	u.wg.Add(1)
+	go func() {
+		defer u.wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				u.log.Error("usage recordPush panicked", slog.Any("panic", r))
+			}
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), usageWriteTimeout)
+		defer cancel()
+		if err := u.store.RecordPushes(ctx, owned); err != nil {
+			u.log.Warn("usage recordPush failed", slog.Int("ids", len(owned)), slog.String("error", err.Error()))
 		}
 	}()
 }

@@ -336,6 +336,7 @@
           "additionalProperties": false,
           "properties": {
             "retrieved": { "type": "integer", "minimum": 0 },
+            "pushed": { "type": "integer", "minimum": 0 },
             "confirmed_helpful": { "type": "integer", "minimum": 0 },
             "last_hit": { "$ref": "#/$defs/nullableDate" }
           }

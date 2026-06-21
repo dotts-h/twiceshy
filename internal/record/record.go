@@ -161,7 +161,13 @@ type Validity struct {
 }
 
 type Usage struct {
-	Retrieved        int     `yaml:"retrieved"`
+	Retrieved int `yaml:"retrieved"`
+	// Pushed counts push-channel impressions (a card auto-injected into a prompt
+	// via /push). It is kept distinct from Retrieved — a push is unprompted, a
+	// weaker signal than a deliberate pull — so the reinforcement input is not
+	// diluted. The closed loop is Pushed (denominator) vs ConfirmedHelpful
+	// (numerator): a card pushed often but never confirmed is noise.
+	Pushed           int     `yaml:"pushed"`
 	ConfirmedHelpful int     `yaml:"confirmed_helpful"`
 	LastHit          *string `yaml:"last_hit"`
 }
@@ -704,7 +710,7 @@ func (r *Record) validateProvenance(fail func(string, ...any)) {
 		fail("provenance.valid.until precedes valid.from")
 	}
 	if u := p.Usage; u != nil {
-		if u.Retrieved < 0 || u.ConfirmedHelpful < 0 {
+		if u.Retrieved < 0 || u.Pushed < 0 || u.ConfirmedHelpful < 0 {
 			fail("usage counters must be non-negative")
 		}
 		if u.LastHit != nil {

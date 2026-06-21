@@ -38,6 +38,12 @@ func TestUsageFlush_MaterializesAndIsIdempotent(t *testing.T) {
 	if err := ix.ConfirmHelpful(ctx, rec.ID); err != nil {
 		t.Fatalf("ConfirmHelpful: %v", err)
 	}
+	const pushes = 3
+	for i := 0; i < pushes; i++ {
+		if err := ix.RecordPushes(ctx, []string{rec.ID}); err != nil {
+			t.Fatalf("RecordPushes: %v", err)
+		}
+	}
 	if err := ix.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -69,6 +75,11 @@ func TestUsageFlush_MaterializesAndIsIdempotent(t *testing.T) {
 	}
 	if u.ConfirmedHelpful != 1 {
 		t.Fatalf("confirmed_helpful = %d, want 1", u.ConfirmedHelpful)
+	}
+	// pushed must materialize too — otherwise every Rebuild/hot-reload erases the
+	// push impressions (the index usage table is wiped on a full reset).
+	if u.Pushed != pushes {
+		t.Fatalf("pushed = %d, want %d (push impressions must flush to provenance)", u.Pushed, pushes)
 	}
 
 	out.Reset()
