@@ -1,0 +1,9 @@
+[Unit]
+Description=twiceshy ollama-VM watchdog — restart VM 101 if the gpt-oss judge upstream is down
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ori
+ExecStart=/home/ori/.local/bin/ollama-watchdog.sh

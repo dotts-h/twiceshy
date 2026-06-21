@@ -1,0 +1,23 @@
+[Unit]
+Description=twiceshy continuous pump — loops import+validate so the corpus grows continuously
+Documentation=https://git.radulescu.app/claude/twiceshy
+# Order after the judges + network; not hard requirements (the panel fail-safe-skips
+# if a judge is down, it never crashes), just better startup ordering.
+After=network-online.target twiceshy-judge.service twiceshy-judge-sonnet.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# root so it can `systemctl start` the import/validate oneshots (which run as ori).
+User=root
+Environment=PUMP_HOURS=9
+Environment=PUMP_INTERVAL=1500
+# Stable copy (not the git working tree, which changes branches). Restart=always
+# means when a 9h window ends — or the process dies, or the box reboots — it comes
+# straight back, so the pump is effectively perpetual and survives a reboot.
+ExecStart=/home/ori/.local/bin/twiceshy-pump.sh
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
