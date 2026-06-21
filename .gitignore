@@ -1,3 +1,10 @@
 coverage.out
 /twiceshy
 .twiceshy-loop.lock
+
+# scratch / build artifacts (ops experiments, local DBs, compiled bins)
+.tmp/
+/compare
+scratch_thinkoff/
+__pycache__/
+runs/*.log
