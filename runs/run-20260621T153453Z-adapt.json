@@ -1,0 +1,12 @@
+{
+  "run_id": "run-20260621T154905Z",
+  "stage": "adapt",
+  "anomaly": false,
+  "counts": {
+    "demoted": 0,
+    "disputed": 0,
+    "held": 0,
+    "orphan": 0
+  },
+  "actions": []
+}
