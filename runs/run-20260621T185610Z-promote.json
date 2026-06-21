@@ -1,7 +1,19 @@
 {
-  "run_id": "",
+  "run_id": "run-20260621T185610Z",
   "stage": "promote",
-  "complete": true,
+  "anomaly": true,
+  "counts": {
+    "held": 36,
+    "ineligible": 82,
+    "promoted": 26
+  },
+  "judge_stats": {
+    "calls": 1,
+    "approvals": 1,
+    "rejections": 0,
+    "p50_ms": 8433,
+    "p95_ms": 8433
+  },
   "actions": [
     {
       "id": "exp-0001",
