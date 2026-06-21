@@ -36,7 +36,11 @@ HEALTH_URL="${TWICESHY_HEALTH_URL:-http://192.168.50.244:8722/healthz}"
 ALERT_URL="${TWICESHY_ALERT_URL:-}"           # ntfy topic; unset = no-op (fail-open)
 HEALTH_TIMEOUT="${TWICESHY_HEALTH_TIMEOUT:-30}"     # seconds to wait for /healthz after a reload/start
 POLL_SLEEP="${TWICESHY_POLL_SLEEP:-2}"               # seconds between health polls
-BREAKER_FILE="${TWICESHY_BREAKER_FILE:-/run/twiceshy-corpus-sync.breaker}"
+# State files default to a per-user-writable dir: the timer runs as a non-root user
+# (User=ori) that cannot write /run, so /run/* silently failed — the breaker never
+# persisted and the lock could not open. XDG_RUNTIME_DIR (/run/user/UID) when set, else /tmp.
+RUNDIR="${TWICESHY_RUNDIR:-${XDG_RUNTIME_DIR:-/tmp}}"
+BREAKER_FILE="${TWICESHY_BREAKER_FILE:-$RUNDIR/twiceshy-corpus-sync.breaker}"
 BREAKER_COOLDOWN="${TWICESHY_BREAKER_COOLDOWN:-900}" # an UNPROVOKED death within this window of a restart = crash-loop
 
 # --- seams (overridable in tests) -------------------------------------------------
@@ -169,9 +173,14 @@ main() {
 }
 
 # Run main only when executed, not when sourced (the test harness sources this file
-# to stub the seams). A flock prevents a slow tick from overlapping the next timer fire.
+# to stub the seams). The flock prevents overlapping ticks but is FAIL-OPEN: if the
+# lock file cannot be opened, proceed without it rather than skip the sync (an
+# unwritable lock path must never silently disable syncing, as /run/ did).
 if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
-	exec 9>"${TWICESHY_LOCK_FILE:-/run/twiceshy-corpus-sync.lock}" 2>/dev/null || true
-	flock -n 9 2>/dev/null || { echo "another sync is running; skipping"; exit 0; }
+	if { exec 9>"${TWICESHY_LOCK_FILE:-$RUNDIR/twiceshy-corpus-sync.lock}"; } 2>/dev/null; then
+		flock -n 9 || { echo "another sync is already running; skipping"; exit 0; }
+	else
+		echo "warning: lock unavailable; proceeding without overlap lock" >&2
+	fi
 	main "$@"
 fi
