@@ -37,6 +37,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -267,7 +268,8 @@ func embedderFor(c *commonFlags) index.Embedder {
 // This is the body of both the startup build and every SIGHUP hot-reload (#0060):
 // ix.Rebuild is a single transaction, so concurrent readers keep the prior snapshot
 // until it commits (no torn reads), and a failed load rolls back leaving the live
-// index intact.
+// index intact. Under resilient, a dense re-embed failure (after the record swap
+// commits) degrades pull-only dense rather than failing — the new records stay live.
 func loadAndRebuild(ctx context.Context, c *commonFlags, ix *index.Index, resilient bool) (int, error) {
 	var (
 		recs []*record.Record
@@ -295,7 +297,15 @@ func loadAndRebuild(ctx context.Context, c *commonFlags, ix *index.Index, resili
 	// by content hash so a rebuild only re-embeds changed records (ADR-0009).
 	if emb := embedderFor(c); emb != nil {
 		if err := ix.EmbedCorpus(ctx, recs, emb); err != nil {
-			return 0, fmt.Errorf("embedding corpus: %w", err)
+			if !resilient {
+				return 0, fmt.Errorf("embedding corpus: %w", err)
+			}
+			// Serve path: the record swap already committed (ix.Rebuild above), so
+			// the new corpus is live on the embedding-free hot path. A re-embed
+			// failure only degrades dense (pull-only) — keep serving the new
+			// records and report the committed count, rather than fail the reload
+			// with a stale count and a misleading "serving prior corpus" alert.
+			slog.Warn("serve: corpus (re)loaded but dense re-embed failed; dense retrieval degraded", "err", err)
 		}
 	}
 	return len(recs), nil
@@ -372,16 +382,25 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)
 	defer signal.Stop(hup)
+	// reloadCtx + reloadWG drain an in-flight rebuild before the deferred
+	// ix.Close() runs, so a SIGHUP that coincides with shutdown can't run a
+	// Rebuild transaction on a closed DB. stopReload fires on every exit path
+	// (graceful shutdown AND a serve error, where ctx itself is not cancelled),
+	// and the deferred Wait runs before ix.Close() (defers are LIFO).
+	reloadCtx, stopReload := context.WithCancel(ctx)
+	var reloadWG sync.WaitGroup
+	reloadWG.Add(1)
 	go func() {
+		defer reloadWG.Done()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-reloadCtx.Done():
 				return
 			case <-hup:
-				rn, err := loadAndRebuild(ctx, c, ix, true)
+				rn, err := loadAndRebuild(reloadCtx, c, ix, true)
 				if err != nil {
 					logger.Error("serve: SIGHUP reload failed; serving prior corpus", "err", err)
-					alerter.Alert(ctx, "serve-reload-failed", fmt.Sprintf("SIGHUP reload failed, still serving prior corpus: %v", err))
+					alerter.Alert(reloadCtx, "serve-reload-failed", fmt.Sprintf("SIGHUP reload failed, still serving prior corpus: %v", err))
 					continue
 				}
 				handler.SetRecordCount(rn)
@@ -389,6 +408,7 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 			}
 		}
 	}()
+	defer func() { stopReload(); reloadWG.Wait() }()
 
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {

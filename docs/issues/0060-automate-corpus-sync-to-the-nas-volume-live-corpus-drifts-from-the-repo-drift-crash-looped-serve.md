@@ -56,3 +56,14 @@ prior good index serving + alerts (`serve-reload-failed`), where a restart on a 
 would crash-loop. Guarded by `TestRunServeReloadsCorpusOnSIGHUP` (cmd) and
 `TestReadyzReflectsHotReloadCount` (server). `docker restart` is now a code-deploy action
 only, never a corpus update.
+
+The reload goroutine is drained (`stopReload()` + `WaitGroup.Wait()`) before the deferred
+`ix.Close()`, so a SIGHUP that coincides with shutdown can't run a `Rebuild` on a closed DB.
+
+**Known limitations (dense retrieval only — `-embed-url` is unset in the live deploy, so
+these don't affect production today):** a re-embed after a committed `Rebuild` (a) holds the
+single SQLite writer across synchronous Ollama calls, so concurrent best-effort usage writes
+can hit `busy_timeout` during a large reload, and (b) is bounded only by the serve context.
+A re-embed failure on reload now **degrades dense** (logs `dense retrieval degraded`) instead
+of failing the reload — the committed records stay live and `/readyz` reflects the new count.
+Revisit if/when dense is enabled in production.
