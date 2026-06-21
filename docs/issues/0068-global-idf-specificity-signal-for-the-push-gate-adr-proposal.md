@@ -8,7 +8,7 @@ depends_on: []
 forgejo: 254
 links:
   adr: docs/adr/ADR-0017-global-idf-push-gate-specificity.md
-  prs: []
+  prs: [270]
   issues: [0064, 0005]
   regression:
 assets: []
