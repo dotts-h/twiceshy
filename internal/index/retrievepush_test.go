@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/dotts-h/twiceshy/internal/index"
+	"github.com/dotts-h/twiceshy/internal/record"
 )
 
 // pushOffTopic prompts must inject NOTHING: their content tokens are either
@@ -79,22 +80,105 @@ func TestRetrievePushPrecisionRecall(t *testing.T) {
 	}
 }
 
-// TestRetrievePushExcludesQuarantined pins two invariants at once: quarantined
-// records never reach the push channel, and document-frequency is counted over
-// VALIDATED records only — so a token living only in a quarantined OSV advisory
-// is non-discriminative and injects nothing. The query targets a record that
-// STAYS quarantined (exp-0010 libheif, an importer-bug reject — #0061), so the
-// test is stable when other advisories get promoted to validated.
+// TestRetrievePushExcludesQuarantined pins two invariants: quarantined records
+// never reach the push channel, and document-frequency is counted over VALIDATED
+// records only — so a discriminative token living only in a quarantined record is
+// non-discriminative (df=0 over validated) and injects nothing.
+//
+// It runs against a CONTROLLED fixture, not the live corpus. The previous version
+// targeted a real record (exp-0010 libheif) assuming it would "stay quarantined",
+// but the autonomous panel correctly promoted it to validated — and a test coupled
+// to mutable corpus state then silently blocked every promotion batch from merging.
 func TestRetrievePushExcludesQuarantined(t *testing.T) {
-	ix := openIndex(t, corpus(t))
-	hits, err := ix.RetrievePush(context.Background(), index.Query{Text: "libheif strukturag heif image vulnerability"})
+	q := mustParseFixture(t, "experience/2099/9001-zqx-quarantined-fixture.md", quarantinedFixtureMD)
+	v := mustParseFixture(t, "experience/2099/9002-zqx-validated-fixture.md", validatedFixtureMD)
+	ix := openIndex(t, []*record.Record{q, v})
+	// "zqxbarnaclium" lives ONLY in the quarantined record: rare enough to clear the
+	// discriminative gate if it were validated, yet it must inject nothing because
+	// push excludes quarantined records and counts df over validated only.
+	hits, err := ix.RetrievePush(context.Background(), index.Query{Text: "zqxbarnaclium quarantined fixture vulnerability"})
 	if err != nil {
 		t.Fatalf("RetrievePush: %v", err)
 	}
 	if len(hits) != 0 {
-		t.Errorf("quarantined-only query injected %v, want 0", hitIDs(hits))
+		t.Errorf("a token living only in a quarantined record injected %v, want 0", hitIDs(hits))
 	}
 }
+
+func mustParseFixture(t *testing.T, path, md string) *record.Record {
+	t.Helper()
+	rec, err := record.Parse(path, []byte(md))
+	if err != nil {
+		t.Fatalf("parse fixture %s: %v", path, err)
+	}
+	return rec
+}
+
+const quarantinedFixtureMD = `---
+schema_version: 1
+id: exp-9001
+kind: trap
+status: quarantined
+title: 'zqxbarnaclium: quarantined fixture advisory'
+symptom:
+    summary: 'zqxbarnaclium quarantined fixture advisory for the push-exclusion test'
+    error_signatures:
+        - ZQXBARNACLIUM-0001
+applies_to:
+    - ecosystem: Go
+      package: example.com/zqxbarnaclium
+      versions:
+        introduced: "0"
+        fixed: 1.0.0
+resolution:
+    root_cause: Synthetic quarantined record; its zqxbarnaclium token lives nowhere else.
+    fix: Upgrade past the fixed version.
+provenance:
+    source:
+        author: twiceshy-test
+        session: null
+        pr: null
+    recorded_at: "2099-01-01"
+    validated_at: null
+    valid:
+        from: "2099-01-01"
+        until: null
+    source_license: CC-BY-4.0
+    source_url: https://example.com/zqxbarnaclium
+    superseded_by: null
+---
+zqxbarnaclium quarantined fixture advisory body — the distinctive token appears only here.
+`
+
+const validatedFixtureMD = `---
+schema_version: 1
+id: exp-9002
+kind: trap
+status: validated
+title: frobnicatorium validated fixture trap
+symptom:
+    summary: a validated fixture trap with its own frobnicatorium vocabulary
+    error_signatures:
+        - "frobnicatorium-9002"
+applies_to:
+    - ecosystem: Go
+      package: example.com/frobnicatorium
+resolution:
+    root_cause: synthetic validated record so document-frequency has a validated corpus.
+    fix: the validated fix for the frobnicatorium trap.
+guard:
+    guarding_test: "TestFrobnicatoriumFixture"
+provenance:
+    source:
+        author: twiceshy-test
+        session: test
+    recorded_at: "2099-01-01"
+    validated_at: "2099-01-01"
+    valid:
+        from: "2099-01-01"
+---
+A validated fixture record body with the frobnicatorium vocabulary so the index has a validated document.
+`
 
 func hitIDs(hits []index.Hit) []string {
 	out := make([]string, len(hits))
