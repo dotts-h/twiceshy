@@ -111,6 +111,65 @@ func newOSVLiveTestSource(t *testing.T) ingest.Source {
 	}))
 }
 
+// Defect 3 (#0061), the largest transcription-defect class: an advisory with no
+// fixed version (fixed:null) must NOT claim "upgrade past the fixed version" — that
+// fix-text references a version that does not exist, a self-contradiction. Pairs
+// with #0062 (the advisory judge now SEES the contradiction in the prompt).
+func TestOSVLiveSource_NoFixedVersionFixText(t *testing.T) {
+	files := map[string]any{
+		"GO-2020-NOFIX.json": map[string]any{
+			"id":      "GO-2020-NOFIX",
+			"summary": "unfixed advisory",
+			"affected": []map[string]any{{
+				"package": map[string]string{"ecosystem": "Go", "name": "github.com/example/unfixed"},
+				"ranges": []map[string]any{{
+					"type":   "SEMVER",
+					"events": []map[string]string{{"introduced": "0"}}, // no fixed event → fixed:null
+				}},
+			}},
+		},
+		"GO-2020-FIXED.json": map[string]any{
+			"id":      "GO-2020-FIXED",
+			"summary": "fixed advisory",
+			"affected": []map[string]any{{
+				"package": map[string]string{"ecosystem": "Go", "name": "github.com/example/fixed"},
+				"ranges": []map[string]any{{
+					"type":   "SEMVER",
+					"events": []map[string]string{{"introduced": "0"}, {"fixed": "2.0.0"}},
+				}},
+			}},
+		},
+	}
+	src := ingest.NewOSVLiveSource(ingest.WithOSVLiveFetch(func(_ context.Context) (io.ReadCloser, error) {
+		return buildOSVLiveZip(t, files), nil
+	}))
+	drafts, err := src.Drafts(context.Background())
+	if err != nil {
+		t.Fatalf("Drafts: %v", err)
+	}
+	fix := map[string]string{}
+	for _, d := range drafts {
+		if d.Resolution == nil {
+			t.Fatalf("draft %q has no resolution", d.Title)
+		}
+		switch {
+		case strings.Contains(d.Title, "GO-2020-NOFIX"):
+			fix["nofix"] = d.Resolution.Fix
+		case strings.Contains(d.Title, "GO-2020-FIXED"):
+			fix["fixed"] = d.Resolution.Fix
+		}
+	}
+	if strings.Contains(fix["nofix"], "past the fixed version") {
+		t.Errorf("fixed:null advisory must NOT claim a fixed version exists; got %q", fix["nofix"])
+	}
+	if !strings.Contains(strings.ToLower(fix["nofix"]), "no fix") {
+		t.Errorf("fixed:null advisory should say no fix is published; got %q", fix["nofix"])
+	}
+	if !strings.Contains(fix["fixed"], "past the fixed version") {
+		t.Errorf("a fixed advisory should still advise upgrading past the fix; got %q", fix["fixed"])
+	}
+}
+
 func symptomEqual(a, b *record.Symptom) bool {
 	if a == nil && b == nil {
 		return true

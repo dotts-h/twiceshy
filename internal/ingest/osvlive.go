@@ -228,7 +228,7 @@ func mapOSVLiveRecord(rec osvLiveRecord, ecosystem string) (Draft, bool) {
 	title := fmt.Sprintf("%s: vulnerability in %s", rec.ID, primaryPkg)
 	body := osvLiveBody(rec.ID, applies, sourceURL)
 	rootCause := fmt.Sprintf("Known vulnerability documented in OSV advisory %s.", rec.ID)
-	fix := fmt.Sprintf("Upgrade affected packages past the fixed version; see %s.", sourceURL)
+	fix := osvLiveFixText(applies, sourceURL)
 
 	return buildOSVDraft(osvDraftInput{
 		Signatures: sigs,
@@ -240,6 +240,20 @@ func mapOSVLiveRecord(rec osvLiveRecord, ecosystem string) (Draft, bool) {
 		Body:       body,
 		SourceURL:  sourceURL,
 	}), true
+}
+
+// osvLiveFixText renders the remediation. If the advisory publishes a fixed
+// version (any affected range carries one) it advises upgrading past it; if none
+// is published (fixed:null) it must NOT claim a fixed version exists — that
+// "upgrade past the fixed version" boilerplate contradicts the record and is the
+// largest #0061 transcription-defect class (#0062 pairs by making the judge see it).
+func osvLiveFixText(applies []record.AppliesTo, sourceURL string) string {
+	for _, a := range applies {
+		if a.Versions != nil && a.Versions.Fixed != nil {
+			return fmt.Sprintf("Upgrade affected packages past the fixed version; see %s.", sourceURL)
+		}
+	}
+	return fmt.Sprintf("No fix is published yet (the advisory lists no fixed version); see %s for status and mitigations.", sourceURL)
 }
 
 func osvLiveRangeEvents(events []osvLiveEvent) (introduced, fixed string) {
