@@ -22,6 +22,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/dotts-h/twiceshy/internal/index"
+	"github.com/dotts-h/twiceshy/internal/telemetry"
 )
 
 // Version is stamped into the MCP server implementation info.
@@ -57,6 +58,10 @@ type Config struct {
 	// against a live index that has drifted behind the committed corpus (#0059).
 	// Empty falls back to index-only allocation.
 	Corpus string
+	// Telemetry, when set, records per-query gate decisions for /push and
+	// search_experience (#0067) — write-only, off the hot path, never read by
+	// retrieval. nil disables it.
+	Telemetry *telemetry.Recorder
 }
 
 // Tool descriptions are load-bearing: description text alone produces
@@ -103,7 +108,7 @@ func New(cfg Config) (*Server, error) {
 		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	}
 
-	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, corpus: cfg.Corpus}
+	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, corpus: cfg.Corpus, telemetry: cfg.Telemetry}
 	h.recordCount.Store(int64(cfg.RecordCount))
 	h.usage = newUsageRecorder(cfg.Index, logger, time.Now)
 	srv := mcp.NewServer(&mcp.Implementation{
@@ -175,9 +180,10 @@ type handlers struct {
 	repo        string
 	emb         index.Embedder // optional; enables pull-channel dense retrieval
 	logger      *slog.Logger
-	usage       *usageRecorder // records retrieval usage off the latency budget (ADR-0013 §4)
-	reportQueue string         // optional; report_outcome enqueues here for intake-reports (ADR-0013 §E1)
-	corpus      string         // corpus root for robust id allocation against the source of truth (#0059)
+	usage       *usageRecorder      // records retrieval usage off the latency budget (ADR-0013 §4)
+	reportQueue string              // optional; report_outcome enqueues here for intake-reports (ADR-0013 §E1)
+	corpus      string              // corpus root for robust id allocation against the source of truth (#0059)
+	telemetry   *telemetry.Recorder // optional; per-query gate-decision log (#0067)
 }
 
 // SearchArgs is the search_experience input.
@@ -261,6 +267,7 @@ func (h *handlers) search(ctx context.Context, _ *mcp.CallToolRequest, args Sear
 		ids[i] = hit.ID
 	}
 	h.usage.record(ids)
+	h.recordSearchDecision(args.Query, hits)
 	h.logger.Info("tool call",
 		slog.String("tool", tool),
 		slog.String("outcome", "ok"),
@@ -270,6 +277,25 @@ func (h *handlers) search(ctx context.Context, _ *mcp.CallToolRequest, args Sear
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: enveloped}},
 	}, out, nil
+}
+
+// recordSearchDecision logs this query's search decision (#0067): the served
+// records and their scores, for measuring retrieval precision on real traffic.
+// Best-effort and async; the raw query is hashed, never stored. nil recorder = no-op.
+func (h *handlers) recordSearchDecision(query string, hits []index.Hit) {
+	if h.telemetry == nil {
+		return
+	}
+	served := make([]telemetry.ServedHit, len(hits))
+	for i, hit := range hits {
+		served[i] = telemetry.ServedHit{ID: hit.ID, Score: hit.Score}
+	}
+	h.telemetry.Record(telemetry.Decision{
+		Channel:   "search",
+		QueryHash: h.telemetry.Hash(query),
+		Served:    served,
+		Count:     len(hits),
+	})
 }
 
 // GetArgs is the get_experience input.

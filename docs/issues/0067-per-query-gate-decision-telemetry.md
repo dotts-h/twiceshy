@@ -1,14 +1,14 @@
 ---
 id: 0067
 title: Per-query gate-decision telemetry
-status: open
+status: closed
 severity: medium
 group: 0064
 depends_on: []
 forgejo: 253
 links:
   adr: docs/adr/ADR-0015-push-discriminative-term-gate.md
-  prs: []
+  prs: [269]
   issues: [0064, 0005, 0065]
   regression:
 assets: []
@@ -46,6 +46,24 @@ the gate leak?" without manually curl-probing the live endpoint.
 - Redaction strategy that still lets us label relevance offline (a salted hash
   loses the text needed for labeling — may need a short-TTL plaintext window on
   LAN before redaction).
+
+## Decision (resolves the open questions above)
+- **Persistence: an append-only, rotating JSONL log** (`internal/telemetry`), not a
+  SQLite `decisions` table. It is structurally separate from the ranking index — so it
+  *cannot* influence ranking (ADR-0013 §4) — has trivial retention (rotate at
+  `telemetryMaxBytes`, keep one prior generation → bounded to ~2x), appends cheaply off
+  the hot path, and streams for the offline eval (#0005).
+- **Redaction: retrieval tokens + a salted query hash; the raw query is never persisted.**
+  Push records the discriminative gate tokens (already stopword/ecosystem-filtered) +
+  the fingerprint-bypass flag; search records served ids+scores. The salt defaults to the
+  bearer token (a per-deployment secret) so a hash can't be dictionary-attacked. Tokens +
+  served ids are enough to label relevance offline — no plaintext window needed.
+- **Capture seam: the server handlers**, via `Index.RetrievePushTraced` (the gate decision
+  exposed with no extra hot-path work; `RetrievePush` is now a thin wrapper). Writes are
+  async + best-effort (a single writer, drop-on-overload), so telemetry never slows serving.
+- **Enablement: opt-in** via `serve -telemetry-log <path>`. Enabling it on the live serve
+  unit is the ops step that starts collection; #0005 consumes the log for real-traffic
+  precision/recall.
 
 ## Notes
 Foundational child of epic #0064 — suggested build-first. Directly unblocks the

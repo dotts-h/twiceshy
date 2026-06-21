@@ -57,6 +57,7 @@ import (
 	"github.com/dotts-h/twiceshy/internal/repro"
 	"github.com/dotts-h/twiceshy/internal/server"
 	"github.com/dotts-h/twiceshy/internal/spool"
+	"github.com/dotts-h/twiceshy/internal/telemetry"
 )
 
 // errUsage marks a flag parse error whose specifics the flag package already
@@ -344,11 +345,16 @@ func runIndex(ctx context.Context, args []string, out io.Writer) error {
 	return nil
 }
 
+// telemetryMaxBytes caps the active gate-decision log before it rotates (#0067);
+// one prior generation is kept, so on-disk telemetry is bounded to ~2x this.
+const telemetryMaxBytes = 64 << 20 // 64 MiB
+
 func runServe(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	c := addCommonFlags(fs)
 	addr := fs.String("addr", ":8722", "listen address")
 	reportQueue := fs.String("report-queue", "", "directory report_outcome enqueues outcome reports into for `intake-reports` to materialize (ADR-0013 §E1); empty = legacy markdown-to-PR")
+	telemetryLog := fs.String("telemetry-log", "", "append per-query gate-decision telemetry to this rotating JSONL file (#0067); empty = disabled")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -370,7 +376,24 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 	}
 	defer func() { _ = ix.Close() }()
 
-	handler, err := server.New(server.Config{Index: ix, RecordCount: n, Token: token, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue, Logger: logger, Corpus: c.corpus})
+	// Per-query gate-decision telemetry (#0067): opt-in via -telemetry-log. Salt the
+	// query hash with the bearer token (a per-deployment secret) unless overridden,
+	// so a hash can't be dictionary-attacked. Off the hot path; closed on shutdown.
+	var tele *telemetry.Recorder
+	if *telemetryLog != "" {
+		salt := getenv("TWICESHY_TELEMETRY_SALT")
+		if salt == "" {
+			salt = token
+		}
+		tele, err = telemetry.NewRecorder(telemetry.Config{Path: *telemetryLog, MaxBytes: telemetryMaxBytes, Salt: []byte(salt), Log: logger})
+		if err != nil {
+			alerter.Alert(ctx, "serve-fatal", fmt.Sprintf("telemetry init failed: %v", err))
+			return err
+		}
+		defer func() { _ = tele.Close() }()
+	}
+
+	handler, err := server.New(server.Config{Index: ix, RecordCount: n, Token: token, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue, Logger: logger, Corpus: c.corpus, Telemetry: tele})
 	if err != nil {
 		alerter.Alert(ctx, "serve-fatal", fmt.Sprintf("serve could not build the handler: %v", err))
 		return err
