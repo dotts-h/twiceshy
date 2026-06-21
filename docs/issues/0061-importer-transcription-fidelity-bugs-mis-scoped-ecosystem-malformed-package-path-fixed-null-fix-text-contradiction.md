@@ -8,7 +8,7 @@ depends_on: []
 forgejo: 188
 links:
   adr: ADR-0016
-  prs: []
+  prs: [272]
   issues: []
   regression:
 assets: []
@@ -84,6 +84,25 @@ classes above; the other **66 were approved + promoted**. This supersedes the
 earlier 7-record Sonnet/Haiku A/B. One reclassification from that A/B: **exp-0032
 is a genuine bug** (fabricated `/v2`), not a Sonnet over-rejection; only **exp-0009**
 (OliveTin's calendar-versioned `3000.10.2`) remains a correct approve.
+
+## Progress
+
+- [x] **Defect 3 — `fixed: null` + contradictory fix-text** (the largest class, 10
+      records). Fixed: `osvLiveFixText` (`internal/ingest/osvlive.go`) renders
+      "upgrade past the fixed version" only when an affected range carries a fixed
+      version, else "no fix is published yet". Guard:
+      `internal/ingest/osvlive_test.go::TestOSVLiveSource_NoFixedVersionFixText`.
+      Dogfooded as exp-0745. Pairs with #0062 (the judge side). *(This PR.)*
+- [ ] **Defect 1 — ecosystem mislabel** (non-Go package labeled `ecosystem: Go`).
+- [ ] **Defect 2 — malformed package path** (`https://` URL as the package).
+- [ ] **Defect 4 — `source_url`/advisory-id mismatch** (the most severe — the link
+      leads to a different vuln; cross-check the cited URL's id against the record's).
+- [ ] **Defect 5 — Go major-version-suffix / case errors** (fabricated/missing
+      `/vN`, uppercase module paths).
+
+Issue stays **open** for Defects 1, 2, 4, 5 (importer ecosystem/package
+normalization + the source_url cross-check). The records already mis-transcribed are
+held by the ADR-0016 panel, not served; this fixes the importer so new ones are clean.
 
 ## Notes
 
