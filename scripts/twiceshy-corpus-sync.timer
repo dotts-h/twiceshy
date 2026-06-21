@@ -1,0 +1,10 @@
+[Unit]
+Description=twiceshy corpus sync heartbeat (mirror main experience/ to the NAS volume, issue 0060)
+
+[Timer]
+OnCalendar=*:0/30
+RandomizedDelaySec=2m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
