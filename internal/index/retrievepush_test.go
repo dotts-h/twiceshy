@@ -4,6 +4,7 @@ package index_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/dotts-h/twiceshy/internal/index"
@@ -77,6 +78,49 @@ func TestRetrievePushPrecisionRecall(t *testing.T) {
 			t.Errorf("on-topic %q -> %v, noise %s must be absent", c.query, got, c.absent)
 		}
 	}
+}
+
+// RetrievePushTraced exposes the gate decision for telemetry (#0067) without
+// changing what RetrievePush serves: the discriminative tokens that opened the
+// gate and the served hits. Off-topic queries leave the decision empty.
+func TestRetrievePushTraced(t *testing.T) {
+	ix := openIndex(t, corpus(t))
+	ctx := context.Background()
+
+	t.Run("discriminative query records its gate tokens + served hits", func(t *testing.T) {
+		const q = "bm25 negative scores" // not an exact signature → discriminative path
+		d, err := ix.RetrievePushTraced(ctx, index.Query{Text: q})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.FingerprintBypass {
+			t.Error("a non-signature query must not record a fingerprint bypass")
+		}
+		if !slices.Contains(d.Discriminative, "bm25") {
+			t.Errorf("gate tokens should include the discriminative term: %v", d.Discriminative)
+		}
+		if !hasID(hitIDs(d.Served), "exp-0002") {
+			t.Errorf("served should include exp-0002: %v", hitIDs(d.Served))
+		}
+		// The trace must serve EXACTLY what RetrievePush serves — no behavioral drift.
+		plain, err := ix.RetrievePush(ctx, index.Query{Text: q})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(plain) != len(d.Served) {
+			t.Errorf("wrapper drift: RetrievePush served %d, traced served %d", len(plain), len(d.Served))
+		}
+	})
+
+	t.Run("off-topic query records an empty decision", func(t *testing.T) {
+		d, err := ix.RetrievePushTraced(ctx, index.Query{Text: "write a haiku about cats"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.FingerprintBypass || len(d.Discriminative) != 0 || len(d.Served) != 0 {
+			t.Errorf("off-topic must be an empty decision: %+v", d)
+		}
+	})
 }
 
 // TestRetrievePushExcludesQuarantined pins two invariants at once: quarantined

@@ -402,30 +402,49 @@ func (ix *Index) Retrieve(ctx context.Context, q Query) ([]Hit, error) {
 // signature) always bypasses the gate: it is real context by construction.
 // Embedding-free; quarantined records are never surfaced (ADR-0001 §4, §6).
 func (ix *Index) RetrievePush(ctx context.Context, q Query) ([]Hit, error) {
+	d, err := ix.RetrievePushTraced(ctx, q)
+	return d.Served, err
+}
+
+// PushDecision is the gate decision RetrievePushTraced makes, for per-query
+// telemetry (#0067): which path the gate took and what it served. It is a
+// read-only trace — recording it can never influence ranking (ADR-0013 §4).
+type PushDecision struct {
+	FingerprintBypass bool     // a deterministic stack match bypassed the discriminative gate
+	Discriminative    []string // the gate-passing tokens; empty means the gate stayed closed
+	Served            []Hit
+}
+
+// RetrievePushTraced is RetrievePush with the gate decision exposed. The logic is
+// identical to RetrievePush — it just returns what the gate did alongside the
+// served hits, computed on the same single pass (no extra work on the hot path).
+func (ix *Index) RetrievePushTraced(ctx context.Context, q Query) (PushDecision, error) {
 	q.IncludeQuarantined = false // push never surfaces quarantined records
 
 	// 1) fingerprint-exact bypass — a deterministic match is always real context.
 	if fp, err := ix.fingerprintHits(ctx, q, MaxK); err != nil {
-		return nil, err
+		return PushDecision{}, err
 	} else if len(fp) > 0 {
 		q.Floor = pushFloor
-		return ix.Retrieve(ctx, q)
+		served, err := ix.Retrieve(ctx, q)
+		return PushDecision{FingerprintBypass: true, Served: served}, err
 	}
 
 	// 2) discriminative-token precondition.
 	disc, err := ix.discriminativeTokens(ctx, q.Text)
 	if err != nil {
-		return nil, err
+		return PushDecision{}, err
 	}
 	if len(disc) == 0 {
-		return nil, nil // generic / off-topic -> inject nothing ("empty is an answer")
+		return PushDecision{}, nil // generic / off-topic -> inject nothing ("empty is an answer")
 	}
 
 	// 3) retrieve + floor on the discriminative subset only.
 	pq := q
 	pq.Text = strings.Join(disc, " ")
 	pq.Floor = pushFloor
-	return ix.Retrieve(ctx, pq)
+	served, err := ix.Retrieve(ctx, pq)
+	return PushDecision{Discriminative: disc, Served: served}, err
 }
 
 // discriminativeTokens returns the query's content tokens (lowercased, alnum,

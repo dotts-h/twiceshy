@@ -85,5 +85,5 @@ never a cycle).
 | [0064](0064-epic-agent-native-feedback-loop-capture-submit-measure.md) | Epic: Agent-native feedback loop — capture, submit, measure | open | high | — | |
 | [0065](0065-session-retro-capture-hook-automatic-trap-submission-at-the-lifecycle-seam.md) | Session-retro capture hook — automatic trap submission at the lifecycle seam | open | high | 0064 | |
 | [0066](0066-agent-issue-submission-tool-report-issue-intake.md) | Agent issue-submission tool (report_issue) + intake | open | medium | 0064 | |
-| [0067](0067-per-query-gate-decision-telemetry.md) | Per-query gate-decision telemetry | open | medium | 0064 | |
+| [0067](0067-per-query-gate-decision-telemetry.md) | Per-query gate-decision telemetry | closed | medium | 0064 | |
 | [0068](0068-global-idf-specificity-signal-for-the-push-gate-adr-proposal.md) | Global-IDF specificity signal for the push gate (ADR proposal) | open | medium | 0064 | |

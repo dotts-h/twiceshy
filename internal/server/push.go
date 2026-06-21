@@ -14,6 +14,7 @@ import (
 
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/record"
+	"github.com/dotts-h/twiceshy/internal/telemetry"
 )
 
 // PushArgs is the POST /push request body.
@@ -61,10 +62,10 @@ func (h *handlers) pushHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	// Push channel: embedding-free retrieval only (ADR-0001 §4). RetrievePush
-	// applies the discriminative-token gate so off-topic prompts inject nothing,
-	// and never surfaces quarantined records.
-	hits, err := h.ix.RetrievePush(ctx, index.Query{
+	// Push channel: embedding-free retrieval only (ADR-0001 §4). RetrievePushTraced
+	// applies the discriminative-token gate so off-topic prompts inject nothing, and
+	// never surfaces quarantined records; its trace feeds per-query telemetry (#0067).
+	decision, err := h.ix.RetrievePushTraced(ctx, index.Query{
 		Text:      args.Query,
 		Repo:      h.repo,
 		Ecosystem: args.Ecosystem,
@@ -81,9 +82,9 @@ func (h *handlers) pushHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cards := make([]string, 0, len(hits))
-	ids := make([]string, 0, len(hits))
-	for _, hit := range hits {
+	cards := make([]string, 0, len(decision.Served))
+	ids := make([]string, 0, len(decision.Served))
+	for _, hit := range decision.Served {
 		stored, err := h.ix.Get(ctx, hit.ID)
 		if err != nil {
 			h.logger.Error("push get failed",
@@ -112,6 +113,7 @@ func (h *handlers) pushHTTP(w http.ResponseWriter, r *http.Request) {
 	// seam pull uses for `retrieved` — closing the feedback loop (#0058): `pushed`
 	// is the denominator a later confirm_helpful (numerator) is measured against.
 	h.usage.recordPush(ids)
+	h.recordPushDecision(args.Query, decision)
 
 	out := PushResult{
 		Count:   len(cards),
@@ -129,4 +131,25 @@ func (h *handlers) pushHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Int64("duration_ms", time.Since(start).Milliseconds()),
 		slog.Int("count", out.Count),
 	)
+}
+
+// recordPushDecision logs this query's push gate decision (#0067): which path the
+// gate took (fingerprint bypass / discriminative tokens) and what it served.
+// Best-effort and async; the raw query is hashed, never stored. nil recorder = no-op.
+func (h *handlers) recordPushDecision(query string, d index.PushDecision) {
+	if h.telemetry == nil {
+		return
+	}
+	served := make([]telemetry.ServedHit, len(d.Served))
+	for i, hit := range d.Served {
+		served[i] = telemetry.ServedHit{ID: hit.ID, Score: hit.Score}
+	}
+	h.telemetry.Record(telemetry.Decision{
+		Channel:           "push",
+		QueryHash:         h.telemetry.Hash(query),
+		Tokens:            d.Discriminative,
+		FingerprintBypass: d.FingerprintBypass,
+		Served:            served,
+		Count:             len(d.Served),
+	})
 }
