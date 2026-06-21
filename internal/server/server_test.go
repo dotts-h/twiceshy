@@ -122,6 +122,49 @@ func TestHealthEndpointsBypassAuthAndReflectReadiness(t *testing.T) {
 	}
 }
 
+// Hot-reload (#0060): a SIGHUP reload rebuilds the index in place and tells the
+// server its new record count via SetRecordCount, so /readyz flips empty→ready
+// without a restart. Guards the readiness seam the reload depends on.
+func TestReadyzReflectsHotReloadCount(t *testing.T) {
+	ix, err := index.Open(filepath.Join(t.TempDir(), "ix.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ix.Close() })
+	if err := ix.Rebuild(context.Background(), nil, testRepo); err != nil {
+		t.Fatal(err)
+	}
+	get := func(ts *httptest.Server, path string) (int, string) {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+
+	srv, err := server.New(server.Config{Index: ix, Token: token, Repo: testRepo, RecordCount: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+
+	if code, _ := get(ts, "/readyz"); code != http.StatusServiceUnavailable {
+		t.Fatalf("/readyz before reload = %d, want 503 (empty corpus)", code)
+	}
+
+	srv.SetRecordCount(7) // a reload found 7 records
+
+	if code, body := get(ts, "/readyz"); code != http.StatusOK || !strings.Contains(body, `"records":7`) {
+		t.Fatalf("/readyz after reload = %d %q, want 200 with records:7", code, body)
+	}
+	if code, body := get(ts, "/healthz"); code != http.StatusOK || !strings.Contains(body, `"records":7`) {
+		t.Fatalf("/healthz after reload = %d %q, want 200 with records:7", code, body)
+	}
+}
+
 func TestNewRequiresIndexAndToken(t *testing.T) {
 	if _, err := server.New(server.Config{Index: nil, Token: "x"}); err == nil {
 		t.Error("nil index must be rejected")

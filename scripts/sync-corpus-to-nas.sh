@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
 # sync-corpus-to-nas.sh — mirror origin/main's experience/ corpus to the twiceshy
-# NAS Docker volume and restart the container ONLY when the corpus changed.
+# NAS Docker volume and hot-reload the running container ONLY when the corpus changed.
 #
 # Why this exists: the server rebuilds its index from /data/corpus on start, but
 # nothing kept that volume in sync with the merged repo. The live corpus drifted
 # (orphan records with colliding ids even crash-looped serve on a restart). This
 # is the missing sync — idempotent, change-gated, fail-safe.
 #
+# Reload, not restart: serve hot-reloads its index in place on SIGHUP (#0060), so
+# this signals the container (`docker kill -s HUP`) instead of restarting it — the
+# listener never drops and a bad corpus can't crash-loop the container (a failed
+# reload keeps the prior good index serving). A restart only happens on a code
+# deploy, never on a corpus update.
+#
 # Change detection: the git tree SHA of experience/ on origin/main (a content
 # hash) is compared to a marker written on the volume; identical => no-op, no
-# restart. The mirror replaces experience/ wholesale (the repo is the source of
+# reload. The mirror replaces experience/ wholesale (the repo is the source of
 # truth, ADR-0001 §1), so orphan/colliding records can never accumulate again.
 #
 # Reads origin/main via `git archive` — never touches a working tree, so it is
@@ -45,7 +51,9 @@ git -C "$REPO" archive --format=tar origin/main experience | ssh_nas \
      printf %s \"$new_sha\" > /data/corpus/.experience-tree-sha &&
      chown -R $NONROOT_UID:$NONROOT_UID /data/corpus'"
 
-# serve rebuilds the index only on start, so a restart is required to pick up the
-# new corpus. Gated on an actual change, so it is rare.
-ssh_nas "docker restart $CONTAINER >/dev/null"
-echo "synced + restarted $CONTAINER at corpus $new_sha"
+# SIGHUP makes serve rebuild its index in place — no restart, no dropped listener
+# (#0060). Gated on an actual change, so it is rare. `docker kill -s HUP` signals
+# the container's PID 1 (the twiceshy binary); the reload installs a SIGHUP handler
+# so the signal triggers a reload instead of being ignored/terminating.
+ssh_nas "docker kill -s HUP $CONTAINER >/dev/null"
+echo "synced + reloaded $CONTAINER at corpus $new_sha"
