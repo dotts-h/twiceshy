@@ -21,16 +21,25 @@ deploy. `govulncheck` + `gitleaks` already run in CI; add the rest.
 ## Scope
 - [ ] **Automated dependency updates:** Renovate (or Dependabot) for `go.mod` →
       PRs that trigger CI (`govulncheck`/tests). Confirm Forgejo support / runner.
-- [ ] **Dogfood OSV/GHSA self-monitoring:** a routine that matches twiceshy's own
-      `go.mod` against the advisory data the importer ingests (#0007) and alerts on
-      a hit (issue/notification). Uses the product on itself.
-- [ ] **PR security checklist:** add to the PR template — new endpoint? auth/input
-      validated? secrets/PII stored? file I/O / path risk? new deps checked? tenant
-      implications (Tier B)?
+      *(Deferred — ops: a Renovate bot adds to an already-busy PR queue (30+ cron
+      PRs); confirm desired + provision a runner/token before enabling.)*
+- [x] **Dogfood OSV/GHSA self-monitoring:** `twiceshy self-audit` (`internal/selfaudit`)
+      matches every module in `go.mod` (direct + indirect) against the ingested
+      vulnerability advisories and exits non-zero on a hit so a timer/CI alerts.
+      Recognizes GHSA/CVE/GO **and MAL-/RUSTSEC-** (broader than `IsAdvisoryClass`,
+      so a malicious package in a dep is not missed).
+- [x] **PR security checklist:** added as `.forgejo/PULL_REQUEST_TEMPLATE.md`.
 - [ ] **SBOM + release signing (P2):** syft/cyclonedx SBOM per release; cosign
-      (Sigstore) signing of binaries/images; verify in the deploy path.
+      (Sigstore) signing of binaries/images; verify in the deploy path. *(P2 — ops.)*
 
 ## Acceptance
-- [ ] Dep-update PRs open automatically and run the gates.
-- [ ] A known-vulnerable dep in twiceshy's own go.mod is surfaced by the dogfood
-      monitor (test with a synthetic advisory).
+- [ ] Dep-update PRs open automatically and run the gates. *(Renovate — deferred, above.)*
+- [x] A known-vulnerable dep in twiceshy's own go.mod is surfaced by the dogfood
+      monitor (test with a synthetic advisory). *(`internal/selfaudit` unit tests +
+      a `cmd/twiceshy` CLI test with an on-disk synthetic GHSA advisory.)*
+
+## Status
+
+The **dogfood monitor** (the testable security core) and the **PR checklist** shipped.
+Issue stays **open** for the two ops/P2 items — Renovate auto-updates (needs an ops
+decision + a runner) and SBOM/signing (P2) — which need infra, not code.
