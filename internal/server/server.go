@@ -30,6 +30,10 @@ const Version = "0.1.0"
 type Config struct {
 	// Index is the derived SQLite index to serve from.
 	Index *index.Index
+	// RecordCount is how many records were indexed at startup. /readyz reports
+	// NOT-ready when it is 0 (an empty corpus = "serving nothing", the failure the
+	// crash-loop outage produced) so an external monitor can page on it.
+	RecordCount int
 	// Token is the bearer token required on every request. Required:
 	// there is no unauthenticated mode (CONVENTIONS.md, Security).
 	Token string
@@ -81,7 +85,7 @@ func New(cfg Config) (http.Handler, error) {
 		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	}
 
-	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue}
+	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, recordCount: cfg.RecordCount}
 	h.usage = newUsageRecorder(cfg.Index, logger, time.Now)
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "twiceshy",
@@ -109,11 +113,45 @@ func New(cfg Config) (http.Handler, error) {
 	hardened := withRateLimit(logger, limiter,
 		withTimeout(requestTimeout,
 			withMaxBytes(maxRequestBytes, mux)))
-	return withRequestLog(logger, bearerAuth(logger, cfg.Token, hardened)), nil
+	authed := withRequestLog(logger, bearerAuth(logger, cfg.Token, hardened))
+
+	// Health probes bypass auth + rate-limit so a container HEALTHCHECK and an
+	// external uptime monitor can reach them unauthenticated: /healthz = liveness
+	// (the process is up and serving), /readyz = readiness (the index is non-empty;
+	// NOT-ready on an empty corpus = "serving nothing"). Their absence is what made
+	// the 5h crash-loop outage invisible.
+	outer := http.NewServeMux()
+	outer.HandleFunc("/healthz", h.healthz)
+	outer.HandleFunc("/readyz", h.readyz)
+	outer.Handle("/", authed)
+	return outer, nil
+}
+
+// healthz is liveness: 200 as long as the process serves HTTP. Unauthenticated,
+// no index work — a probe that pages only when the process is truly down.
+func (h *handlers) healthz(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprintf(w, `{"status":"ok","records":%d}`+"\n", h.recordCount)
+}
+
+// readyz is readiness: 200 only when the index has records, else 503. An empty
+// corpus means the server is up but serving nothing — the exact silent-failure
+// the outage produced — so it must read as NOT-ready to an external monitor.
+func (h *handlers) readyz(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if h.recordCount <= 0 {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = fmt.Fprint(w, `{"status":"empty","records":0}`+"\n")
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprintf(w, `{"status":"ready","records":%d}`+"\n", h.recordCount)
 }
 
 type handlers struct {
 	ix          *index.Index
+	recordCount int // records indexed at startup; drives /healthz + /readyz
 	repo        string
 	emb         index.Embedder // optional; enables pull-channel dense retrieval
 	logger      *slog.Logger

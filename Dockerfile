@@ -20,6 +20,11 @@ COPY --from=build /out/twiceshy /usr/local/bin/twiceshy
 # /data is writable by the nonroot user via the volume mount.
 ENV TWICESHY_DB=/data/twiceshy.db
 EXPOSE 8722
+# Liveness probe: the binary probes its own /healthz (distroless has no curl), so a
+# crash-loop / failed-to-come-up serve goes unhealthy instead of looking "running".
+# start-period covers the index rebuild on a large corpus.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+	CMD ["/usr/local/bin/twiceshy", "healthcheck"]
 # TWICESHY_TOKEN must be supplied at runtime (no unauthenticated mode).
 # serve rebuilds the index from the mounted corpus on start, then serves MCP.
 ENTRYPOINT ["twiceshy"]

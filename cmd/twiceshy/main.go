@@ -190,13 +190,15 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|ingest|draft|promote|repromote|adapt|intake-reports|report|pack|doctor|eval|usage-flush|gold-add|judge-eval> [flags]")
+		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|draft|promote|repromote|adapt|intake-reports|report|pack|doctor|eval|usage-flush|gold-add|judge-eval> [flags]")
 	}
 	switch args[0] {
 	case "index":
 		return runIndex(ctx, args[1:], out)
 	case "serve":
 		return runServe(ctx, args[1:], out, getenv)
+	case "healthcheck":
+		return runHealthcheck(ctx, args[1:], out)
 	case "pack":
 		return runPack(args[1:], out)
 	case "ingest":
@@ -224,7 +226,7 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	case "judge-eval":
 		return runJudgeEval(ctx, args[1:], out, getenv)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, ingest, draft, promote, repromote, adapt, intake-reports, report, pack, doctor, eval, usage-flush, gold-add, or judge-eval)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, draft, promote, repromote, adapt, intake-reports, report, pack, doctor, eval, usage-flush, gold-add, or judge-eval)", args[0])
 	}
 }
 
@@ -331,14 +333,22 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 		return errors.New("TWICESHY_TOKEN must be set; the server has no unauthenticated mode")
 	}
 
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	// A fatal serve exit (the crash-loop cause: a corpus the index can't build, a
+	// bind failure) fires to TWICESHY_ALERT_URL so a restart loop is never silent
+	// again; unset = no-op. Pairs with the /healthz + /readyz probes.
+	alerter := notify.New(getenv("TWICESHY_ALERT_URL"), logger)
+
 	ix, n, err := buildIndex(ctx, c, true) // serve = tolerant reader: one bad record never crash-loops the service
 	if err != nil {
+		alerter.Alert(ctx, "serve-fatal", fmt.Sprintf("serve could not build the index: %v", err))
 		return err
 	}
 	defer func() { _ = ix.Close() }()
 
-	handler, err := server.New(server.Config{Index: ix, Token: token, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue})
+	handler, err := server.New(server.Config{Index: ix, RecordCount: n, Token: token, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue, Logger: logger})
 	if err != nil {
+		alerter.Alert(ctx, "serve-fatal", fmt.Sprintf("serve could not build the handler: %v", err))
 		return err
 	}
 
@@ -362,8 +372,43 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 	if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+		alerter.Alert(ctx, "serve-fatal", fmt.Sprintf("serve exited unexpectedly: %v", err))
 		return err
 	}
+	return nil
+}
+
+// runHealthcheck is the container HEALTHCHECK / external-probe entrypoint: it GETs
+// /healthz on the local serve port and exits non-zero if it is not 200. Distroless
+// has no curl, so the binary probes itself; this is what lets Docker detect the
+// crash-loop the 5h outage hid.
+func runHealthcheck(ctx context.Context, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("healthcheck", flag.ContinueOnError)
+	addr := fs.String("addr", ":8722", "serve address to probe (host optional; defaults to 127.0.0.1)")
+	path := fs.String("path", "/healthz", "health path to probe (/healthz or /readyz)")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	host := *addr
+	if strings.HasPrefix(host, ":") {
+		host = "127.0.0.1" + host
+	}
+	url := "http://" + host + *path
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("healthcheck: %s unreachable: %w", url, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("healthcheck: %s returned HTTP %d", url, resp.StatusCode)
+	}
+	_, _ = fmt.Fprintln(out, "ok")
 	return nil
 }
 
