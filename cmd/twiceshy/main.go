@@ -368,7 +368,7 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 	}
 	defer func() { _ = ix.Close() }()
 
-	handler, err := server.New(server.Config{Index: ix, RecordCount: n, Token: token, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue, Logger: logger})
+	handler, err := server.New(server.Config{Index: ix, RecordCount: n, Token: token, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue, Logger: logger, Corpus: c.corpus})
 	if err != nil {
 		alerter.Alert(ctx, "serve-fatal", fmt.Sprintf("serve could not build the handler: %v", err))
 		return err
@@ -524,7 +524,7 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 
-	id, err := ix.NextID(ctx)
+	id, err := ingest.NextID(ctx, ix, c.corpus)
 	if err != nil {
 		return err
 	}
