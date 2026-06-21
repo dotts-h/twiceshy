@@ -1,14 +1,14 @@
 ---
 id: 0026
 title: Repro test-gen pipeline — drafter to broker-gate to attach (ADR-0011 section 8)
-status: in-progress
+status: closed
 severity: high
 group: 0015
 depends_on: [0020]
 forgejo: 116
 links:
   adr:
-  prs: []
+  prs: [265]
   issues: []
   regression:
 assets: []
