@@ -1,0 +1,11 @@
+[Unit]
+Description=twiceshy corpus sync — mirror origin/main experience/ to the NAS volume (issue 0060)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ori
+Environment=PATH=/home/ori/.local/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
+Environment=TWICESHY_REPO=/home/ori/twiceshy-import
+ExecStart=/home/ori/twiceshy-import/scripts/sync-corpus-to-nas.sh

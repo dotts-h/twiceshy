@@ -1,7 +1,7 @@
 ---
 id: 0060
 title: Automate corpus sync to the NAS volume (live corpus drifts from the repo; drift crash-looped serve)
-status: in-progress
+status: closed
 severity: high
 group: 0008
 depends_on: []
