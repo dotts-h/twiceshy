@@ -4,10 +4,14 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -107,12 +111,95 @@ func TestSearchEmptyResultRecordsNoUsage(t *testing.T) {
 	}
 }
 
+// TestPushRecordsImpression closes the push feedback loop end-to-end: a push that
+// injects a card bumps the `pushed` impression counter for that record (off the
+// latency budget), distinct from the pull `retrieved` counter, and a push that
+// injects nothing records no impression.
+func TestPushRecordsImpression(t *testing.T) {
+	ctx := context.Background()
+	recs, err := record.LoadCorpus("../..")
+	if err != nil {
+		t.Fatalf("LoadCorpus: %v", err)
+	}
+	ix, err := index.Open(filepath.Join(t.TempDir(), "ix.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ix.Close() })
+	if err := ix.Rebuild(ctx, recs, usageTestRepo); err != nil {
+		t.Fatal(err)
+	}
+	logger := quietLogger()
+	h := &handlers{ix: ix, repo: usageTestRepo, logger: logger}
+	h.usage = newUsageRecorder(ix, logger, fixedClock)
+
+	push := func(query string) PushResult {
+		body := strings.NewReader(`{"query":` + jsonString(query) + `}`)
+		req := httptest.NewRequest(http.MethodPost, "/push", body)
+		rec := httptest.NewRecorder()
+		h.pushHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("push %q: status %d, body %s", query, rec.Code, rec.Body.String())
+		}
+		var out PushResult
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode push result: %v", err)
+		}
+		return out
+	}
+
+	// A strong, on-domain query injects exp-0001 (the FTS5 trap).
+	out := push(`FTS5: syntax error near "."`)
+	hasID := func(ids []string, want string) bool {
+		for _, id := range ids {
+			if id == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasID(out.IDs, "exp-0001") {
+		t.Fatalf("expected exp-0001 injected, got ids=%v count=%d", out.IDs, out.Count)
+	}
+	h.usage.flush()
+
+	u, err := ix.Usage(ctx, "exp-0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Pushed != 1 {
+		t.Fatalf("pushed = %d, want 1 (an injected card's impression must be recorded)", u.Pushed)
+	}
+	if u.Retrieved != 0 {
+		t.Fatalf("retrieved = %d, want 0 (a push impression is not a pull)", u.Retrieved)
+	}
+
+	// An off-domain query injects nothing and records no impression.
+	before, _ := ix.Usage(ctx, "exp-0001")
+	out = push("what is a good birthday gift to buy for my mother")
+	if out.Count != 0 || len(out.IDs) != 0 {
+		t.Fatalf("off-domain push must inject nothing, got count=%d ids=%v", out.Count, out.IDs)
+	}
+	h.usage.flush()
+	after, _ := ix.Usage(ctx, "exp-0001")
+	if after.Pushed != before.Pushed {
+		t.Fatalf("a push that injects nothing must not record an impression: %d -> %d", before.Pushed, after.Pushed)
+	}
+}
+
+// jsonString quotes s as a JSON string literal for the test request body.
+func jsonString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
 // fakeUsageStore records calls and can be primed to fail.
 type fakeUsageStore struct {
-	mu    sync.Mutex
-	calls [][]string
-	dates []string
-	err   error
+	mu        sync.Mutex
+	calls     [][]string
+	dates     []string
+	pushCalls [][]string
+	err       error
 }
 
 func (f *fakeUsageStore) RecordHits(_ context.Context, ids []string, date string) error {
@@ -121,6 +208,40 @@ func (f *fakeUsageStore) RecordHits(_ context.Context, ids []string, date string
 	f.calls = append(f.calls, ids)
 	f.dates = append(f.dates, date)
 	return f.err
+}
+
+func (f *fakeUsageStore) RecordPushes(_ context.Context, ids []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pushCalls = append(f.pushCalls, ids)
+	return f.err
+}
+
+func TestUsageRecorderRecordPushAsync(t *testing.T) {
+	f := &fakeUsageStore{}
+	r := newUsageRecorder(f, quietLogger(), fixedClock)
+	r.recordPush([]string{"exp-1", "exp-2"})
+	r.recordPush(nil)        // no-op
+	r.recordPush([]string{}) // no-op
+	r.flush()
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.pushCalls) != 1 {
+		t.Fatalf("got %d push writes, want 1 (empty lists are no-ops)", len(f.pushCalls))
+	}
+	if got := f.pushCalls[0]; len(got) != 2 || got[0] != "exp-1" {
+		t.Fatalf("recorded push ids = %v, want [exp-1 exp-2]", got)
+	}
+	if len(f.calls) != 0 {
+		t.Fatalf("recordPush must not touch the retrieved counter; got %d hit writes", len(f.calls))
+	}
+}
+
+func TestUsageRecorderRecordPushNilSafe(t *testing.T) {
+	var r *usageRecorder
+	r.recordPush([]string{"exp-1"}) // nil recorder is a no-op, not a panic
+	r.flush()
 }
 
 func TestUsageRecorderAsyncAndDate(t *testing.T) {

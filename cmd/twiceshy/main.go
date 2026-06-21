@@ -1991,7 +1991,7 @@ func usageEqual(a, b *record.Usage) bool {
 	if a == nil || b == nil {
 		return false
 	}
-	if a.Retrieved != b.Retrieved || a.ConfirmedHelpful != b.ConfirmedHelpful {
+	if a.Retrieved != b.Retrieved || a.Pushed != b.Pushed || a.ConfirmedHelpful != b.ConfirmedHelpful {
 		return false
 	}
 	switch {

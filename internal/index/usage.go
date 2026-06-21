@@ -49,6 +49,33 @@ func (ix *Index) RecordHits(ctx context.Context, ids []string, date string) erro
 	return tx.Commit()
 }
 
+// RecordPushes increments `pushed` for each record auto-injected via the push
+// channel (POST /push), in one transaction. Like RecordHits it is off the hot
+// path (the server calls it asynchronously) and a no-op on an empty list. It
+// deliberately does NOT touch `retrieved` or `last_hit`: a push impression is a
+// distinct, weaker signal than a deliberate pull, and `last_hit` stays tied to
+// genuine retrieval so staleness is not muddied by unprompted injections. The
+// closed loop is `pushed` (denominator) vs `confirmed_helpful` (numerator).
+func (ix *Index) RecordPushes(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	tx, err := ix.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("usage: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO usage (record_id, pushed) VALUES (?, 1)
+			 ON CONFLICT(record_id) DO UPDATE SET pushed = pushed + 1`,
+			id); err != nil {
+			return fmt.Errorf("usage: record push %s: %w", id, err)
+		}
+	}
+	return tx.Commit()
+}
+
 // ConfirmHelpful increments `confirmed_helpful` for a record — the positive
 // signal a `report_outcome` (#0031) sets when a served lesson actually worked.
 // It does not touch `retrieved`/`last_hit`.
@@ -71,8 +98,8 @@ func (ix *Index) Usage(ctx context.Context, id string) (record.Usage, error) {
 		lastHit sql.NullString
 	)
 	err := ix.db.QueryRowContext(ctx,
-		`SELECT retrieved, confirmed_helpful, last_hit FROM usage WHERE record_id = ?`, id).
-		Scan(&u.Retrieved, &u.ConfirmedHelpful, &lastHit)
+		`SELECT retrieved, pushed, confirmed_helpful, last_hit FROM usage WHERE record_id = ?`, id).
+		Scan(&u.Retrieved, &u.Pushed, &u.ConfirmedHelpful, &lastHit)
 	if errors.Is(err, sql.ErrNoRows) {
 		return record.Usage{}, nil
 	}
@@ -89,7 +116,7 @@ func (ix *Index) Usage(ctx context.Context, id string) (record.Usage, error) {
 // with no usage row are simply absent from the map.
 func (ix *Index) AllUsage(ctx context.Context) (map[string]record.Usage, error) {
 	rows, err := ix.db.QueryContext(ctx,
-		`SELECT record_id, retrieved, confirmed_helpful, last_hit FROM usage`)
+		`SELECT record_id, retrieved, pushed, confirmed_helpful, last_hit FROM usage`)
 	if err != nil {
 		return nil, fmt.Errorf("usage: list: %w", err)
 	}
@@ -102,7 +129,7 @@ func (ix *Index) AllUsage(ctx context.Context) (map[string]record.Usage, error) 
 			u       record.Usage
 			lastHit sql.NullString
 		)
-		if err := rows.Scan(&id, &u.Retrieved, &u.ConfirmedHelpful, &lastHit); err != nil {
+		if err := rows.Scan(&id, &u.Retrieved, &u.Pushed, &u.ConfirmedHelpful, &lastHit); err != nil {
 			return nil, fmt.Errorf("usage: scan: %w", err)
 		}
 		if lastHit.Valid {

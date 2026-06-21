@@ -108,6 +108,20 @@ func TestPushReturnsTrapCardsOnStrongMatch(t *testing.T) {
 	if countRealEndDelimiters(out.Context) != 1 {
 		t.Fatalf("want exactly one end delimiter in context, got %d", countRealEndDelimiters(out.Context))
 	}
+	// The response exposes the injected ids so a client can close the feedback
+	// loop (confirm_helpful / report_outcome on a pushed card).
+	if len(out.IDs) == 0 || !contains(out.IDs, "exp-0001") {
+		t.Errorf("response must list injected ids including exp-0001, got %v", out.IDs)
+	}
+}
+
+func contains(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestPushWeakMatchReturnsEmpty(t *testing.T) {
