@@ -82,3 +82,8 @@ never a cycle).
 | [0061](0061-importer-transcription-fidelity-bugs-mis-scoped-ecosystem-malformed-package-path-fixed-null-fix-text-contradiction.md) | Importer transcription-fidelity bugs: mis-scoped ecosystem, malformed package path, fixed-null fix-text contradiction | open | medium | — | |
 | [0062](0062-buildadvisoryprompt-omits-fixed-null-line-cheap-advisory-judge-can-t-catch-the-largest-0061-defect-class.md) | BuildAdvisoryPrompt omits fixed:null line — cheap advisory judge can't catch the largest #0061 defect class | open | medium | 0015 | |
 | [0063](0063-judgeeval-lacks-advisory-prompt-routing-can-t-measure-cheap-judges-on-the-sonnet-advisory-gold-set.md) | judgeeval lacks advisory-prompt routing — can't measure cheap judges on the Sonnet advisory gold-set | open | medium | 0015 | |
+| [0064](0064-epic-agent-native-feedback-loop-capture-submit-measure.md) | Epic: Agent-native feedback loop — capture, submit, measure | open | high | — | |
+| [0065](0065-session-retro-capture-hook-automatic-trap-submission-at-the-lifecycle-seam.md) | Session-retro capture hook — automatic trap submission at the lifecycle seam | open | high | 0064 | |
+| [0066](0066-agent-issue-submission-tool-report-issue-intake.md) | Agent issue-submission tool (report_issue) + intake | open | medium | 0064 | |
+| [0067](0067-per-query-gate-decision-telemetry.md) | Per-query gate-decision telemetry | open | medium | 0064 | |
+| [0068](0068-global-idf-specificity-signal-for-the-push-gate-adr-proposal.md) | Global-IDF specificity signal for the push gate (ADR proposal) | open | medium | 0064 | |
