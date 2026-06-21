@@ -258,9 +258,30 @@ func embedderFor(c *commonFlags) index.Embedder {
 // buildIndex loads + validates the corpus and rebuilds the derived index.
 // Rebuild-on-start keeps the index trivially consistent with the records —
 // the index is never the source of truth.
-func buildIndex(ctx context.Context, c *commonFlags) (*index.Index, int, error) {
-	recs, err := record.LoadCorpus(c.corpus)
-	if err != nil {
+// buildIndex loads the corpus and rebuilds the derived index. When resilient is
+// set (the long-running serve read path), it loads with the tolerant reader
+// (LoadCorpusForServe): an additive unknown field or a single unparseable record is
+// logged + skipped, never fatal — a server must stay up and serve the good records,
+// not crash-loop on one it cannot parse (#0064). One-shot commands (index, etc.)
+// pass false: strict load, fail loud, the operator/CI sees it.
+func buildIndex(ctx context.Context, c *commonFlags, resilient bool) (*index.Index, int, error) {
+	var (
+		recs []*record.Record
+		err  error
+	)
+	if resilient {
+		var skipped []string
+		recs, skipped, err = record.LoadCorpusForServe(c.corpus)
+		if err != nil {
+			return nil, 0, fmt.Errorf("loading corpus: %w", err)
+		}
+		for _, s := range skipped {
+			slog.Warn("serve: skipped an unloadable record, serving the rest", "record", s)
+		}
+		if len(skipped) > 0 {
+			slog.Warn("serve: corpus had unloadable records", "skipped", len(skipped))
+		}
+	} else if recs, err = record.LoadCorpus(c.corpus); err != nil {
 		return nil, 0, fmt.Errorf("loading corpus: %w", err)
 	}
 	ix, err := index.Open(c.db)
@@ -288,7 +309,7 @@ func runIndex(ctx context.Context, args []string, out io.Writer) error {
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	ix, n, err := buildIndex(ctx, c)
+	ix, n, err := buildIndex(ctx, c, false) // one-shot index build: strict, fail loud for the operator/CI
 	if err != nil {
 		return err
 	}
@@ -310,7 +331,7 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 		return errors.New("TWICESHY_TOKEN must be set; the server has no unauthenticated mode")
 	}
 
-	ix, n, err := buildIndex(ctx, c)
+	ix, n, err := buildIndex(ctx, c, true) // serve = tolerant reader: one bad record never crash-loops the service
 	if err != nil {
 		return err
 	}
@@ -347,7 +368,7 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 }
 
 // importSource resolves a CLI source selector to its adapter.
-func importSource(name string) (ingest.Source, error) {
+func importSource(name, ecosystem string) (ingest.Source, error) {
 	switch name {
 	case "go":
 		return ingest.NewGoSource(), nil
@@ -356,7 +377,9 @@ func importSource(name string) (ingest.Source, error) {
 	case "py":
 		return ingest.NewPySource(), nil
 	case "osv-live":
-		return ingest.NewOSVLiveSource(), nil
+		// ecosystem ("" ignored → Go) lets one importer cover a whole stack:
+		// npm (React/React Native), PyPI (Python), Go — one run per ecosystem.
+		return ingest.NewOSVLiveSource(ingest.WithEcosystem(ecosystem)), nil
 	default:
 		return nil, fmt.Errorf("unknown ingest source %q (want: go, osv, osv-live, py)", name)
 	}
@@ -373,20 +396,21 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) < 1 {
 		return errors.New("usage: twiceshy ingest <source> [flags] (sources: go, osv, osv-live, py)")
 	}
-	src, err := importSource(args[0])
-	if err != nil {
-		return err
-	}
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	c := addCommonFlags(fs)
 	dryRun := fs.Bool("dry-run", false, "classify and report, but write no files")
 	limit := fs.Int("limit", 0, "max new records to write this run (0 = unlimited); bounds a scheduled import")
 	author := fs.String("author", "twiceshy-importer", "provenance author recorded on imported records")
+	ecosystem := fs.String("ecosystem", "", "OSV ecosystem for osv-live (e.g. npm, PyPI, Go); empty = Go")
 	if err := parseFlags(fs, args[1:]); err != nil {
 		return err
 	}
+	src, err := importSource(args[0], *ecosystem)
+	if err != nil {
+		return err
+	}
 
-	ix, _, err := buildIndex(ctx, c)
+	ix, _, err := buildIndex(ctx, c, false)
 	if err != nil {
 		return err
 	}

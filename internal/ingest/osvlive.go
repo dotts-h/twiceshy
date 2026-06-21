@@ -17,51 +17,77 @@ import (
 	"github.com/dotts-h/twiceshy/internal/record"
 )
 
-const osvLiveExportURL = "https://osv-vulnerabilities.storage.googleapis.com/Go/all.zip"
+const (
+	osvLiveExportBase       = "https://osv-vulnerabilities.storage.googleapis.com"
+	defaultOSVLiveEcosystem = "Go"
+)
 
-// OSVLiveSource fetches live Go advisories from osv.dev and emits license-clean,
-// quarantined-record Drafts. Functional identifiers (GO/CVE/GHSA ids, package
-// names, version ranges) are verbatim; all prose is generated in twiceshy's own
-// words (ADR-0003 §4, ADR-0011 §5/§8).
+// OSVLiveSource fetches live advisories for ONE OSV ecosystem from osv.dev's bulk
+// export and emits license-clean, quarantined-record Drafts. Functional identifiers
+// (GO/CVE/GHSA ids, package names, version ranges) are verbatim; all prose is
+// generated in twiceshy's own words (ADR-0003 §4, ADR-0011 §5/§8). The ecosystem is
+// configurable (WithEcosystem) so the corpus can cover a whole stack — npm for
+// React/React Native, PyPI for Python, Go — by running the importer once per
+// ecosystem.
 type OSVLiveSource struct {
-	fetch func(context.Context) (io.ReadCloser, error)
+	ecosystem string
+	fetch     func(context.Context) (io.ReadCloser, error)
 }
 
 // OSVLiveOption configures an OSVLiveSource.
 type OSVLiveOption func(*OSVLiveSource)
 
 // WithOSVLiveFetch overrides the zip fetcher (tests inject a fixture; production
-// uses the default osv.dev Go bulk export).
+// uses the default osv.dev per-ecosystem bulk export).
 func WithOSVLiveFetch(fetch func(context.Context) (io.ReadCloser, error)) OSVLiveOption {
 	return func(s *OSVLiveSource) {
 		s.fetch = fetch
 	}
 }
 
-// NewOSVLiveSource returns a live OSV importer for the Go ecosystem.
+// WithEcosystem sets which OSV ecosystem to import — the exact OSV ecosystem label,
+// which is also the bulk-export path segment (e.g. "npm", "PyPI", "Go"). Default
+// "Go"; an empty value is ignored (keeps the default).
+func WithEcosystem(ecosystem string) OSVLiveOption {
+	return func(s *OSVLiveSource) {
+		if e := strings.TrimSpace(ecosystem); e != "" {
+			s.ecosystem = e
+		}
+	}
+}
+
+// NewOSVLiveSource returns a live OSV importer (default ecosystem Go). The fetcher
+// is built from the FINAL ecosystem after options apply, unless a test injected one.
 func NewOSVLiveSource(opts ...OSVLiveOption) Source {
-	s := &OSVLiveSource{fetch: defaultOSVLiveFetch}
+	s := &OSVLiveSource{ecosystem: defaultOSVLiveEcosystem}
 	for _, opt := range opts {
 		opt(s)
+	}
+	if s.fetch == nil {
+		s.fetch = osvLiveFetcher(s.ecosystem)
 	}
 	return s
 }
 
-func defaultOSVLiveFetch(ctx context.Context) (io.ReadCloser, error) {
-	client := &http.Client{Timeout: 2 * time.Minute}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, osvLiveExportURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("osv-live: build request: %w", err)
+// osvLiveFetcher returns the production fetcher for one ecosystem's bulk export.
+func osvLiveFetcher(ecosystem string) func(context.Context) (io.ReadCloser, error) {
+	url := fmt.Sprintf("%s/%s/all.zip", osvLiveExportBase, ecosystem)
+	return func(ctx context.Context) (io.ReadCloser, error) {
+		client := &http.Client{Timeout: 2 * time.Minute}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("osv-live: build request: %w", err)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("osv-live: fetch export: %w", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			return nil, fmt.Errorf("osv-live: fetch %s: HTTP %d", url, resp.StatusCode)
+		}
+		return resp.Body, nil
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("osv-live: fetch export: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		_ = resp.Body.Close()
-		return nil, fmt.Errorf("osv-live: fetch export: HTTP %d", resp.StatusCode)
-	}
-	return resp.Body, nil
 }
 
 func (s *OSVLiveSource) Name() string { return "osv-live" }
@@ -88,10 +114,10 @@ func (s *OSVLiveSource) Drafts(ctx context.Context) ([]Draft, error) {
 	if err != nil {
 		return nil, fmt.Errorf("osv-live: open zip: %w", err)
 	}
-	return draftsFromZip(zr)
+	return draftsFromZip(zr, s.ecosystem)
 }
 
-func draftsFromZip(zr *zip.Reader) ([]Draft, error) {
+func draftsFromZip(zr *zip.Reader, ecosystem string) ([]Draft, error) {
 	var drafts []Draft
 	for _, f := range zr.File {
 		if f.FileInfo().IsDir() || !strings.HasSuffix(f.Name, ".json") {
@@ -107,7 +133,7 @@ func draftsFromZip(zr *zip.Reader) ([]Draft, error) {
 			return nil, fmt.Errorf("osv-live: decode %q: %w", f.Name, err)
 		}
 		_ = rc.Close()
-		if d, ok := mapOSVLiveRecord(rec); ok {
+		if d, ok := mapOSVLiveRecord(rec, ecosystem); ok {
 			drafts = append(drafts, d)
 		}
 	}
@@ -151,7 +177,7 @@ type osvLiveRef struct {
 	URL  string `json:"url"`
 }
 
-func mapOSVLiveRecord(rec osvLiveRecord) (Draft, bool) {
+func mapOSVLiveRecord(rec osvLiveRecord, ecosystem string) (Draft, bool) {
 	if strings.TrimSpace(rec.Withdrawn) != "" {
 		return Draft{}, false
 	}
@@ -164,7 +190,7 @@ func mapOSVLiveRecord(rec osvLiveRecord) (Draft, bool) {
 	var applies []record.AppliesTo
 	primaryPkg := ""
 	for _, aff := range rec.Affected {
-		if aff.Package.Ecosystem != "Go" {
+		if aff.Package.Ecosystem != ecosystem {
 			continue
 		}
 		if strings.TrimSpace(aff.Package.Name) == "" {
@@ -176,7 +202,7 @@ func mapOSVLiveRecord(rec osvLiveRecord) (Draft, bool) {
 		for _, r := range aff.Ranges {
 			introduced, fixed := osvLiveRangeEvents(r.Events)
 			applies = append(applies, record.AppliesTo{
-				Ecosystem: "Go",
+				Ecosystem: ecosystem,
 				Package:   aff.Package.Name,
 				Versions:  versionRange(introduced, fixed),
 			})

@@ -1,0 +1,23 @@
+[Unit]
+Description=twiceshy sonnet judge shim — advisory-panel second family (ollama+sonnet, ADR-0016)
+Documentation=https://git.radulescu.app/claude/twiceshy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ori
+# claude -p needs HOME (for ~/.claude auth/config) and its bin on PATH.
+Environment=HOME=/home/ori
+Environment=PATH=/home/ori/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=SONNET_MODEL=claude-sonnet-4-6
+Environment=JUDGE_PORT=8725
+Environment=JUDGE_TIMEOUT=90
+Environment=MAX_CONCURRENCY=3
+WorkingDirectory=/tmp
+ExecStart=/usr/bin/python3 /home/ori/work/twiceshy-judge-sonnet/sonnet_judge_shim.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

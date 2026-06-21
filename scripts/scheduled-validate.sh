@@ -43,6 +43,7 @@ GO="${GO:-/usr/local/go/bin/go}"
 JUDGE_URL="${TWICESHY_JUDGE_URL:-}"
 JUDGE_MODEL="${TWICESHY_JUDGE_MODEL:-gpt-oss:20b}"
 DRAFTER_MODEL="${TWICESHY_DRAFTER_MODEL:-qwen2.5-coder}"
+VOTES="${TWICESHY_VOTES:-3}"
 QUEUE="${TWICESHY_REPORT_QUEUE:-}"
 SOAK="${TWICESHY_SOAK_SECONDS:-172800}"
 AUTOMERGE="${TWICESHY_AUTOMERGE:-1}"
@@ -144,7 +145,7 @@ anomaly=0
 # promote (positive direction). Exit 3 = anomaly halt (#0037) — keep going to
 # capture adapt too, but mark the batch for human review (no auto-merge).
 set +e
-"$bin" promote -json -corpus "$REPO" -judge-model "$JUDGE_MODEL" -drafter-model "$DRAFTER_MODEL" >"$REPO/runs/${runid}-promote.json" 2>"$REPO/runs/${runid}-promote.err"
+"$bin" promote -json -corpus "$REPO" -judge-model "$JUDGE_MODEL" -drafter-model "$DRAFTER_MODEL" -votes "$VOTES" >"$REPO/runs/${runid}-promote.json" 2>"$REPO/runs/${runid}-promote.err"
 pc=$?
 set -e
 case "$pc" in

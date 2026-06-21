@@ -26,6 +26,10 @@ set -euo pipefail
 REPO="${TWICESHY_REPO:-/home/ori/twiceshy-import}"  # dedicated clone; never a working checkout
 SOURCE="${TWICESHY_IMPORT_SOURCE:-osv-live}"
 LIMIT="${TWICESHY_IMPORT_LIMIT:-25}"
+# Stack-first ecosystems for osv-live: npm (React + React Native), PyPI (Python),
+# Go — imported each run in this order, then fan out to others. Space-separated;
+# each is an exact OSV ecosystem label. Only used when SOURCE=osv-live.
+ECOSYSTEMS="${TWICESHY_IMPORT_ECOSYSTEMS:-npm PyPI Go}"
 AUTOMERGE="${TWICESHY_AUTOMERGE:-1}"
 GO="${GO:-/usr/local/go/bin/go}"
 NTFY_URL="${NTFY_URL:-}"
@@ -41,11 +45,28 @@ bin="$(mktemp -d)/twiceshy"
 branch="import/${SOURCE}-$(date -u +%Y%m%d-%H%M%S)"
 git checkout -b "$branch" -q
 
-if ! out="$("$bin" ingest "$SOURCE" -limit "$LIMIT" -corpus "$REPO" 2>&1)"; then
-  notify "twiceshy import FAILED ($SOURCE): $out"
-  git checkout main -q; git branch -D "$branch" -q; exit 1
+if [ "$SOURCE" = "osv-live" ]; then
+  # Stack-first import: one bounded ingest per ecosystem (npm, PyPI, Go, …),
+  # accumulating into this branch. A single ecosystem failing (e.g. a network
+  # blip) is logged + alerted but does NOT abort the others — a bulk importer
+  # makes partial progress rather than failing the whole batch.
+  for eco in $ECOSYSTEMS; do
+    if out="$("$bin" ingest osv-live -ecosystem "$eco" -limit "$LIMIT" -corpus "$REPO" 2>&1)"; then
+      echo "[$eco] $out"
+    else
+      echo "[$eco] FAILED: $out"
+      notify "twiceshy import FAILED (osv-live $eco): $out"
+    fi
+  done
+else
+  if ! out="$("$bin" ingest "$SOURCE" -limit "$LIMIT" -corpus "$REPO" 2>&1)"; then
+    notify "twiceshy import FAILED ($SOURCE): $out"
+    git checkout main -q
+    git branch -D "$branch" -q
+    exit 1
+  fi
+  echo "$out"
 fi
-echo "$out"
 
 # git diff misses UNTRACKED files, and freshly-written records are untracked —
 # use status (porcelain) so new records are actually detected and committed.

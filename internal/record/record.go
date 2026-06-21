@@ -212,9 +212,26 @@ var (
 	reHTTPURL = regexp.MustCompile(`^https?://[^\s]+$`)
 )
 
-// Parse parses and validates one record. path is the corpus-relative file
-// path (filename and year-directory rules are part of validation).
+// Parse parses and validates one record (STRICT: unknown frontmatter fields are
+// rejected, so the write/CI path catches typos — additionalProperties:false). path
+// is the corpus-relative file path (filename and year-directory rules are part of
+// validation).
 func Parse(path string, src []byte) (*Record, error) {
+	return parseRecord(path, src, true)
+}
+
+// ParseLenient is Parse for the READ/serve path: it IGNORES unknown frontmatter
+// fields instead of rejecting them, so an additive schema field written by a newer
+// writer never makes an older server fail to load the record. This is the
+// forward-compat half of "serve must never dark-fail on one record" — the corpus
+// gaining `panel` while the deployed binary's struct lacked it crash-looped the
+// strict reader (#0064). All OTHER validation (required fields, structure, path
+// rules) still applies; only the unknown-field rejection is relaxed.
+func ParseLenient(path string, src []byte) (*Record, error) {
+	return parseRecord(path, src, false)
+}
+
+func parseRecord(path string, src []byte, knownFields bool) (*Record, error) {
 	front, body, err := splitFrontmatter(src)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
@@ -222,7 +239,7 @@ func Parse(path string, src []byte) (*Record, error) {
 
 	var rec Record
 	dec := yaml.NewDecoder(bytes.NewReader(front))
-	dec.KnownFields(true)
+	dec.KnownFields(knownFields)
 	if err := dec.Decode(&rec); err != nil {
 		return nil, fmt.Errorf("%s: frontmatter: %w", path, err)
 	}
@@ -236,13 +253,22 @@ func Parse(path string, src []byte) (*Record, error) {
 	return &rec, nil
 }
 
-// ParseFile parses root-relative rel under the corpus root.
+// ParseFile parses root-relative rel under the corpus root (strict).
 func ParseFile(root, rel string) (*Record, error) {
+	return parseFileWith(root, rel, Parse)
+}
+
+// ParseFileLenient is ParseFile for the read/serve path (tolerates unknown fields).
+func ParseFileLenient(root, rel string) (*Record, error) {
+	return parseFileWith(root, rel, ParseLenient)
+}
+
+func parseFileWith(root, rel string, parse func(string, []byte) (*Record, error)) (*Record, error) {
 	src, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
 	if err != nil {
 		return nil, err
 	}
-	return Parse(rel, src)
+	return parse(rel, src)
 }
 
 // LoadCorpus loads every record under root/experience, applies corpus-level
@@ -322,7 +348,29 @@ func LoadCorpus(root string) ([]*Record, error) {
 // validator's job (index/doctor/CI); a run only acts on independently-eligible
 // records. A missing/unreadable corpus tree is still fatal (nothing to run on).
 func LoadCorpusResilient(root string) (recs []*Record, skipped []string, err error) {
+	return walkCorpusSkipping(root, ParseFile)
+}
+
+// LoadCorpusForServe loads the corpus for the READ/serve path with maximum
+// availability — the tolerant-reader sibling of LoadCorpusResilient (#0064). It
+// parses leniently (ParseFileLenient: an additive unknown frontmatter field is
+// ignored, not fatal, so a newer schema never dark-fails an older server) AND, like
+// the resilient loader, skips+reports any record that still fails rather than
+// aborting the whole load. The strict KnownFields + cross-record integrity checks
+// (dup ids, superseded_by, repro presence) stay the write/CI job (LoadCorpus): a
+// long-running server must serve the 126 good records, not crash-loop on the one it
+// cannot parse. A missing/unreadable corpus tree is still fatal (nothing to serve).
+func LoadCorpusForServe(root string) (recs []*Record, skipped []string, err error) {
+	return walkCorpusSkipping(root, ParseFileLenient)
+}
+
+// walkCorpusSkipping walks root/experience, parsing each record file with parseFile
+// and skipping (collecting "path: reason") any that fail, so one bad record never
+// aborts the load. Shared by LoadCorpusResilient (strict parse) and
+// LoadCorpusForServe (lenient parse).
+func walkCorpusSkipping(root string, parseFile func(root, rel string) (*Record, error)) (recs []*Record, skipped []string, err error) {
 	expDir := filepath.Join(root, "experience")
+	seen := make(map[string]string) // record id -> first file that claimed it
 	werr := filepath.WalkDir(expDir, func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -338,11 +386,20 @@ func LoadCorpusResilient(root string) (recs []*Record, skipped []string, err err
 		if !reRecordPath.MatchString(rel) {
 			return nil // repro scripts, READMEs, scratch files
 		}
-		rec, parseErr := ParseFile(root, rel)
+		rec, parseErr := parseFile(root, rel)
 		if parseErr != nil {
 			skipped = append(skipped, fmt.Sprintf("%s: %v", rel, parseErr))
 			return nil // skip the poison record, keep walking
 		}
+		// A duplicate id is the OTHER way a single bad file dark-fails serve: the
+		// id is a PRIMARY KEY, so a second record with the same id aborts the index
+		// Rebuild (#0060). The strict cross-record check that catches this stays the
+		// write/CI job; on the resilient path skip+report the dup and keep serving.
+		if first, dup := seen[rec.ID]; dup {
+			skipped = append(skipped, fmt.Sprintf("%s: duplicate id %s (already loaded from %s)", rel, rec.ID, first))
+			return nil
+		}
+		seen[rec.ID] = rel
 		recs = append(recs, rec)
 		return nil
 	})

@@ -341,3 +341,41 @@ func TestOSVLiveSource_SkipsWithdrawnAndNonGo(t *testing.T) {
 		}
 	}
 }
+
+// WithEcosystem lets one importer cover a whole stack: npm (React/React Native),
+// PyPI (Python), Go — run once per ecosystem. The export URL, the affected-package
+// filter, and the applies_to label must all track the configured ecosystem (not
+// hard-coded "Go"), or a non-Go advisory is dropped or mislabelled.
+func TestOSVLiveSource_EcosystemParameterized(t *testing.T) {
+	npm := map[string]any{
+		"id":      "GHSA-npm-test-0001",
+		"summary": "a distinctly worded npm advisory summary for this fixture only",
+		"details": "a distinctly worded npm advisory details body for this fixture only",
+		"affected": []map[string]any{{
+			"package": map[string]string{"ecosystem": "npm", "name": "left-pad"},
+			"ranges": []map[string]any{{
+				"type":   "SEMVER",
+				"events": []map[string]string{{"introduced": "0"}, {"fixed": "1.3.0"}},
+			}},
+		}},
+	}
+	src := ingest.NewOSVLiveSource(
+		ingest.WithEcosystem("npm"),
+		ingest.WithOSVLiveFetch(func(_ context.Context) (io.ReadCloser, error) {
+			return buildOSVLiveZip(t, map[string]any{"GHSA-npm-test-0001.json": npm}), nil
+		}),
+	)
+	drafts, err := src.Drafts(context.Background())
+	if err != nil {
+		t.Fatalf("Drafts: %v", err)
+	}
+	if len(drafts) != 1 {
+		t.Fatalf("want 1 npm draft, got %d", len(drafts))
+	}
+	if len(drafts[0].AppliesTo) != 1 {
+		t.Fatalf("applies_to len = %d, want 1", len(drafts[0].AppliesTo))
+	}
+	if a := drafts[0].AppliesTo[0]; a.Ecosystem != "npm" || a.Package != "left-pad" {
+		t.Errorf("applies_to = %+v, want npm/left-pad", a)
+	}
+}

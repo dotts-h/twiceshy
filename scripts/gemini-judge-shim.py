@@ -22,7 +22,11 @@ from /home/ori/.config/brain/secrets.env.
 """
 import json
 import os
+import random
 import sys
+import threading
+import time
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -30,6 +34,42 @@ API = "https://generativelanguage.googleapis.com/v1beta"
 DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 UPSTREAM_TIMEOUT = float(os.environ.get("JUDGE_TIMEOUT", "55"))
 LISTEN = ("0.0.0.0", int(os.environ.get("JUDGE_PORT", "8724")))
+
+# Free-tier Gemini rate-limits hard (HTTP 429) under the nightly validate burst:
+# 19 advisory records x DefaultVotes=3 ~= 57 calls back-to-back exhausts the
+# per-minute cap, every panel verdict errors, and (panel being fail-safe) every
+# advisory record silently stays quarantined — zero throughput, no alert. Two
+# defenses (ADR-0016 follow-up): (1) _pace() spaces upstream calls under the RPM
+# cap; (2) call_gemini retries 429/503 with Retry-After-aware backoff so a
+# transient throttle self-heals instead of fail-safe-skipping the record. Both
+# env-tunable; set GEMINI_MIN_INTERVAL=0 to disable pacing.
+MIN_INTERVAL = float(os.environ.get("GEMINI_MIN_INTERVAL", "4.5"))  # ~13 req/min
+MAX_RETRIES = int(os.environ.get("GEMINI_MAX_RETRIES", "4"))
+_pace_lock = threading.Lock()
+_last_call = [0.0]  # monotonic ts of the last upstream call (mutable cell)
+
+
+def _pace():
+    """Serialize + space upstream calls to stay under the free-tier RPM cap."""
+    if MIN_INTERVAL <= 0:
+        return
+    with _pace_lock:
+        wait = MIN_INTERVAL - (time.monotonic() - _last_call[0])
+        if wait > 0:
+            time.sleep(wait)
+        _last_call[0] = time.monotonic()
+
+
+def _retry_backoff(err, attempt):
+    """Seconds to wait before retrying a throttled call — Retry-After if Gemini
+    sent one (capped), else exponential with jitter."""
+    ra = err.headers.get("Retry-After") if err.headers else None
+    if ra:
+        try:
+            return min(float(ra), 30.0)
+        except ValueError:
+            pass
+    return min(2 ** attempt, 16) + random.uniform(0, 1)
 
 
 def _api_key():
@@ -101,11 +141,32 @@ def call_gemini(model, prompt, system=None):
             "responseSchema": SCHEMA,
         },
     }
-    req = urllib.request.Request(
-        url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(req, timeout=UPSTREAM_TIMEOUT) as r:
-        d = json.load(r)
+    data = json.dumps(body).encode()
+    deadline = time.monotonic() + UPSTREAM_TIMEOUT
+    for attempt in range(MAX_RETRIES + 1):
+        _pace()
+        req = urllib.request.Request(
+            url, data=data, headers={"Content-Type": "application/json"}
+        )
+        try:
+            remaining = max(1.0, deadline - time.monotonic())
+            with urllib.request.urlopen(req, timeout=remaining) as r:
+                d = json.load(r)
+        except urllib.error.HTTPError as e:
+            # 429 (rate limit) / 503 (overloaded) are transient — back off and
+            # retry within the request's timeout budget; anything else propagates.
+            if e.code not in (429, 503) or attempt >= MAX_RETRIES:
+                raise
+            backoff = _retry_backoff(e, attempt)
+            if time.monotonic() + backoff >= deadline:
+                raise  # no budget left to retry inside the Go-side 60s call timeout
+            sys.stderr.write(
+                "gemini-judge: HTTP %d throttled, backoff %.1fs (attempt %d/%d)\n"
+                % (e.code, backoff, attempt + 1, MAX_RETRIES)
+            )
+            time.sleep(backoff)
+            continue
+        break
     cands = d.get("candidates") or []
     if not cands:
         raise ValueError("no candidates (blocked: %s)" % d.get("promptFeedback"))
