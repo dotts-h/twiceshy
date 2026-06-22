@@ -95,7 +95,7 @@ never a cycle).
 | [0074](0074-ingest-the-85-sonnet-advisory-labels-as-advisory-gold-cases-uses-0063-routing.md) | Ingest the 85 Sonnet advisory labels as advisory gold cases (uses #0063 routing) | closed | medium | 0015 | |
 | [0075](0075-intake-issues-drainer-materialize-the-report-issue-spool-into-docs-issues-uses-0066-capture.md) | intake-issues drainer — materialize the report_issue spool into docs/issues/ (uses #0066 capture) | closed | medium | 0064 | |
 | [0076](0076-epic-decouple-the-corpus-into-a-versioned-data-product-adr-0021.md) | Epic: Decouple the corpus into a versioned data product (ADR-0021) | open | high | — | |
-| [0077](0077-decouple-pre-flight-gemini-agy-gut-check-lossless-corpus-snapshot-tag.md) | Decouple pre-flight: gemini+agy gut-check + lossless corpus snapshot tag | open | medium | 0076 | |
+| [0077](0077-decouple-pre-flight-gemini-agy-gut-check-lossless-corpus-snapshot-tag.md) | Decouple pre-flight: gemini+agy gut-check + lossless corpus snapshot tag | closed | medium | 0076 | ADR-0021 |
 | [0078](0078-interim-take-corpus-imports-off-the-code-ci-shim-relax-outdated-branch-slower-cadence.md) | Interim: take corpus imports off the code CI (shim + relax outdated-branch + slower cadence) | open | medium | 0076 | |
 | [0079](0079-schema-contract-frozen-test-fixtures-engine-stops-loading-the-live-corpus-in-ci.md) | Schema contract + frozen test fixtures (engine stops loading the live corpus in CI) | open | high | 0076 | |
 | [0080](0080-stand-up-the-twiceshy-corpus-store-its-ci-the-no-silent-freeze-stall-alarm.md) | Stand up the twiceshy-corpus store + its CI + the no-silent-freeze stall alarm | open | high | 0076 | |
