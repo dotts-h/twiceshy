@@ -4,6 +4,11 @@
   this"; chose the judge-panel gate and the daily-review posture); claude proposed
   and authored. **Supersedes ADR-0013 §5** for the advisory class only; all other
   ADR-0013 sections stand.
+- **Amended 2026-06-22 (#0071):** §7 added — the panel must not promote a
+  *born-stale* advisory (an EOL runtime, or a `valid.until` already past). This is
+  the promote-side mirror of #302's import-side staleness scoping; without it,
+  panel-promoted EOL advisories became validated records that tripped the D2 guard
+  and stuck ~36 validate PRs.
 - **Related:** [ADR-0013](ADR-0013-closed-loop-autonomous-validation.md) (the
   closed loop this extends — §1 proof+judge, §2 veto window, §6 diversity/fail-safe,
   the standing rule *local LLM = drafter/flagger, never judge*); [ADR-0003 §4](ADR-0003-corpus-bootstrap-source-scope.md)
@@ -135,6 +140,23 @@ gate — it is to make the gate a **panel** and keep ADR-0013's veto window.
    are untouched; this ADR changes *what may become validated*, not how validated
    records are retrieved or injected.
 
+7. **A born-stale advisory is not promote-worthy — the panel is gated by the D2
+   staleness check (#0071, companion to #302; amendment 2026-06-22).** Before the
+   panel is consulted, an advisory whose runtime is already end-of-life (or whose
+   `provenance.valid.until` is already past) is **held, quarantined**: `promote`
+   consults the same end-of-life signal the D2 staleness doctor uses
+   (`doctor.Staleness.WouldFlag`, the status-independent form of the
+   validated-scoped guard). Rationale — #302 scoped the D2 guard to *validated*
+   records so the importer could ingest EOL-runtime advisories as quarantined
+   drafts (a draft is not "drift"); this §7 closes the **mirror gap on the promote
+   side**: promoting such a draft manufactures a validated record the guard then
+   flags, reding the very test that gates the validate PR (observed: ~36 stuck
+   validate PRs, 2026-06-22). The gate **fails open** (an endoflife.date outage ⇒ no
+   flag ⇒ promotion proceeds), matching the doctor's "no data ⇒ no flag" rule, with
+   the deterministic guard test as the backstop. **Scope:** the advisory path only —
+   the §1 proof+judge path is unchanged (a repro that holds on an EOL runtime is a
+   separate question, not the stuck-PR cause).
+
 ## Consequences
 
 - **Good.** The 86 advisories become eligible for autonomous promotion under an
@@ -155,3 +177,9 @@ gate — it is to make the gate a **panel** and keep ADR-0013's veto window.
 - **Scope discipline.** This ADR moves **only** the advisory class off the §5 human
   gate. Conventions and prose lessons stay human-gated; revisiting them is a
   separate decision (a future multi-model prose panel), not licensed here.
+- **Born-stale exclusion (#0071, amendment).** The panel no longer manufactures
+  validated-but-immediately-stale advisories, so the validate PR stays green as the
+  corpus grows across ecosystems. Cost: one endoflife.date lookup per product per
+  run (memoized), made *before* the more expensive panel — a net saving on the EOL
+  records it now skips. Residual: the gate fails open on a source outage, so the
+  deterministic D2 guard test stays the backstop for the known-EOL cycles.

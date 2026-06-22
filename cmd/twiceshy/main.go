@@ -1013,6 +1013,15 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	// inside Majority so each inner HTTP call is timed, not the N-vote group.
 	tj := judge.NewTiming(j)
 	promoterOpts := []promote.Option{}
+	// Born-stale gate (#0071, companion to #302): never promote an advisory whose
+	// runtime is already EOL — it would trip the (validated-scoped) D2 staleness
+	// guard the instant it became validated, the very thing that stuck ~36 validate
+	// PRs. Uses the public endoflife.date source (TWICESHY_EOL_URL overrides — e.g.
+	// a test/offline stub). Fails open (a source outage ⇒ no flag ⇒ promotion
+	// proceeds), with the deterministic D2 guard test as the backstop. Only fires on
+	// the advisory path, so it is inert unless a panel is configured below.
+	staleGate := doctor.NewStaleness(doctor.NewEndOfLifeSource(getenv("TWICESHY_EOL_URL")), time.Now().UTC())
+	promoterOpts = append(promoterOpts, promote.WithStalenessGate(staleGate.WouldFlag))
 	if panelURL := getenv("TWICESHY_PANEL_JUDGE_URL"); panelURL != "" {
 		panelModel := getenv("TWICESHY_PANEL_JUDGE_MODEL")
 		aj1, err := judge.NewModelJudge(judge.Config{

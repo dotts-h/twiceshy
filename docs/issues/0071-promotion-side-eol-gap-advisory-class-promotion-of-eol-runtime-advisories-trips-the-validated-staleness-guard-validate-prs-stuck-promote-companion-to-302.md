@@ -43,10 +43,25 @@ record is EOL-flagged → the validate PR can't merge.
 - **C:** loosen the guard test to tolerate validated EOL records — wrong; they *are* stale.
 
 ## Acceptance
-- [ ] A validate run that would promote an EOL-runtime advisory skips it (logged), so no
-      validated record trips the staleness guard.
+- [x] A validate run that would promote an EOL-runtime advisory skips it (logged), so no
+      validated record trips the staleness guard. — `promote.WithStalenessGate` holds the
+      record (`held … runtime is end-of-life — born-stale (#0071)`) before the panel.
 - [ ] The stuck validate-PR backlog clears (re-run after the fix; close the stale ones).
-- [ ] `make test` stays green as the corpus grows across ecosystems.
+      — **post-merge / operational**: the next scheduled validate run uses the fixed binary
+      and produces green PRs; the ~36 already-open stale PRs are then closed/superseded.
+- [x] `make test` stays green as the corpus grows across ecosystems. — guard test
+      `TestStaleness_RealCorpusNotFalseFlagged` + new `TestStaleness_WouldFlag_StatusIndependent`
+      and `TestPromote_AdvisoryEOLRuntime_HeldNotPromoted` all green under `-race`.
+
+## Resolution
+Option **A** (charter): the advisory panel path is gated by the D2 staleness check.
+`doctor.Staleness.WouldFlag` exposes the staleness signals status-independently (the
+promote-side mirror of the validated-scoped guard #302 introduced); `promote.promoteAdvisory`
+consults it and refuses a born-stale advisory **before** the costly panel. Wired in the
+`validate` command against the real endoflife.date source (`TWICESHY_EOL_URL` overrides;
+fails open with the guard test as backstop). Decision recorded as **ADR-0016 §7**
+(amendment 2026-06-22). Dogfood lesson: `experience/2026/0807-promote-eol-gate.md`.
+Code fix lands in this PR; only the backlog-clear box above is a post-merge step.
 
 ## Notes
 Direct companion to #302 (the import-side fix). Relates to ADR-0011 (the validation
