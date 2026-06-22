@@ -83,7 +83,8 @@ never a cycle).
 | [0062](0062-buildadvisoryprompt-omits-fixed-null-line-cheap-advisory-judge-can-t-catch-the-largest-0061-defect-class.md) | BuildAdvisoryPrompt omits fixed:null line — cheap advisory judge can't catch the largest #0061 defect class | closed | medium | 0015 | PR#263 |
 | [0063](0063-judgeeval-lacks-advisory-prompt-routing-can-t-measure-cheap-judges-on-the-sonnet-advisory-gold-set.md) | judgeeval lacks advisory-prompt routing — can't measure cheap judges on the Sonnet advisory gold-set | open | medium | 0015 | |
 | [0064](0064-epic-agent-native-feedback-loop-capture-submit-measure.md) | Epic: Agent-native feedback loop — capture, submit, measure | open | high | — | |
-| [0065](0065-session-retro-capture-hook-automatic-trap-submission-at-the-lifecycle-seam.md) | Session-retro capture hook — automatic trap submission at the lifecycle seam | open | high | 0064 | |
+| [0065](0065-session-retro-capture-hook-automatic-trap-submission-at-the-lifecycle-seam.md) | Session-retro capture hook — automatic trap submission at the lifecycle seam | closed | high | 0064 | ADR-0018 |
 | [0066](0066-agent-issue-submission-tool-report-issue-intake.md) | Agent issue-submission tool (report_issue) + intake | open | medium | 0064 | |
 | [0067](0067-per-query-gate-decision-telemetry.md) | Per-query gate-decision telemetry | closed | medium | 0064 | PR#269 |
 | [0068](0068-global-idf-specificity-signal-for-the-push-gate-adr-proposal.md) | Global-IDF specificity signal for the push gate (ADR proposal) | closed | medium | 0064 | ADR-0017 |
+| [0069](0069-session-retro-helpfulness-signal-join-transcript-against-the-0067-decision-log-to-score-served-cards-used-vs-ignored.md) | Session-retro helpfulness signal — join transcript against the #0067 decision log to score served cards used vs ignored | open | medium | 0064 | |

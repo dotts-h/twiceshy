@@ -25,3 +25,4 @@ accepted ADR's decision — supersede it (`Status: superseded-by-NNNN`).
 | [0015](ADR-0015-push-discriminative-term-gate.md) | The push channel gates on a discriminative term, not a magnitude floor | Accepted |
 | [0016](ADR-0016-advisory-class-panel-promotion.md) | Advisory-class records auto-promote via a diverse judge-panel (no repro) | Accepted |
 | [0017](ADR-0017-global-idf-push-gate-specificity.md) | A global dev/code IDF replaces the hand-maintained stoplist as the push gate's specificity signal | Proposed |
+| [0018](ADR-0018-session-retro-capture.md) | Session-retro capture — a SessionEnd hook spools the transcript; an off-pool analyzer drafts quarantined traps | Proposed |

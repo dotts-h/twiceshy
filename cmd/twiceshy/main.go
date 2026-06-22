@@ -192,7 +192,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|draft|promote|repromote|adapt|intake-reports|report|pack|doctor|eval|usage-flush|gold-add|judge-eval> [flags]")
+		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|draft|promote|repromote|adapt|intake-reports|retro-intake|screen|report|pack|doctor|eval|usage-flush|gold-add|judge-eval> [flags]")
 	}
 	switch args[0] {
 	case "index":
@@ -215,6 +215,10 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runAdapt(ctx, args[1:], out, getenv)
 	case "intake-reports":
 		return runIntakeReports(args[1:], out)
+	case "retro-intake":
+		return runRetroIntake(ctx, args[1:], out, getenv)
+	case "screen":
+		return runScreen(args[1:], os.Stdin, out)
 	case "report":
 		return runReport(args[1:], out)
 	case "doctor":
@@ -230,7 +234,7 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	case "self-audit":
 		return runSelfAudit(args[1:], out)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, draft, promote, repromote, adapt, intake-reports, report, pack, doctor, eval, usage-flush, gold-add, judge-eval, or self-audit)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, draft, promote, repromote, adapt, intake-reports, retro-intake, screen, report, pack, doctor, eval, usage-flush, gold-add, judge-eval, or self-audit)", args[0])
 	}
 }
 
@@ -354,6 +358,7 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 	c := addCommonFlags(fs)
 	addr := fs.String("addr", ":8722", "listen address")
 	reportQueue := fs.String("report-queue", "", "directory report_outcome enqueues outcome reports into for `intake-reports` to materialize (ADR-0013 §E1); empty = legacy markdown-to-PR")
+	retroQueue := fs.String("retro-queue", "", "directory POST /retro spools session transcripts into for `retro-intake` to analyze (ADR-0018, #0065); empty disables the /retro endpoint")
 	telemetryLog := fs.String("telemetry-log", "", "append per-query gate-decision telemetry to this rotating JSONL file (#0067); empty = disabled")
 	if err := parseFlags(fs, args); err != nil {
 		return err
@@ -393,7 +398,7 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 		defer func() { _ = tele.Close() }()
 	}
 
-	handler, err := server.New(server.Config{Index: ix, RecordCount: n, Token: token, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue, Logger: logger, Corpus: c.corpus, Telemetry: tele})
+	handler, err := server.New(server.Config{Index: ix, RecordCount: n, Token: token, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue, RetroQueue: *retroQueue, Logger: logger, Corpus: c.corpus, Telemetry: tele})
 	if err != nil {
 		alerter.Alert(ctx, "serve-fatal", fmt.Sprintf("serve could not build the handler: %v", err))
 		return err

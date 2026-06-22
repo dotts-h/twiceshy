@@ -53,6 +53,11 @@ type Config struct {
 	// (ADR-0013 §E1, #0042). Empty keeps the legacy behavior: report_outcome
 	// returns the counter-record markdown for a human to PR, and writes nothing.
 	ReportQueue string
+	// RetroQueue, when set, is the directory POST /retro spools session transcripts
+	// into for the `retro-intake` CLI to analyze off-pool into quarantined drafts
+	// (ADR-0018, #0065). Empty disables the /retro endpoint (503): retro capture is
+	// opt-in, like the report queue.
+	RetroQueue string
 	// Corpus is the corpus root (the directory containing experience/) the index
 	// was built from. The write path scans it to allocate record ids robustly
 	// against a live index that has drifted behind the committed corpus (#0059).
@@ -108,7 +113,7 @@ func New(cfg Config) (*Server, error) {
 		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	}
 
-	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, corpus: cfg.Corpus, telemetry: cfg.Telemetry}
+	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, retroQueue: cfg.RetroQueue, corpus: cfg.Corpus, telemetry: cfg.Telemetry}
 	h.recordCount.Store(int64(cfg.RecordCount))
 	h.usage = newUsageRecorder(cfg.Index, logger, time.Now)
 	srv := mcp.NewServer(&mcp.Implementation{
@@ -129,6 +134,9 @@ func New(cfg Config) (*Server, error) {
 	// Route all methods to pushHTTP so a non-POST gets a clean 405 from the
 	// handler itself, rather than falling through to the MCP catch-all.
 	mux.HandleFunc("/push", h.pushHTTP)
+	// Same rationale (exp-0006): /retro is registered unqualified, not "POST
+	// /retro", so a non-POST returns 405 from retroHTTP instead of falling through.
+	mux.HandleFunc("/retro", h.retroHTTP)
 	mux.Handle("/", mcpHandler)
 
 	// Middleware chain (outermost first): access log, then reject unauthenticated
@@ -182,6 +190,7 @@ type handlers struct {
 	logger      *slog.Logger
 	usage       *usageRecorder      // records retrieval usage off the latency budget (ADR-0013 §4)
 	reportQueue string              // optional; report_outcome enqueues here for intake-reports (ADR-0013 §E1)
+	retroQueue  string              // optional; POST /retro spools transcripts here for retro-intake (ADR-0018)
 	corpus      string              // corpus root for robust id allocation against the source of truth (#0059)
 	telemetry   *telemetry.Recorder // optional; per-query gate-decision log (#0067)
 }

@@ -9,7 +9,7 @@ forgejo: 250
 links:
   adr: docs/adr/ADR-0013-closed-loop-autonomous-validation.md
   prs: []
-  issues: [0005, 0065, 0066, 0067, 0068]
+  issues: [0005, 0065, 0066, 0067, 0068, 0069]
   regression:
 assets: []
 ---
@@ -50,8 +50,8 @@ the transport envelope) rather than adding new architecture.
 
 ## Acceptance (tick when the epic closes)
 - [ ] #0065, #0066, #0067, #0068 all closed.
-- [ ] An agent session that solves a novel trap results in a quarantined draft
-      **without the agent explicitly calling `record_experience`** (#0065).
+- [x] An agent session that solves a novel trap results in a quarantined draft
+      **without the agent explicitly calling `record_experience`** (#0065, ADR-0018).
 - [ ] Precision/recall reported on a sample of **real** agent traffic, not only
       the synthetic negative/positive sets (#0067 → #0005).
 - [ ] An agent can file a half-formed issue that lands in `docs/issues/` +
