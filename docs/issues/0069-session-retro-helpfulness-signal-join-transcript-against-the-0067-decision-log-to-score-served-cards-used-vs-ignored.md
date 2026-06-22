@@ -5,7 +5,7 @@ status: open
 severity: medium
 group: 0064
 depends_on: []
-forgejo:
+forgejo: 297
 links:
   adr: docs/adr/ADR-0018-session-retro-capture.md
   prs: []
