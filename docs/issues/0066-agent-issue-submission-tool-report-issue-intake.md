@@ -1,7 +1,7 @@
 ---
 id: 0066
 title: Agent issue-submission tool (report_issue) + intake
-status: open
+status: closed
 severity: medium
 group: 0064
 depends_on: []
@@ -40,6 +40,18 @@ garbage / crashed" have **nowhere to go** — they are silently lost.
   future lesson" — route the former to `docs/issues/`, the latter could become a
   `record_experience` draft instead. The `category` field is the discriminator.
 - Volume / abuse: rate-limit per token; cap intake-queue depth.
+
+## Resolution
+The agent-facing surface shipped: MCP tool **`report_issue`**
+(`{title, description, category, related_record_id?, author}`) → captures to a
+quarantined spool (`spool.Issue`/`EnqueueIssue`) when `issue-queue` is configured,
+else returns a PR-ready docs/issues markdown so input is never lost. Content-screened
+(secrets/PII), title `%q`-quoted (no YAML injection), triage-flagged, never
+auto-actioned. Inherits the global bearer + rate-limit + body-cap chain. Registered
+in CONTRACTS.md. The **intake drainer** (spool → docs/issues/ with allocated numbers,
+reusing `new-issue.sh`) + intake-time dedup are split to **#0075** (the materialize
+half). Open questions resolved: `category` discriminates self-bug vs lesson; abuse is
+bounded by the inherited rate-limit + size caps.
 
 ## Notes
 Child of epic #0064. Self-contained and parallelizable. Confirmed gap: no MCP

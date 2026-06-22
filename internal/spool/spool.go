@@ -133,6 +133,41 @@ func ReadTranscript(path string) (Transcript, error) {
 	return t, nil
 }
 
+// Issue is one queued agent-submitted issue (#0066): the report_issue tool ships
+// half-formed input here — a problem with no fix yet, or a twiceshy-self bug —
+// instead of a complete lesson, and `intake-issues` drains it into docs/issues/.
+// Like Report it stores the request, not a built artifact: the issue NUMBER is
+// allocated against docs/issues/ at intake, never colliding across entries queued
+// before a drain. Agent-submitted issues are triage-flagged, never auto-actioned.
+type Issue struct {
+	Title           string `json:"title"`
+	Description     string `json:"description"`
+	Category        string `json:"category"` // bug | feature | question
+	RelatedRecordID string `json:"related_record_id,omitempty"`
+	Author          string `json:"author"`
+	Session         string `json:"session,omitempty"`
+	ReportedAt      string `json:"reported_at"`
+}
+
+// EnqueueIssue writes i as a JSON file in dir using the same atomic
+// temp-then-rename discipline as Enqueue, prefixed with ReportedAt for time order.
+func EnqueueIssue(dir string, i Issue) (string, error) {
+	return enqueueJSON(dir, i.ReportedAt, i)
+}
+
+// ReadIssue decodes a queued issue file.
+func ReadIssue(path string) (Issue, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Issue{}, err
+	}
+	var i Issue
+	if err := json.Unmarshal(data, &i); err != nil {
+		return Issue{}, err
+	}
+	return i, nil
+}
+
 // Remove deletes a processed queue file.
 func Remove(path string) error { return os.Remove(path) }
 

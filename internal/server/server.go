@@ -58,6 +58,11 @@ type Config struct {
 	// (ADR-0018, #0065). Empty disables the /retro endpoint (503): retro capture is
 	// opt-in, like the report queue.
 	RetroQueue string
+	// IssueQueue, when set, is the directory report_issue enqueues agent-submitted
+	// issues into for the `intake-issues` CLI to materialize into docs/issues/
+	// (#0066). Empty keeps the fallback: report_issue returns a PR-ready docs/issues
+	// markdown for a human to PR, and writes nothing.
+	IssueQueue string
 	// Corpus is the corpus root (the directory containing experience/) the index
 	// was built from. The write path scans it to allocate record ids robustly
 	// against a live index that has drifted behind the committed corpus (#0059).
@@ -113,7 +118,7 @@ func New(cfg Config) (*Server, error) {
 		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	}
 
-	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, retroQueue: cfg.RetroQueue, corpus: cfg.Corpus, telemetry: cfg.Telemetry}
+	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, retroQueue: cfg.RetroQueue, issueQueue: cfg.IssueQueue, corpus: cfg.Corpus, telemetry: cfg.Telemetry}
 	h.recordCount.Store(int64(cfg.RecordCount))
 	h.usage = newUsageRecorder(cfg.Index, logger, time.Now)
 	srv := mcp.NewServer(&mcp.Implementation{
@@ -125,6 +130,7 @@ func New(cfg Config) (*Server, error) {
 	mcp.AddTool(srv, &mcp.Tool{Name: "get_experience", Description: getDescription}, h.get)
 	mcp.AddTool(srv, &mcp.Tool{Name: "record_experience", Description: recordDescription}, h.record)
 	mcp.AddTool(srv, &mcp.Tool{Name: "report_outcome", Description: reportDescription}, h.reportOutcome)
+	mcp.AddTool(srv, &mcp.Tool{Name: "report_issue", Description: issueDescription}, h.reportIssue)
 	mcp.AddTool(srv, &mcp.Tool{Name: "confirm_helpful", Description: confirmDescription}, h.confirmHelpful)
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(
@@ -191,6 +197,7 @@ type handlers struct {
 	usage       *usageRecorder      // records retrieval usage off the latency budget (ADR-0013 §4)
 	reportQueue string              // optional; report_outcome enqueues here for intake-reports (ADR-0013 §E1)
 	retroQueue  string              // optional; POST /retro spools transcripts here for retro-intake (ADR-0018)
+	issueQueue  string              // optional; report_issue enqueues here for intake-issues (#0066)
 	corpus      string              // corpus root for robust id allocation against the source of truth (#0059)
 	telemetry   *telemetry.Recorder // optional; per-query gate-decision log (#0067)
 }

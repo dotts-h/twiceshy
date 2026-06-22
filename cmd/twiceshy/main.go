@@ -359,6 +359,7 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 	addr := fs.String("addr", ":8722", "listen address")
 	reportQueue := fs.String("report-queue", "", "directory report_outcome enqueues outcome reports into for `intake-reports` to materialize (ADR-0013 §E1); empty = legacy markdown-to-PR")
 	retroQueue := fs.String("retro-queue", "", "directory POST /retro spools session transcripts into for `retro-intake` to analyze (ADR-0018, #0065); empty disables the /retro endpoint")
+	issueQueue := fs.String("issue-queue", "", "directory report_issue enqueues agent-submitted issues into for `intake-issues` to materialize (#0066); empty = return PR-ready markdown")
 	telemetryLog := fs.String("telemetry-log", "", "append per-query gate-decision telemetry to this rotating JSONL file (#0067); empty = disabled")
 	if err := parseFlags(fs, args); err != nil {
 		return err
@@ -398,7 +399,7 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 		defer func() { _ = tele.Close() }()
 	}
 
-	handler, err := server.New(server.Config{Index: ix, RecordCount: n, Token: token, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue, RetroQueue: *retroQueue, Logger: logger, Corpus: c.corpus, Telemetry: tele})
+	handler, err := server.New(server.Config{Index: ix, RecordCount: n, Token: token, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue, RetroQueue: *retroQueue, IssueQueue: *issueQueue, Logger: logger, Corpus: c.corpus, Telemetry: tele})
 	if err != nil {
 		alerter.Alert(ctx, "serve-fatal", fmt.Sprintf("serve could not build the handler: %v", err))
 		return err
