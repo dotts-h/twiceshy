@@ -2,7 +2,7 @@
 schema_version: 1
 id: exp-0044
 kind: fix
-status: quarantined
+status: validated
 title: strings.Title is deprecated since Go 1.18 — use golang.org/x/text/cases
 symptom:
     summary: staticcheck flags strings.Title as deprecated; its word-boundary rule mishandles Unicode.
@@ -30,13 +30,19 @@ provenance:
         session: null
         pr: null
     recorded_at: "2026-06-19"
-    validated_at: null
+    validated_at: "2026-06-22"
     valid:
         from: "2026-06-19"
         until: null
     source_license: none (facts only)
     source_url: https://pkg.go.dev/strings#Title
     superseded_by: null
+    promotion:
+        attested_at: "2026-06-22T04:39:37Z"
+        reproduced_under:
+            - go1.25
+        judge_model: gpt-oss:20b
+        judge_decision: approve
 ---
 
 Go 1.18 deprecated strings.Title because its word-boundary handling is
