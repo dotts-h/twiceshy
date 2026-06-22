@@ -1,11 +1,12 @@
 # ADR-0021: Decouple the corpus into a versioned data product, separate from the engine
 
-- **Status:** Proposed (2026-06-22) — decider: **horia** (directed the split, on reliability
-  + modularity + scalability grounds); claude proposed and authored. **A frontier
-  gut-check (gemini + agy) is OWED before execution** — both off-pool endpoints were
-  unreachable at authoring time (ask-agy timed out at 8s, ask-gemini hung); the
-  local-model (gpt-oss:20b) duck pass informed this draft. Run the gemini/agy consult at
-  the **start of the execution session, before any pipeline change.**
+- **Status:** Accepted (2026-06-22) — decider: **horia** (directed the split, on reliability
+  + modularity + scalability grounds); claude proposed and authored. **The owed frontier
+  gut-check (gemini + agy) is COMPLETE** (2026-06-22, issue #0077): both off-pool endpoints
+  were unreachable at authoring time (ask-agy timed out at 8s, ask-gemini hung) but ran on
+  the execution session. Both **confirm decision B** — the multi-tenant requirement (#0010)
+  is the decisive factor neither model dislodged — and surfaced **four execution guards**,
+  now folded into the migration plan below. See "Pre-flight gut-check (2026-06-22)".
 - **Related:** [ADR-0001 §6](ADR-0001-architecture.md) (git is the trust boundary);
   [ADR-0005](ADR-0005-stable-seams.md) (the `-corpus` seam this leans on);
   [ADR-0011](ADR-0011-corpus-growth-and-validation-engine.md) (corpus growth as a live
@@ -73,7 +74,11 @@ points the opposite way.
 2. **The engine consumes the corpus through the existing `-corpus` seam plus a versioned
    record-schema CONTRACT.** The schema (`schema/`, SCHEMA.md, `schema_version`) is the
    interface; a breaking change is a deliberate, coordinated version bump, never a silent
-   break across the two repos. The engine declares the schema version(s) it supports.
+   break across the two repos. The engine declares the schema version(s) it supports, and
+   **enforces them loudly**: `LoadCorpus` rejects an unsupported `schema_version` with a
+   CRITICAL log + an alert metric (never a silent skip), and the corpus repo's CI rejects a
+   record the *currently-deployed* engine can't parse before it reaches the NAS replica
+   (gut-check guard 2).
 3. **The autonomous loop moves to live WITH the corpus.** The importer, `promote`/`adapt`,
    the corpus doctors, and their scheduling + CI run against the corpus store — its own
    trust boundary, its own gate. The **engine repo's CI stops loading the live corpus**: it
@@ -88,24 +93,66 @@ points the opposite way.
    scoped to the served (`validated`) subset; **no auto-merge result is ever swallowed** —
    a left-open red/stalled PR alerts, so a data event can never silently freeze the loop.
 
+## Pre-flight gut-check (2026-06-22)
+
+The owed frontier consult ran on the execution session (issue #0077); the brief was the
+problem, the chosen option B, the rejected options, and the full migration plan.
+**Both gemini and agy confirm decision B** — each independently probed for a simpler option
+and neither dislodged the split, because the **multi-tenant requirement (#0010) is decisive**:
+N tenants = N corpus stores served by one engine, which an in-repo branch cannot give.
+agy's orphan-`corpus`-branch variant (a sharper take on rejected option C) and gemini's
+"validate the trust boundary in-repo first" both reduce to **option D as the interim
+proving step** — already adopted. The decision stands; what changed is the *plan got four
+guards* it under-weighted:
+
+1. **Quiesce needs a HARD write-lock, not just "stop timers + drain."** Both flagged that a
+   stray local branch or a hung cron can push to `experience/` *after* "drained," forking the
+   corpus. → Phase 3 installs a reject-all guard on `experience/` (branch protection / a
+   pre-receive or pre-commit hook) so the old location is provably unwritable, and the
+   **authoritative** lossless snapshot is taken as the *last* action under that lock — the
+   phase-0 tag is only a baseline (see Phase 0/3).
+2. **The schema contract must FAIL LOUD and be checked against the *deployed* engine** — a
+   `schema_version` *declaration* is not enforcement. → The engine's `LoadCorpus` rejects an
+   unsupported version with a CRITICAL log + an alert metric (never silently skips); the
+   corpus repo's CI rejects a record the *currently-deployed* engine can't parse *before* it
+   reaches the NAS replica (via the engine's supported-version set, not a static file).
+   Folded into Decision §2 and issue #0079.
+3. **CI dependency inversion** (agy): the importer/doctors run the engine's Go code, so corpus
+   CI needs engine binaries while engine CI needs frozen corpus data — a cycle. → The engine
+   repo publishes a **pinned, versioned CLI artifact**; the corpus repo's CI downloads and
+   runs *that* rather than building the engine from source. Folded into Phase 2 and issue #0080.
+4. **id-allocation must start at `max(exp-NNNN) + gap`, verified pre-restart** — a `max+1`
+   allocator collides with any straggler PR ported over after cutover. → Phase 6 initialises
+   the new allocator with an intentional gap (e.g. `+1000`) and a test asserts no collision
+   before timers are re-enabled. Folded into issue #0082/#0083.
+
 ## Migration plan (STOP → MOVE → RESTART), reversible at each phase
 
 Execution is a **dedicated session**. Each phase is independently revertable; do not start
 the next until the current one is verified.
 
-0. **Pre-flight:** run the gemini + agy gut-check (Status, above). Snapshot
-   `origin/main:experience` (a tag) so the move is provably lossless.
+0. **Pre-flight:** run the gemini + agy gut-check (done — see "Pre-flight gut-check"). Tag
+   `origin/main` as a **baseline** snapshot (`corpus-snapshot-pre-decouple-<date>`) — a
+   recovery point, **not** the authoritative cutover snapshot. Because imports keep landing,
+   the *authoritative* lossless snapshot is re-taken at quiesce under the write-lock (Phase 3),
+   and the Phase-4 byte-match is against *that* drained SHA, not this baseline.
 1. **Contract first (engine repo, no corpus move yet):** pin the engine's supported
    `schema_version`; replace live-corpus CI loads with the frozen fixture; add the
    required-check **shim** + relax `block_on_outdated_branch` (this is D, and it is the
    safe first step). Reversible: pure code/CI config.
 2. **Stand up the corpus store (parallel, not yet authoritative):** create `twiceshy-corpus`,
    import the snapshot, stand up its CI (schema-validate + validated-scoped doctors) and
-   the exp-0746 stall alarm. Nothing reads it yet. Reversible: delete the repo.
+   the exp-0746 stall alarm. The corpus CI runs the engine's **pinned, versioned CLI
+   artifact** (published by the engine repo), not a build-from-source — this breaks the
+   dependency inversion the gut-check flagged (corpus CI needs engine code, engine CI needs
+   corpus data) (gut-check guard 3). Nothing reads it yet. Reversible: delete the repo.
 3. **QUIESCE the live pipeline:** pause the importer + the promote/adapt timers on the
    brain (`systemctl stop …`), and **drain in-flight import/validate PRs** to a clean point
-   (no half-open auto-merge). Confirm the engine-repo `experience/` is at a known SHA.
-   Reversible: re-enable the timers.
+   (no half-open auto-merge). Then install a **hard write-lock on `experience/`** — branch
+   protection + a pre-receive/pre-commit reject-all so a stray local branch or hung cron
+   cannot push after the drain (gut-check guard 1) — and only then take the **authoritative**
+   lossless snapshot as the last action on the source. Confirm the engine-repo `experience/`
+   is at a known SHA. Reversible: lift the lock + re-enable the timers.
 4. **MOVE / cut over:** make the corpus store authoritative — sync its content from the
    drained engine-repo SHA (must byte-match the snapshot tag); re-point the NAS sync at the
    corpus store; re-point the importer + promote/adapt at `-corpus <corpus-store>`. The
@@ -114,10 +161,11 @@ the next until the current one is verified.
 5. **RESTART on the new home:** re-enable the importer + loop timers against the corpus
    store; verify a full cycle (import → quarantined PR → validate → served) end-to-end, and
    that serving still answers from the re-pointed NAS replica.
-6. **Verify + decommission:** confirm id-allocation is correct in the new store (the
-   single-allocator invariant must hold across the move — no colliding `exp-NNNN`), the
-   gold/eval suites pass against the fixture, and the stall alarm fires on a synthetic red.
-   Only then retire the engine-repo corpus path.
+6. **Verify + decommission:** confirm id-allocation is correct in the new store — initialise
+   the allocator at **`max(exp-NNNN) + gap`** (e.g. `+1000`), not `max+1`, so a straggler PR
+   ported over after cutover cannot collide, and assert no collision by test *before* timers
+   are re-enabled (gut-check guard 4) — the gold/eval suites pass against the fixture, and the
+   stall alarm fires on a synthetic red. Only then retire the engine-repo corpus path.
 
 ## Consequences
 
