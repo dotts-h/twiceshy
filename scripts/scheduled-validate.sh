@@ -49,7 +49,12 @@ SOAK="${TWICESHY_SOAK_SECONDS:-172800}"
 AUTOMERGE="${TWICESHY_AUTOMERGE:-1}"
 DRYRUN="${TWICESHY_VALIDATE_DRYRUN:-0}"
 NTFY_URL="${NTFY_URL:-}"
-API="http://192.168.50.244:3030/api/v1/repos/claude/twiceshy"
+# Forge repo + prebuilt binary (see scheduled-import.sh). Default = the engine repo +
+# build-from-source; the decoupled deployment sets TWICESHY_FORGEJO_REPO=claude/twiceshy-corpus
+# and TWICESHY_BIN=<prebuilt> so this runs against a data-only corpus clone (ADR-0021).
+FORGEJO_REPO="${TWICESHY_FORGEJO_REPO:-claude/twiceshy}"
+BIN="${TWICESHY_BIN:-}"
+API="http://192.168.50.244:3030/api/v1/repos/${FORGEJO_REPO}"
 
 notify() {
 	[ -n "$NTFY_URL" ] || return 0
@@ -103,7 +108,7 @@ merge_due() {
 		fi
 		age=$((now - created))
 		if [ "$age" -ge "$SOAK" ]; then
-			if forgejo-ci-merge claude/twiceshy "$pr" "$sha" "$REPO"; then
+			if forgejo-ci-merge "$FORGEJO_REPO" "$pr" "$sha" "$REPO"; then
 				notify "twiceshy validate: PR #${pr} (${head}) merged after ${age}s soak"
 			else
 				notify "twiceshy validate: PR #${pr} (${head}) merge failed after soak"
@@ -114,10 +119,16 @@ merge_due() {
 merge_due
 
 # --- Phase 3: run tonight's validation on a fresh branch ----------------------
-bindir="$(mktemp -d)"
-trap 'rm -rf "$bindir"' EXIT # don't leak the build dir in /tmp across nightly runs
-bin="$bindir/twiceshy"
-"$GO" build -o "$bin" ./cmd/twiceshy
+# Resolve the engine binary: a PATH-installed prebuilt (decoupled corpus — no source
+# in $REPO) or a build from this clone (legacy engine-repo deployment).
+if [ -n "$BIN" ]; then
+	bin="$BIN"
+else
+	bindir="$(mktemp -d)"
+	trap 'rm -rf "$bindir"' EXIT # don't leak the build dir in /tmp across nightly runs
+	bin="$bindir/twiceshy"
+	"$GO" build -o "$bin" ./cmd/twiceshy
+fi
 
 runid="run-$(date -u +%Y%m%dT%H%M%SZ)"
 branch="validate/${runid}"
