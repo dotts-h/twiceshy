@@ -43,6 +43,27 @@ func TestIsAdvisoryClass_ProseRecordFalse(t *testing.T) {
 	}
 }
 
+func TestIsProseClass(t *testing.T) {
+	rp := "experience/repro/x.sh"
+	cases := []struct {
+		name string
+		rec  *record.Record
+		want bool
+	}{
+		{"advisory (vuln id) is not prose", &record.Record{Symptom: &record.Symptom{ErrorSignatures: []string{"GHSA-227x-7mh8-3cf6"}}}, false},
+		{"execution-provable (repro) is not prose", &record.Record{Guard: &record.Guard{Repro: &rp}}, false},
+		{"positive repros entry is not prose", &record.Record{Guard: &record.Guard{Repros: []record.Repro{{Path: "p", Kind: "positive"}}}}, false},
+		{"no vuln id, no repro is prose", &record.Record{Kind: "convention", Symptom: &record.Symptom{Summary: "comparing wrapped errors with == misses the sentinel"}}, true},
+		{"deprecation diagnostic (no vuln id, no repro) is prose", &record.Record{Symptom: &record.Symptom{ErrorSignatures: []string{"SA1019: deprecated"}}}, true},
+		{"nil is not prose", nil, false},
+	}
+	for _, tc := range cases {
+		if got := record.IsProseClass(tc.rec); got != tc.want {
+			t.Errorf("%s: IsProseClass = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestIsAdvisoryClass_FingerprintMatch(t *testing.T) {
 	rec := &record.Record{
 		Symptom: &record.Symptom{

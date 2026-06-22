@@ -386,6 +386,179 @@ func TestPromote_AdvisoryNoPanel_Skips(t *testing.T) {
 	}
 }
 
+// proseRecord is a quarantined prose lesson — NO repro and NO vuln id: the prose class
+// (ADR-0020) that routes to neither the proof path nor the advisory panel.
+func proseRecord() *record.Record {
+	return &record.Record{
+		SchemaVersion: 1, ID: "exp-0200", Kind: "convention", Status: "quarantined",
+		Title:   "Prefer errors.Is over == for wrapped sentinel errors, long enough title",
+		Symptom: &record.Symptom{Summary: "Comparing a wrapped error with == silently misses the sentinel."},
+		Resolution: &record.Resolution{
+			RootCause: "fmt.Errorf(\"%w\", err) wraps the sentinel, so == against the bare sentinel fails.",
+			Fix:       "Use errors.Is(err, ErrSentinel) to match through the wrap chain.",
+		},
+		AppliesTo: []record.AppliesTo{{Ecosystem: "Go", Package: "errors"}},
+		Provenance: record.Provenance{
+			Source: record.Source{Author: "retro-capture"}, RecordedAt: "2026-06-18",
+			Valid: record.Validity{From: "2026-06-18"},
+		},
+		Body: "A session captured this: comparing wrapped errors with == misses the sentinel; use errors.Is.",
+		Path: "experience/2026/0200-errors-is.md",
+	}
+}
+
+// prosePanel builds a two-member, distinct-family stub panel (gpt-oss + agy) with the
+// given member decisions — the cross-family prose panel (ADR-0020), gemini-free.
+func prosePanel(t *testing.T, v1, v2 judge.Verdict) judge.Judge {
+	t.Helper()
+	panel, err := judge.NewPanel(
+		judge.PanelMember{Model: "gpt-oss:20b", Judge: &judge.StubJudge{Verdict: v1}},
+		judge.PanelMember{Model: "agy-pro", Judge: &judge.StubJudge{Verdict: v2}},
+	)
+	if err != nil {
+		t.Fatalf("NewPanel: %v", err)
+	}
+	return panel
+}
+
+func TestPromote_ProsePanelApproves_Promotes(t *testing.T) {
+	att := &stubAttestor{att: holdingAtt()}
+	panel := prosePanel(t, judge.ApproveVerdict("gpt-oss:20b"), judge.ApproveVerdict("agy-pro"))
+	proofJudge := &captureJudge{verdict: judge.ApproveVerdict("gpt-oss:20b")}
+	p := newPromoter(t, att, proofJudge, promote.WithProsePanel(panel))
+	rec := proseRecord()
+
+	out, err := p.Promote(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	if !out.Promoted {
+		t.Fatalf("expected prose promotion, got reason %q", out.Reason)
+	}
+	if att.Calls != 0 {
+		t.Fatalf("attestor must not be called on the prose path; calls=%d", att.Calls)
+	}
+	if proofJudge.last.Record != nil {
+		t.Fatal("proof judge must not be consulted for prose records")
+	}
+	if rec.Status != "validated" {
+		t.Fatalf("status = %q, want validated", rec.Status)
+	}
+	pr := rec.Provenance.Promotion
+	if pr == nil || pr.AttestedAt != "" || len(pr.Panel) != 2 {
+		t.Fatalf("promotion audit block wrong (no attestation, two panel verdicts): %+v", pr)
+	}
+	if pr.JudgeModel != "gpt-oss:20b+agy-pro" || pr.JudgeDecision != "approve" {
+		t.Fatalf("top-level promotion fields wrong: %+v", pr)
+	}
+	if err := record.Validate(rec); err != nil {
+		t.Fatalf("promoted prose must validate: %v", err)
+	}
+}
+
+func TestPromote_ProsePanelRejects_StaysQuarantined(t *testing.T) {
+	panel := prosePanel(t, judge.ApproveVerdict("gpt-oss:20b"), judge.Verdict{Decision: judge.Reject})
+	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, &judge.StubJudge{}, promote.WithProsePanel(panel))
+	rec := proseRecord()
+
+	out, err := p.Promote(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	if out.Promoted || rec.Status != "quarantined" {
+		t.Fatal("one prose-panel dissent must not promote")
+	}
+}
+
+func TestPromote_ProsePanelError_FailSafe(t *testing.T) {
+	panel, err := judge.NewPanel(
+		judge.PanelMember{Model: "gpt-oss:20b", Judge: &judge.StubJudge{Err: errors.New("down")}},
+		judge.PanelMember{Model: "agy-pro", Judge: &judge.StubJudge{Verdict: judge.ApproveVerdict("agy-pro")}},
+	)
+	if err != nil {
+		t.Fatalf("NewPanel: %v", err)
+	}
+	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, &judge.StubJudge{}, promote.WithProsePanel(panel))
+	rec := proseRecord()
+
+	out, err := p.Promote(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("panel error is fail-safe, not a hard error: %v", err)
+	}
+	if out.Promoted || rec.Status != "quarantined" {
+		t.Fatal("a prose-panel outage must leave the record quarantined")
+	}
+}
+
+func TestPromote_ProseNoPanel_Skips(t *testing.T) {
+	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, &judge.StubJudge{})
+	rec := proseRecord()
+
+	out, err := p.Promote(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	if out.Promoted {
+		t.Fatal("prose without a panel must not promote")
+	}
+	if out.Reason != "no prose panel configured — left for a human (ADR-0013 §5)" {
+		t.Fatalf("reason = %q", out.Reason)
+	}
+}
+
+// The mandatory content-screen (ADR-0020 §2c): a security-flagged prose record is never
+// promoted, even with an approving panel.
+func TestPromote_ProseSecurityFlagged_NotPromoted(t *testing.T) {
+	panel := prosePanel(t, judge.ApproveVerdict("gpt-oss:20b"), judge.ApproveVerdict("agy-pro"))
+	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, &judge.StubJudge{}, promote.WithProsePanel(panel))
+	rec := proseRecord()
+	rec.Provenance.SecurityFlags = []string{"secret:aws-access-key"}
+
+	out, err := p.Promote(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	if out.Promoted || rec.Status != "quarantined" {
+		t.Fatal("a security-flagged prose record must never promote (mandatory content-screen)")
+	}
+}
+
+// The prose panel receives Request.Prose=true (which selects ProsePanelSystemV1) and
+// never Advisory — the routing flag the production prompt selection keys on.
+func TestPromote_ProsePassesProseFlag(t *testing.T) {
+	cj := &captureJudge{verdict: judge.ApproveVerdict("gpt-oss:20b")}
+	panel, err := judge.NewPanel(
+		judge.PanelMember{Model: "gpt-oss:20b", Judge: cj},
+		judge.PanelMember{Model: "agy-pro", Judge: &judge.StubJudge{Verdict: judge.ApproveVerdict("agy-pro")}},
+	)
+	if err != nil {
+		t.Fatalf("NewPanel: %v", err)
+	}
+	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, &judge.StubJudge{}, promote.WithProsePanel(panel))
+	rec := proseRecord()
+
+	if _, err := p.Promote(context.Background(), rec); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	if !cj.last.Prose {
+		t.Fatal("the prose panel must receive Request.Prose=true (selects ProsePanelSystemV1)")
+	}
+	if cj.last.Advisory {
+		t.Fatal("a prose request must not set Advisory")
+	}
+}
+
+func TestPromotable_ProsePath(t *testing.T) {
+	if ok, _ := promote.Promotable(proseRecord()); !ok {
+		t.Fatal("a quarantined prose record must be promotable")
+	}
+	r := proseRecord()
+	r.Status = "validated"
+	if ok, _ := promote.Promotable(r); ok {
+		t.Fatal("a non-quarantined prose record must not be promotable")
+	}
+}
+
 func TestPromotable_AdvisoryAndProofPaths(t *testing.T) {
 	if ok, _ := promote.Promotable(advisoryRecord()); !ok {
 		t.Fatal("advisory quarantined record must be promotable")
