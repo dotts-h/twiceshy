@@ -2099,8 +2099,12 @@ func runGoldAdd(_ context.Context, args []string, out io.Writer) error {
 	checks := fs.String("checks", "", "comma-separated want_failing_checks (reject cases only)")
 	goldFile := fs.String("gold-file", "internal/judgeeval/gold.yaml", "path to gold.yaml (for -append)")
 	appendFile := fs.Bool("append", false, "append the stanza to -gold-file instead of printing")
+	advisoryAudit := fs.String("advisory-audit", "", "bulk: regenerate advisory-gold.yaml from a Sonnet advisory-audit JSON (advisory-class gold cases, no repro, #0074)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
+	}
+	if *advisoryAudit != "" {
+		return runGoldAddAdvisory(*corpus, *advisoryAudit, *goldFile, out)
 	}
 	if *recordPath == "" || *id == "" || *mode == "" || *rationale == "" {
 		return errors.New("gold-add: -record, -id, -mode, and -rationale are required")
@@ -2153,6 +2157,50 @@ func runGoldAdd(_ context.Context, args []string, out io.Writer) error {
 	}
 	_, _ = fmt.Fprintln(out, stanza)
 	_, _ = fmt.Fprintf(out, "\n# paste under cases: in %s, then re-run judge-eval to re-measure\n", *goldFile)
+	return nil
+}
+
+// runGoldAddAdvisory bulk-regenerates the advisory gold set (#0074): it reads a Sonnet
+// advisory-audit JSON, resolves each audited record from the corpus, and writes the 85
+// verdicts as advisory-class gold cases (no repro) into advisory-gold.yaml, which
+// LoadGold merges with the prose gold.yaml. The whole file is rewritten deterministically
+// (idempotent), so re-running on an updated audit refreshes the embed.
+func runGoldAddAdvisory(corpus, auditPath, goldFile string, out io.Writer) error {
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		return fmt.Errorf("gold-add: reading advisory audit: %w", err)
+	}
+	var audit judgeeval.AdvisoryAudit
+	if err := json.Unmarshal(data, &audit); err != nil {
+		return fmt.Errorf("gold-add: parsing advisory audit %s: %w", auditPath, err)
+	}
+	recs, err := record.LoadCorpus(corpus)
+	if err != nil {
+		return fmt.Errorf("gold-add: loading corpus: %w", err)
+	}
+	byID := make(map[string]*record.Record, len(recs))
+	for _, r := range recs {
+		byID[r.ID] = r
+	}
+	doc, err := judgeeval.BuildAdvisoryGold(audit, func(id string) (*record.Record, error) {
+		if r, ok := byID[id]; ok {
+			return r, nil
+		}
+		return nil, fmt.Errorf("record %s not in corpus", id)
+	})
+	if err != nil {
+		return fmt.Errorf("gold-add: %w", err)
+	}
+	// The advisory cases live in their own embed so the prose gold.yaml stays readable;
+	// redirect off the gold.yaml default unless the operator named an explicit target.
+	target := goldFile
+	if target == "internal/judgeeval/gold.yaml" {
+		target = "internal/judgeeval/advisory-gold.yaml"
+	}
+	if err := os.WriteFile(target, []byte(doc), 0o644); err != nil {
+		return fmt.Errorf("gold-add: writing %s: %w", target, err)
+	}
+	_, _ = fmt.Fprintf(out, "gold-add: wrote %d advisory gold case(s) to %s — re-run judge-eval to measure\n", len(audit.Approved)+len(audit.Rejected), target)
 	return nil
 }
 

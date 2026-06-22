@@ -39,6 +39,40 @@ func TestLoadGold_AdvisoryCasesRouteToAdvisoryPrompt(t *testing.T) {
 	}
 }
 
+// #0074: the 85 Sonnet advisory verdicts load as advisory-class gold cases (66 approve
+// / 19 reject), each routed to the advisory prompt with no repro. Their gold-case ids
+// are the corpus record ids (exp-NNNN); the prose set uses A1/P1/... so the prefix
+// isolates the generated advisory set. Guards advisory-gold.yaml against silent
+// loss or regeneration drift.
+func TestLoadGold_IncludesSonnetAdvisorySet(t *testing.T) {
+	cases, err := judgeeval.LoadGold()
+	if err != nil {
+		t.Fatalf("LoadGold: %v", err)
+	}
+	approve, reject := 0, 0
+	for _, c := range cases {
+		if !strings.HasPrefix(c.ID, "exp-") {
+			continue
+		}
+		req := c.Request()
+		if !req.Advisory {
+			t.Errorf("advisory gold case %s must route to the advisory prompt", c.ID)
+		}
+		if len(req.Repros) != 0 {
+			t.Errorf("advisory gold case %s must carry no repro, got %d", c.ID, len(req.Repros))
+		}
+		switch c.WantDecision {
+		case judge.Approve:
+			approve++
+		case judge.Reject:
+			reject++
+		}
+	}
+	if approve != 66 || reject != 19 {
+		t.Errorf("advisory set: got %d approve / %d reject, want 66 / 19 (the Sonnet audit)", approve, reject)
+	}
+}
+
 // The embedded gold set is the eval's ground truth; if it is internally
 // inconsistent the whole eval is meaningless, so CI guards it.
 func TestLoadGold_ParsesAndIsConsistent(t *testing.T) {

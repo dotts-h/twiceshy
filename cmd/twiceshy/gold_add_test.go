@@ -68,6 +68,40 @@ func TestGoldAdd_PrintsStanza(t *testing.T) {
 	}
 }
 
+// The committed advisory-gold.yaml (#0074) must be exactly what `gold-add
+// -advisory-audit` produces from the real audit + corpus — a golden test that both
+// exercises the bulk generator end-to-end and catches the embed drifting from its
+// source (regenerate and commit if this fails). BuildAdvisoryGold emits only the 85
+// audited ids, so corpus growth from scheduled imports does not perturb it.
+func TestGoldAddAdvisory_RegenerationMatchesCommitted(t *testing.T) {
+	root := filepath.Join("..", "..")
+	auditPath := filepath.Join(root, "runs", "sonnet-advisory-audit.json")
+	goldPath := filepath.Join(t.TempDir(), "advisory-gold.yaml")
+
+	var out bytes.Buffer
+	if err := runGoldAdd(context.Background(), []string{
+		"-corpus", root, "-advisory-audit", auditPath, "-gold-file", goldPath,
+	}, &out); err != nil {
+		t.Fatalf("runGoldAdd -advisory-audit: %v", err)
+	}
+	if !strings.Contains(out.String(), "wrote 85 advisory gold case") {
+		t.Errorf("unexpected summary: %q", out.String())
+	}
+
+	got, err := os.ReadFile(goldPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed, err := os.ReadFile(filepath.Join(root, "internal", "judgeeval", "advisory-gold.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, committed) {
+		t.Error("regenerated advisory-gold.yaml differs from the committed embed — " +
+			"re-run `twiceshy gold-add -advisory-audit runs/sonnet-advisory-audit.json` and commit the result")
+	}
+}
+
 func TestGoldAdd_RequiresFlags(t *testing.T) {
 	if err := runGoldAdd(context.Background(), []string{}, &bytes.Buffer{}); err == nil {
 		t.Fatal("expected error without required flags")

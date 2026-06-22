@@ -89,6 +89,38 @@ func TestGoldCaseStanza_RoundTrips(t *testing.T) {
 	}
 }
 
+// An advisory-class record (vuln id in error_signatures, no repro) is exempt from the
+// repro requirement — the panel judges fidelity, not execution — mirroring LoadGold
+// (#0063, #0074). A non-advisory record with no repro still errors (see RejectsBad).
+func TestGoldCaseStanza_AdvisoryExemptFromRepro(t *testing.T) {
+	rec := &record.Record{
+		ID:      "exp-0007",
+		Kind:    "trap",
+		Title:   "GHSA-227x-7mh8-3cf6: vulnerability in example.com/pkg",
+		Symptom: &record.Symptom{ErrorSignatures: []string{"GHSA-227x-7mh8-3cf6"}},
+	}
+	stanza, err := GoldCaseStanza(GoldStanzaInput{
+		ID:        "exp-0007",
+		Mode:      "approve",
+		Rationale: "clean advisory the judge should approve",
+		Record:    rec,
+		// no repros — advisory-class is exempt
+	})
+	if err != nil {
+		t.Fatalf("advisory case without repro must be allowed: %v", err)
+	}
+	var gf goldFile
+	if err := yaml.Unmarshal([]byte("cases:\n"+stanza), &gf); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, stanza)
+	}
+	if gf.Cases[0].ID != "exp-0007" || gf.Cases[0].Mode != "approve" {
+		t.Errorf("got id=%q mode=%q", gf.Cases[0].ID, gf.Cases[0].Mode)
+	}
+	if !record.IsAdvisoryClass(gf.Cases[0].Record) {
+		t.Error("round-tripped record should remain advisory-class")
+	}
+}
+
 func TestGoldCaseStanza_RejectsBad(t *testing.T) {
 	base := GoldStanzaInput{
 		ID: "Gx", Mode: "license", Rationale: "x",

@@ -1,7 +1,7 @@
 ---
 id: 0074
 title: Ingest the 85 Sonnet advisory labels as advisory gold cases (uses #0063 routing)
-status: open
+status: closed
 severity: medium
 group: 0015
 depends_on: []
@@ -30,9 +30,27 @@ inline records is impractical; consider a separate `advisory-gold.yaml` so the
 prose gold set stays readable.
 
 ## Acceptance
-- [ ] The 85 Sonnet labels are loadable as advisory gold cases (id/decision/checks).
-- [ ] `judge-eval` scores them via the advisory prompt (the #0063 routing).
-- [ ] The gold set stays internally consistent (LoadGold passes) and CI-guarded.
+- [x] The 85 Sonnet labels are loadable as advisory gold cases (id/decision/checks).
+- [x] `judge-eval` scores them via the advisory prompt (the #0063 routing).
+- [x] The gold set stays internally consistent (LoadGold passes) and CI-guarded.
+
+## Status
+
+Shipped. The 85 verdicts (66 approve / 19 reject) live in a generated, embedded
+`internal/judgeeval/advisory-gold.yaml`, kept separate from the hand-written prose
+`gold.yaml` so the latter stays readable; `LoadGold` merges both and validates the
+combined set. A bulk generator — `twiceshy gold-add -advisory-audit
+runs/sonnet-advisory-audit.json` (`BuildAdvisoryGold`, pure core) — resolves each
+audited record from the corpus and emits it as an advisory-class gold case (no repro):
+approve → `mode approve`; reject → its `failed_checks` (mode = first). The 2 rejects the
+audit left with an empty `failed_checks` array have their checks recovered from the
+reason prose ("… fails meaning and poison checks") rather than guessed. `GoldCaseStanza`
+now exempts advisory-class records from the repro requirement (mirroring `LoadGold`,
+#0063). Guards: `TestLoadGold_IncludesSonnetAdvisorySet` (66/19, all advisory-routed,
+no repro), the combined-set consistency/routing tests, `BuildAdvisoryGold` unit tests,
+and a golden regeneration test asserting the committed embed equals the generator's
+output (catches drift). Enables #0005/#0058 to measure the cheap off-pool judges on the
+real importer-bug set.
 
 ## Notes
 Depends on #0063 (routing, merged). Pairs with #0062 (the `fixed:null` render fix can
