@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/dotts-h/twiceshy/internal/record"
@@ -36,10 +35,8 @@ import (
 type Staleness struct {
 	eol      EOLSource
 	now      time.Time
-	products map[string]string // lower-cased ecosystem → endoflife product
-
-	mu    sync.Mutex
-	cache map[string][]Cycle // product → cycles, memoized across calls
+	products map[string]string  // lower-cased ecosystem → endoflife product
+	cache    map[string][]Cycle // product → cycles, memoized across calls (callers are sequential)
 }
 
 // NewStaleness builds D2. eol may be nil (only the valid.until signal runs).
@@ -121,8 +118,8 @@ func (s *Staleness) Run(ctx context.Context, recs []*record.Record) (Report, err
 // the D2 guard (#0071, companion to #302): the promoter refuses a born-stale
 // advisory (an EOL runtime, or a valid.until already past) with it, because such a
 // record would be flagged the instant it became validated and red the guard test
-// that gates the validate PR. nil = would not be flagged. Safe across calls; the
-// cycles cache is shared.
+// that gates the validate PR. nil = would not be flagged. The cycles cache is
+// shared across calls (callers are sequential).
 func (s *Staleness) WouldFlag(ctx context.Context, r *record.Record) *Finding {
 	return s.wouldFlag(ctx, r)
 }
@@ -184,21 +181,17 @@ func (s *Staleness) staleByEOL(ctx context.Context, r *record.Record) *Finding {
 // cycles returns the endoflife cycles for a product, memoized across calls so the
 // promote gate (one WouldFlag per record) never re-fetches the same product. ok is
 // false only when the source errored (caller skips — no data ⇒ no false flag); a
-// 404/unknown product is a successful empty result and is cached. The lock guards
-// only the map; the network fetch runs outside it.
+// 404/unknown product is a successful empty result and is cached. No lock: the only
+// callers (Run's loop, the sequential promote loop) never touch one *Staleness
+// concurrently.
 func (s *Staleness) cycles(ctx context.Context, product string) ([]Cycle, bool) {
-	s.mu.Lock()
-	c, ok := s.cache[product]
-	s.mu.Unlock()
-	if ok {
+	if c, ok := s.cache[product]; ok {
 		return c, true
 	}
 	c, err := s.eol.Cycles(ctx, product)
 	if err != nil {
 		return nil, false
 	}
-	s.mu.Lock()
 	s.cache[product] = c
-	s.mu.Unlock()
 	return c, true
 }
