@@ -14,7 +14,10 @@ import (
 
 // Staleness is D2 (ADR-0001 §7, CONTEXT.md "stale"): it flags records whose
 // applies_to no longer matches the live world. Report-only — it proposes a
-// `stale` transition for human review, never mutates a record.
+// `stale` transition for human review, never mutates a record. It evaluates
+// ONLY `validated` records — the served corpus; a quarantined draft cannot
+// transition to stale, so the importer may ingest advisories for an EOL runtime
+// (born quarantined) without this guard false-flagging them.
 //
 // Two signals, both fail-closed (no data ⇒ no flag):
 //  1. provenance.valid.until is a date in the past (unambiguous; pure).
@@ -90,8 +93,13 @@ func (s *Staleness) Run(ctx context.Context, recs []*record.Record) (Report, err
 	cache := map[string][]Cycle{} // product → cycles, fetched once per run
 
 	for _, r := range recs {
-		if r.Status == "stale" || r.Status == "superseded" {
-			continue // already retired
+		// Staleness proposes a validated→stale demotion, so it evaluates ONLY
+		// validated records. Quarantined drafts (incl. imported advisories that
+		// target an EOL runtime — a draft is not "drift"), disputed, and
+		// already-retired records are not candidates. This is what lets the importer
+		// ingest EOL-runtime advisories without tripping the D2 guard test.
+		if r.Status != "validated" {
+			continue
 		}
 		// Signal 1: an explicit validity window that has closed.
 		if u := r.Provenance.Valid.Until; u != nil {
