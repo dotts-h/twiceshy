@@ -1,13 +1,13 @@
 ---
 id: 0070
 title: Prose-class promotion path — captured session traps are quarantined dead-weight without a non-advisory promoter (decide via ADR, extend ADR-0016 panel)
-status: open
+status: closed
 severity: high
 group: 0064
 depends_on: []
 forgejo: 298
 links:
-  adr:
+  adr: docs/adr/ADR-0020-prose-class-panel-promotion.md
   prs: []
   issues: [0064, 0065]
   regression:
@@ -49,13 +49,46 @@ be an ADR** weighing the options:
   B, the corpus-poisoning failure mode; listed only to be explicitly ruled out).
 
 ## Acceptance
-- [ ] An ADR records the prose-promotion decision (supersede/extend ADR-0013 §5 and
+- [x] An ADR records the prose-promotion decision (supersede/extend ADR-0013 §5 and
       ADR-0016, or commit to a review process), with the poison-risk tradeoff explicit.
-- [ ] If A: a prose-class promoter exists — gated, fail-safe, guardrails ≥ the advisory
+      → [ADR-0020](../adr/ADR-0020-prose-class-panel-promotion.md): **Option A** (horia
+      directed "A — autonomous panel, live"), superseding ADR-0013 §5 for the prose class.
+- [x] If A: a prose-class promoter exists — gated, fail-safe, guardrails ≥ the advisory
       panel; a captured prose trap can reach `validated` autonomously.
-- [ ] If B: a defined, low-friction review path for retro-draft PRs that is actually run
-      (not a never-reviewed pile).
-- [ ] Captured session traps demonstrably become servable (pull/push) via the chosen path.
+- [~] If B: not chosen.
+- [x] Captured session traps demonstrably become servable (pull/push) via the chosen path
+      — proven at the mechanism level (a prose record promotes to `validated`, which the
+      pull/push paths serve). The live demonstration rides the deploy glue below.
+
+## Status
+
+**Option A shipped.** [ADR-0020](../adr/ADR-0020-prose-class-panel-promotion.md) records the
+decision (the poison-risk reversal of ADR-0013 §5, made explicit, answered by guardrails
+*stronger* than the advisory panel). The promoter:
+
+- **`record.IsProseClass`** = `!IsAdvisoryClass && !HasPositiveRepro` — the residue that
+  routes to neither the §1 proof path nor the ADR-0016 advisory panel.
+- **`promote.promoteProse`** (routed before the proof-eligibility skip): a quarantined,
+  screen-clean, non-disputed prose record is judged by a **cross-family panel** — gpt-oss
+  (off-pool local) + **agy** (operator-designated, privacy-acceptable; the **gemini free
+  tier is excluded** for prose, ADR-0016 §5; the §6 local denylist stays fully enforced —
+  no denylisted model judges). Unanimous approve → `validated` with the panel audit in
+  `provenance.promotion`. Fail-safe in every direction (nil panel / any member error /
+  any dissent → quarantined).
+- **Stronger-than-advisory guardrails:** a **mandatory** clean content-screen
+  (`EligibleProse` holds a security-flagged record), a **poison-foregrounded**,
+  reject-on-uncertainty prompt (`ProsePanelSystemV1` / `BuildProsePanelPrompt`), the
+  born-stale (`valid.until`) gate, and the ADR-0013 §2 veto window.
+- Wired in `cmd/twiceshy` from `TWICESHY_PROSE_PANEL_JUDGE_URL/MODEL` (the agy seat),
+  each member majority-wrapped (§F1). Tested with stub panels: promotes / one-dissent-holds
+  / member-error-fail-safe / no-panel-skip / security-flagged-held / Prose-flag-routes.
+
+**Deferred (deploy glue — "the easy part," per this issue's Notes):** the agy judge **shim**
+(CLI→HTTP, like the gemini/sonnet shims), the **longer prose veto-cooldown** config on the
+held-PR timer (ADR-0020 §2d — an ops knob, like ADR-0016 §4), a **prose gold set**
+(positive + adversarial-poison cases) to measure the panel in `judge-eval` (ADR-0020
+backstop; mirrors #0074), and enabling the #0065 SessionEnd capture hook. None are required
+by the promoter mechanism this delivers.
 
 ## Notes
 Found while preparing to enable retro capture live (#0065): the deployment is downstream

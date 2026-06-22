@@ -32,6 +32,18 @@ func IsAdvisoryClass(rec *Record) bool {
 	return false
 }
 
+// IsProseClass reports whether a record is a pure-prose lesson (ADR-0020): NOT
+// advisory-class (no vuln id) AND NOT execution-provable (no positive repro). Such a
+// record routes to neither the ADR-0013 §1 proof+judge path nor the ADR-0016 advisory
+// panel — it is the prose class the ADR-0020 cross-family panel promotes. A nil record is
+// not prose-class.
+func IsProseClass(rec *Record) bool {
+	if rec == nil {
+		return false
+	}
+	return !IsAdvisoryClass(rec) && !HasPositiveRepro(rec)
+}
+
 func hasVulnIDPrefix(s string) bool {
 	up := strings.ToUpper(strings.TrimSpace(s))
 	for _, p := range vulnIDPrefixes {

@@ -215,6 +215,58 @@ func TestModelJudge_PerRequestAdvisoryRoutesPrompt(t *testing.T) {
 	}
 }
 
+// The privacy gate (ADR-0016 §5 / ADR-0020): a gemini judge is rejected by construction
+// for prose (it may carry sensitive content; gemini free tier trains on inputs), but is
+// still allowed for advisory (public OSV/GHSA data). agy is fine for prose.
+func TestNewModelJudge_RejectsGeminiForProse(t *testing.T) {
+	if _, err := judge.NewModelJudge(judge.Config{Endpoint: "http://x", Model: "gemini-2.5-pro", Prose: true}); err == nil || !strings.Contains(err.Error(), "gemini") {
+		t.Fatalf("a gemini prose judge must be rejected (privacy gate); got %v", err)
+	}
+	if _, err := judge.NewModelJudge(judge.Config{Endpoint: "http://x", Model: "gemini-2.5-pro", Advisory: true}); err != nil {
+		t.Fatalf("gemini must still be allowed for advisory (public data): %v", err)
+	}
+	if _, err := judge.NewModelJudge(judge.Config{Endpoint: "http://x", Model: "agy-pro", Prose: true}); err != nil {
+		t.Fatalf("agy must be allowed for prose: %v", err)
+	}
+}
+
+func TestModelJudge_PerRequestProseRoutesPrompt(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf, _ := io.ReadAll(r.Body)
+		gotBody = string(buf)
+		_, _ = w.Write([]byte(approveBody()))
+	}))
+	defer srv.Close()
+	// agy: a non-gemini, non-denylisted frontier family — the prose panel's off-box seat.
+	j, err := judge.NewModelJudge(judge.Config{Endpoint: srv.URL, Model: "agy-pro", DrafterModel: "claude-opus-4-8", Client: srv.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sysOf := func(body string) string {
+		var w struct {
+			System string `json:"system"`
+		}
+		_ = json.Unmarshal([]byte(body), &w)
+		return w.System
+	}
+
+	req := sampleRequest()
+	req.Prose = true
+	if _, err := j.Judge(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gotBody, "PROSE lesson") {
+		t.Fatalf("req.Prose=true must render the prose USER prompt; body=%s", gotBody)
+	}
+	if !strings.Contains(gotBody, "POISON is gating") {
+		t.Fatalf("the prose prompt must foreground the poison check (ADR-0020); body=%s", gotBody)
+	}
+	if sysOf(gotBody) != judge.ProsePanelSystemV1 {
+		t.Fatalf("req.Prose=true must pair the prose SYSTEM prompt; got system=%q", sysOf(gotBody))
+	}
+}
+
 func TestModelJudgeReject(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"decision":"reject","checks":[
@@ -295,6 +347,39 @@ func TestStubJudge(t *testing.T) {
 	estub := &judge.StubJudge{Err: context.DeadlineExceeded}
 	if _, err := estub.Judge(context.Background(), sampleRequest()); err == nil {
 		t.Fatal("error-primed stub must return the error")
+	}
+}
+
+func TestBuildProsePanelPrompt_RendersAdviceAndForegroundsPoison(t *testing.T) {
+	req := judge.Request{
+		Record: &record.Record{
+			ID: "exp-0200", Kind: "convention", Status: "quarantined",
+			Title:     "Prefer errors.Is over ==",
+			Symptom:   &record.Symptom{Summary: "comparing wrapped errors with == misses the sentinel"},
+			AppliesTo: []record.AppliesTo{{Ecosystem: "Go", Package: "errors"}},
+			Resolution: &record.Resolution{
+				RootCause: "fmt.Errorf %w wraps the sentinel",
+				Fix:       "use errors.Is",
+				DeadEnds:  []record.DeadEnd{{Tried: "== against the bare sentinel", WhyItFailed: "misses the wrap chain"}},
+			},
+			Body:       "a captured session lesson",
+			Provenance: record.Provenance{SourceLicense: "none (facts only)"},
+		},
+	}
+	p := judge.BuildProsePanelPrompt(req)
+	for _, want := range []string{
+		"PROSE lesson", "POISON is gating", // the safety framing
+		"title: Prefer errors.Is", "symptom: comparing wrapped", "applies_to: ecosystem=Go package=errors",
+		"root_cause: fmt.Errorf", "fix: use errors.Is", "dead_end: tried=", "body: a captured session lesson",
+		"source_license: none (facts only)",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prose prompt missing %q\n---\n%s", want, p)
+		}
+	}
+	// No advisory/vuln framing leaks into the prose prompt.
+	if strings.Contains(p, "vulnerability advisory") || strings.Contains(p, "source_url") {
+		t.Error("prose prompt must not carry advisory/source framing")
 	}
 }
 

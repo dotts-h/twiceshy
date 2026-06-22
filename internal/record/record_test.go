@@ -178,6 +178,35 @@ func TestParseAcceptsValidatedTrapWithReproAndNoGuardingTest(t *testing.T) {
 	}
 }
 
+// ADR-0020: a validated trap promoted by a PANEL (its promotion audit carries panel
+// verdicts — advisory or prose) is guard-exempt: the panel is its proof. But a no-repro
+// validated trap with NO panel promotion is STILL rejected — the exemption must not
+// neuter the guard check (which would let an unproven validated trap slip through).
+func TestValidate_PanelPromotedTrapGuardExemption(t *testing.T) {
+	noProof := func() map[string]any {
+		f := fm()
+		f["guard"] = map[string]any{"repro": nil, "guarding_test": nil}
+		return f
+	}
+	// No repro, no guarding_test, no panel → rejected (the check still bites).
+	if _, err := record.Parse(fmPath, render(t, noProof())); err == nil {
+		t.Error("a no-repro validated trap with no panel promotion must require a guard")
+	}
+	// Same record, but panel-promoted → exempt → valid (the prose/advisory panel is proof).
+	panelProm := noProof()
+	panelProm["provenance"].(map[string]any)["promotion"] = map[string]any{
+		"judge_model":    "gpt-oss:20b+agy-pro",
+		"judge_decision": "approve",
+		"panel": []any{
+			map[string]any{"judge_model": "gpt-oss:20b", "judge_decision": "approve"},
+			map[string]any{"judge_model": "agy-pro", "judge_decision": "approve"},
+		},
+	}
+	if _, err := record.Parse(fmPath, render(t, panelProm)); err != nil {
+		t.Errorf("a panel-promoted validated trap must be guard-exempt (ADR-0020), got: %v", err)
+	}
+}
+
 func TestParseRejections(t *testing.T) {
 	del := func(keys ...string) func(map[string]any) {
 		return func(m map[string]any) {

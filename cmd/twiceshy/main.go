@@ -979,7 +979,7 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 				_, _ = fmt.Fprintf(out, "  candidate %s %s\n", rec.ID, rec.Path)
 			}
 		}
-		_, _ = fmt.Fprintf(out, "promote (dry-run): %d promotable candidate(s); proof-path needs attestation+judge, advisory-path needs panel\n", n)
+		_, _ = fmt.Fprintf(out, "promote (dry-run): %d promotable candidate(s); proof-path needs attestation+judge, advisory-path and prose-path need their panels\n", n)
 		return nil
 	}
 
@@ -1053,6 +1053,43 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 		// proceeds), with the deterministic D2 guard test as the backstop.
 		staleGate := doctor.NewStaleness(doctor.NewEndOfLifeSource(getenv("TWICESHY_EOL_URL")), time.Now().UTC())
 		promoterOpts = append(promoterOpts, promote.WithStalenessGate(staleGate.WouldFlag))
+	}
+	// Prose-class panel (ADR-0020): a cross-family panel for no-repro, no-source lessons.
+	// Members are gpt-oss (the off-pool local judge) + an operator-designated frontier
+	// family on TWICESHY_PROSE_PANEL_JUDGE_URL (agy) — the gemini FREE tier is excluded
+	// for prose (privacy, ADR-0016 §5), and the ADR-0013 §6 local denylist stays enforced
+	// (neither member is a denylisted family). The prompt foregrounds poison and rejects
+	// on uncertainty; the mandatory content-screen + fail-safe panel are in promote.
+	if prosePanelURL := getenv("TWICESHY_PROSE_PANEL_JUDGE_URL"); prosePanelURL != "" {
+		prosePanelModel := getenv("TWICESHY_PROSE_PANEL_JUDGE_MODEL")
+		pj1, err := judge.NewModelJudge(judge.Config{
+			Endpoint: judgeURL, Model: *judgeModel, DrafterModel: *drafterModel,
+			System: judge.ProsePanelSystemV1, Prose: true,
+		})
+		if err != nil {
+			return fmt.Errorf("configuring prose panel primary judge: %w", err)
+		}
+		pj2, err := judge.NewModelJudge(judge.Config{
+			Endpoint: prosePanelURL, Model: prosePanelModel, DrafterModel: *drafterModel,
+			System: judge.ProsePanelSystemV1, Prose: true,
+		})
+		if err != nil {
+			return fmt.Errorf("configuring prose panel secondary judge: %w", err)
+		}
+		prosePanel, err := judge.NewPanel(
+			judge.PanelMember{Model: *judgeModel, Judge: judge.NewMajority(judge.NewTiming(pj1), *votes)},
+			judge.PanelMember{Model: prosePanelModel, Judge: judge.NewMajority(judge.NewTiming(pj2), *votes)},
+		)
+		if err != nil {
+			return fmt.Errorf("configuring prose panel: %w", err)
+		}
+		promoterOpts = append(promoterOpts, promote.WithProsePanel(prosePanel))
+		// The born-stale gate (valid.until) guards the prose path too; add it if the
+		// advisory block above didn't already wire the (idempotent) same gate.
+		if getenv("TWICESHY_PANEL_JUDGE_URL") == "" {
+			staleGate := doctor.NewStaleness(doctor.NewEndOfLifeSource(getenv("TWICESHY_EOL_URL")), time.Now().UTC())
+			promoterOpts = append(promoterOpts, promote.WithStalenessGate(staleGate.WouldFlag))
+		}
 	}
 	p := promote.NewPromoter(rv, judge.NewMajority(tj, *votes), *corpus, promoterOpts...)
 

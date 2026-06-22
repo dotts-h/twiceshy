@@ -566,7 +566,14 @@ func (r *Record) validateGuard(fail func(string, ...any)) {
 			}
 		}
 	}
-	needsGuard := r.Status == "validated" && (r.Kind == "trap" || r.Kind == "fix") && !IsAdvisoryClass(r)
+	// A validated trap/fix needs a guard UNLESS it was validated by a no-repro panel:
+	// advisory-class (ADR-0016) or a cross-family prose panel (ADR-0020). The advisory
+	// exemption is by class; the prose exemption is by the promotion audit (a panel
+	// verdict), so an illegitimate no-repro validated trap that was NOT panel-promoted is
+	// still caught. (Using IsProseClass here would be circular — it IS "no repro" — and
+	// would vacuously disable the check.)
+	needsGuard := r.Status == "validated" && (r.Kind == "trap" || r.Kind == "fix") &&
+		!IsAdvisoryClass(r) && !r.panelPromoted()
 	if !needsGuard {
 		return
 	}
@@ -582,6 +589,14 @@ func (r *Record) validateGuard(fail func(string, ...any)) {
 		return
 	}
 	fail("validated %s requires guard.guarding_test or a positive guard repro", r.Kind)
+}
+
+// panelPromoted reports whether this record was validated by a judge panel — its
+// promotion audit carries panel member verdicts (advisory, ADR-0016, or prose,
+// ADR-0020). Such a record had no executable proof; the panel is its proof, so it is
+// exempt from the validated-trap guard requirement, exactly like an advisory.
+func (r *Record) panelPromoted() bool {
+	return r.Provenance.Promotion != nil && len(r.Provenance.Promotion.Panel) > 0
 }
 
 // HasPositiveRepro reports whether r carries an executable positive

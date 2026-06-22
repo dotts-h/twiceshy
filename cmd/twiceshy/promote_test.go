@@ -53,10 +53,10 @@ func eligibleRec(id string) *record.Record {
 
 func TestPromoteCorpus_PromotesEligiblePersistsFlip(t *testing.T) {
 	recs := []*record.Record{
-		eligibleRec("exp-0100"),                 // promoted
-		eligibleRec("exp-0101"),                 // held
+		eligibleRec("exp-0100"),                 // promoted (repro-eligible)
+		eligibleRec("exp-0101"),                 // held (repro-eligible, not promoted)
 		{ID: "exp-0102", Status: "validated"},   // ineligible (not quarantined)
-		{ID: "exp-0103", Status: "quarantined"}, // ineligible (no repro)
+		{ID: "exp-0103", Status: "quarantined"}, // prose-class (no repro, no vuln id) → held, ADR-0020
 	}
 	fp := &fakePromoter{promote: map[string]bool{"exp-0100": true}}
 	var persisted []string
@@ -70,15 +70,16 @@ func TestPromoteCorpus_PromotesEligiblePersistsFlip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("promoteCorpus: %v", err)
 	}
-	if st.promoted != 1 || st.held != 1 || st.ineligible != 2 {
-		t.Fatalf("stats = %+v, want promoted 1 / held 1 / ineligible 2", st)
+	if st.promoted != 1 || st.held != 2 || st.ineligible != 1 {
+		t.Fatalf("stats = %+v, want promoted 1 / held 2 / ineligible 1 (exp-0103 is now prose-class, ADR-0020)", st)
 	}
 	if len(persisted) != 1 || persisted[0] != "exp-0100" {
 		t.Fatalf("persisted = %v, want [exp-0100] (only the promoted record is written)", persisted)
 	}
-	// Ineligible records never reach the promoter (cost guard).
-	if strings.Join(fp.calls, ",") != "exp-0100,exp-0101" {
-		t.Fatalf("promoter calls = %v, want only the two eligible records", fp.calls)
+	// Ineligible records (exp-0102, not quarantined) never reach the promoter (cost
+	// guard); the two repro-eligible records and the prose-class exp-0103 do.
+	if strings.Join(fp.calls, ",") != "exp-0100,exp-0101,exp-0103" {
+		t.Fatalf("promoter calls = %v, want the repro-eligible records + the prose-class record", fp.calls)
 	}
 }
 

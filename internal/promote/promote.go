@@ -40,6 +40,7 @@ type Promoter struct {
 	attestor      Attestor
 	judge         judge.Judge
 	advisoryPanel judge.Judge                                                   // ADR-0016: diverse panel for advisory-class records; nil = skip
+	prosePanel    judge.Judge                                                   // ADR-0020: cross-family (gpt-oss+agy) panel for prose-class records; nil = skip
 	stalenessGate func(ctx context.Context, rec *record.Record) *doctor.Finding // #0071: born-stale gate; nil = ungated
 	readRepro     func(reproPath string) (string, error)                        // corpus-relative repro path → content
 	now           func() string                                                 // validated_at date, "YYYY-MM-DD"
@@ -61,6 +62,14 @@ func WithClock(now func() string) Option { return func(p *Promoter) { p.now = no
 // (ADR-0016). When nil, advisory records skip with a human-left reason.
 func WithAdvisoryPanel(j judge.Judge) Option {
 	return func(p *Promoter) { p.advisoryPanel = j }
+}
+
+// WithProsePanel wires the cross-family panel for prose-class promotions (ADR-0020):
+// a no-repro, no-source lesson is judged on its own coherence + safety, poison gating,
+// by a panel that excludes the gemini free tier (privacy, ADR-0016 §5). When nil,
+// prose records skip with a human-left reason.
+func WithProsePanel(j judge.Judge) Option {
+	return func(p *Promoter) { p.prosePanel = j }
 }
 
 // WithStalenessGate refuses to promote a record the staleness doctor would
@@ -136,10 +145,31 @@ func EligibleAdvisory(rec *record.Record) (bool, string) {
 	return true, ""
 }
 
-// Promotable reports whether Promote should attempt this record (proof path or
-// advisory panel path).
+// EligibleProse reports whether a quarantined prose-class record may be auto-promoted
+// via the cross-family panel (ADR-0020), without proof or a cited source. The
+// content-screen is MANDATORY here (a security-flagged prose record is held — ADR-0020
+// §2c), as are quarantined and not-an-outcome-report; the panel is Promote's job.
+func EligibleProse(rec *record.Record) (bool, string) {
+	switch {
+	case rec.Status != "quarantined":
+		return false, "not quarantined"
+	case rec.Provenance.Disputes != nil:
+		return false, "record is an outcome report (#0031), not a promotable lesson"
+	case len(rec.Provenance.SecurityFlags) > 0:
+		return false, "security-flagged record cannot be validated"
+	case !record.IsProseClass(rec):
+		return false, "not prose-class (carries a vuln id or a repro)"
+	}
+	return true, ""
+}
+
+// Promotable reports whether Promote should attempt this record (proof path, advisory
+// panel, or prose panel).
 func Promotable(rec *record.Record) (bool, string) {
 	if ok, _ := EligibleAdvisory(rec); ok {
+		return true, ""
+	}
+	if ok, _ := EligibleProse(rec); ok {
 		return true, ""
 	}
 	return Eligible(rec)
@@ -154,6 +184,13 @@ func (p *Promoter) Promote(ctx context.Context, rec *record.Record) (Outcome, er
 	// Advisory-class panel path (ADR-0016) — before the proof path.
 	if ok, _ := EligibleAdvisory(rec); ok {
 		return p.promoteAdvisory(ctx, rec)
+	}
+
+	// Prose-class panel path (ADR-0020) — a no-repro, no-source lesson, judged by the
+	// cross-family panel. Before the proof eligibility check, which would otherwise skip
+	// it as "no executable proof — left for a human".
+	if ok, _ := EligibleProse(rec); ok {
+		return p.promoteProse(ctx, rec)
 	}
 
 	// Eligibility — only the execution-provable class is auto-promotable; the
@@ -232,6 +269,47 @@ func (p *Promoter) promoteAdvisory(ctx context.Context, rec *record.Record) (Out
 	}
 
 	panel := panelVerdicts(p.advisoryPanel)
+	origStatus, origValidatedAt, origPromotion := rec.Status, rec.Provenance.ValidatedAt, rec.Provenance.Promotion
+	validatedAt := p.now()
+	rec.Status = "validated"
+	rec.Provenance.ValidatedAt = &validatedAt
+	rec.Provenance.Promotion = &record.Promotion{
+		Panel:         panel,
+		JudgeModel:    verdict.Model,
+		JudgeDecision: string(verdict.Decision),
+	}
+	if err := record.Validate(rec); err != nil {
+		rec.Status, rec.Provenance.ValidatedAt, rec.Provenance.Promotion = origStatus, origValidatedAt, origPromotion
+		return Outcome{}, fmt.Errorf("promote %s: promoted record is invalid (not persisted): %w", rec.ID, err)
+	}
+	return Outcome{Promoted: true, Verdict: verdict}, nil
+}
+
+// promoteProse promotes a prose-class record (ADR-0020) via the cross-family panel —
+// no attestation, no cited source: the panel judges the advice on its own coherence +
+// safety (poison gating, ProsePanelSystemV1). Fail-safe in every direction, exactly like
+// the advisory path: a nil panel, any member error/timeout, or any dissent leaves the
+// record quarantined. The content-screen is already enforced by EligibleProse.
+func (p *Promoter) promoteProse(ctx context.Context, rec *record.Record) (Outcome, error) {
+	if p.prosePanel == nil {
+		return skip("no prose panel configured — left for a human (ADR-0013 §5)")
+	}
+	// Born-stale gate (ADR-0016 §7, #0071): a lesson whose valid.until is already past is
+	// not promote-worthy; held, quarantined, before the costly panel.
+	if p.stalenessGate != nil {
+		if f := p.stalenessGate(ctx, rec); f != nil {
+			return skip("record is born-stale, not promoted (#0071): " + f.Issue)
+		}
+	}
+	verdict, err := p.prosePanel.Judge(ctx, judge.Request{Record: rec, Prose: true})
+	if err != nil {
+		return Outcome{Reason: "prose panel unavailable — stays quarantined (fail-safe): " + err.Error(), Verdict: verdict}, nil
+	}
+	if !verdict.Approved() {
+		return Outcome{Reason: "prose panel did not approve — stays quarantined", Verdict: verdict}, nil
+	}
+
+	panel := panelVerdicts(p.prosePanel)
 	origStatus, origValidatedAt, origPromotion := rec.Status, rec.Provenance.ValidatedAt, rec.Provenance.Promotion
 	validatedAt := p.now()
 	rec.Status = "validated"

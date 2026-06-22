@@ -126,6 +126,11 @@ type Request struct {
 	// the prompt production actually uses (#0063). A judge configured Advisory:true
 	// renders the advisory prompt regardless; this is the per-request escalation.
 	Advisory bool
+	// Prose routes this single request to the prose-class panel prompt (ADR-0020):
+	// a no-repro, no-source lesson judged on its own coherence + safety, with the
+	// poison check gating. Mutually exclusive with Advisory (a record is one class);
+	// Advisory takes precedence if both are set.
+	Prose bool
 }
 
 // Judge decides what a green attestation cannot. A non-nil error means NO
