@@ -1,7 +1,7 @@
 ---
 id: 0063
 title: judgeeval lacks advisory-prompt routing — can't measure cheap judges on the Sonnet advisory gold-set
-status: open
+status: closed
 severity: medium
 group: 0015
 depends_on: []
@@ -41,6 +41,14 @@ score doesn't reflect production advisory judging.
 The Sonnet audit produced 66 approve / 19 reject labels across the 85 quarantined
 advisories (`runs/sonnet-advisory-audit.json`) ready to ingest as advisory gold
 cases once routing exists.
+
+## Resolution
+Part (a) — the routing — shipped: `judge.Request.Advisory` (per-request flag,
+OR'd with the judge's config in `ModelJudge.Judge`); `judgeeval` sets it from
+`record.IsAdvisoryClass` in `Case.Request()`; the gold loader exempts advisory-class
+cases from the repro requirement; a demonstrative advisory gold case (`ADV1`) +
+tests guard it. Part (b) — bulk-ingesting the 85 Sonnet labels as advisory gold
+cases — is split to **#0074** (a data task this routing enables).
 
 ## Notes
 

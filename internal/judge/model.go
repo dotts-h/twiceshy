@@ -168,7 +168,7 @@ func (j *ModelJudge) Ping(ctx context.Context) error {
 // failure it returns an error and the zero Verdict, never a spurious approve.
 func (j *ModelJudge) Judge(ctx context.Context, req Request) (Verdict, error) {
 	prompt := BuildPrompt(req)
-	if j.advisory {
+	if j.advisory || req.Advisory {
 		prompt = BuildAdvisoryPrompt(req)
 	}
 	body, err := json.Marshal(wireRequest{Model: j.model, Prompt: prompt, System: j.system, Think: j.think})

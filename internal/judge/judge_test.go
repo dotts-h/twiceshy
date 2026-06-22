@@ -166,6 +166,40 @@ func TestModelJudgeApprove(t *testing.T) {
 	}
 }
 
+// #0063: a per-request Advisory flag lets one judge render the advisory prompt for
+// an advisory-class case and the prose prompt otherwise — how judgeeval routes a
+// mixed gold set through a single judge. A prose-configured judge must honour it.
+func TestModelJudge_PerRequestAdvisoryRoutesPrompt(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf, _ := io.ReadAll(r.Body)
+		gotBody = string(buf)
+		_, _ = w.Write([]byte(approveBody()))
+	}))
+	defer srv.Close()
+	j, err := judge.NewModelJudge(judge.Config{Endpoint: srv.URL, Model: "gemini-2.5-pro", DrafterModel: "claude-opus-4-8", Client: srv.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	adv := sampleRequest()
+	adv.Advisory = true
+	if _, err := j.Judge(context.Background(), adv); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gotBody, "vulnerability advisory imported by a TRUSTED importer") {
+		t.Fatalf("req.Advisory=true must render the advisory prompt; body=%s", gotBody)
+	}
+
+	prose := sampleRequest() // Advisory defaults false
+	if _, err := j.Judge(context.Background(), prose); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gotBody, "A sandbox already PROVED") {
+		t.Fatalf("req.Advisory=false must render the prose prompt; body=%s", gotBody)
+	}
+}
+
 func TestModelJudgeReject(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"decision":"reject","checks":[

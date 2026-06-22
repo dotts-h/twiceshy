@@ -121,6 +121,11 @@ type Request struct {
 	Record      *record.Record
 	Attestation repro.Attestation
 	Repros      []ReproArtifact
+	// Advisory routes this single request to the advisory prompt (ADR-0016) even on
+	// a prose-configured judge — how judgeeval scores an advisory-class case against
+	// the prompt production actually uses (#0063). A judge configured Advisory:true
+	// renders the advisory prompt regardless; this is the per-request escalation.
+	Advisory bool
 }
 
 // Judge decides what a green attestation cannot. A non-nil error means NO

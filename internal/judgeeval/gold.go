@@ -46,7 +46,15 @@ type Case struct {
 // Request renders the case into the judging request the judge actually sees —
 // the same shape twiceshy's promote/adapt paths build.
 func (c Case) Request() judge.Request {
-	return judge.Request{Record: c.record, Attestation: c.attestation, Repros: c.repros}
+	return judge.Request{
+		Record:      c.record,
+		Attestation: c.attestation,
+		Repros:      c.repros,
+		// Route advisory-class records (vuln id, no repro) to the advisory prompt the
+		// production panel uses — scoring them under the prose rubric measures the
+		// wrong thing (#0063, ADR-0016).
+		Advisory: record.IsAdvisoryClass(c.record),
+	}
 }
 
 // ShouldReject reports whether ground truth wants this case rejected — the cases
@@ -111,7 +119,9 @@ func LoadGold() ([]Case, error) {
 		if gc.Record == nil || gc.Record.Title == "" {
 			errs = append(errs, fmt.Errorf("%s: record with a title is required", where))
 		}
-		if len(gc.Repros) == 0 {
+		// An advisory-class record (ADR-0016) carries NO repro — the panel judges
+		// fidelity, not execution — so it is exempt from the repro requirement (#0063).
+		if len(gc.Repros) == 0 && !record.IsAdvisoryClass(gc.Record) {
 			errs = append(errs, fmt.Errorf("%s: at least one repro is required (the judge reads it)", where))
 		}
 		if gc.Rationale == "" {

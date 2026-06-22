@@ -1149,3 +1149,38 @@ cases:
           set -u
           (cd /work/fix && go test -run TestStream ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
           echo OK
+
+  # ───────────────────────── ADVISORY (1) — #0063 routing guard ─────────────────────────
+  # An advisory-class case (vuln id in error_signatures) carries NO repro — the
+  # advisory panel judges fidelity, not execution (ADR-0016). It loads only because
+  # the gold loader exempts advisory-class records from the repro requirement, and it
+  # is rendered via judge.BuildAdvisoryPrompt because Case.Request() sets Advisory
+  # from record.IsAdvisoryClass. Both are the #0063 routing this guards.
+  - id: ADV1
+    mode: approve
+    want_decision: approve
+    want_failing_checks: []
+    rationale: >-
+      Clean advisory-class record: the GHSA id is in error_signatures (routing it to
+      the advisory prompt), the package and remediation are internally consistent, the
+      provenance is facts-only, and nothing is misleading — the advisory panel approves.
+      The control that a healthy no-repro advisory sails through, and the regression
+      guard for #0063 advisory-prompt routing.
+    record:
+      id: exp-9101
+      kind: trap
+      status: quarantined
+      title: "GHSA-aaaa-bbbb-cccc: vulnerability in example.com/widget"
+      symptom:
+        summary: "GHSA-aaaa-bbbb-cccc: known vulnerability in example.com/widget, fixed in 2.4.1."
+        error_signatures:
+          - GHSA-aaaa-bbbb-cccc
+      applies_to:
+        - ecosystem: Go
+          package: example.com/widget
+      resolution:
+        root_cause: Known vulnerability documented in OSV advisory GHSA-aaaa-bbbb-cccc.
+        fix: Upgrade example.com/widget past the fixed version (2.4.1); see the advisory.
+      provenance:
+        source_license: none (facts only)
+        source_url: https://github.com/advisories/GHSA-aaaa-bbbb-cccc

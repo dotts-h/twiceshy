@@ -8,7 +8,36 @@ import (
 
 	"github.com/dotts-h/twiceshy/internal/judge"
 	"github.com/dotts-h/twiceshy/internal/judgeeval"
+	"github.com/dotts-h/twiceshy/internal/record"
 )
+
+// #0063: an advisory-class gold case (vuln id, no repro) must (a) load — the loader
+// exempts advisory records from the repro requirement — and (b) render via the
+// advisory prompt, i.e. Case.Request().Advisory mirrors record.IsAdvisoryClass for
+// every case. Scoring an advisory under the prose rubric measures the wrong thing.
+func TestLoadGold_AdvisoryCasesRouteToAdvisoryPrompt(t *testing.T) {
+	cases, err := judgeeval.LoadGold()
+	if err != nil {
+		t.Fatalf("LoadGold: %v", err)
+	}
+	advisoryCases := 0
+	for _, c := range cases {
+		req := c.Request()
+		want := record.IsAdvisoryClass(req.Record)
+		if req.Advisory != want {
+			t.Errorf("case %s: Request().Advisory=%v, want %v (must mirror IsAdvisoryClass)", c.ID, req.Advisory, want)
+		}
+		if want {
+			advisoryCases++
+			if len(req.Repros) != 0 {
+				t.Errorf("case %s: advisory case must carry no repro, got %d", c.ID, len(req.Repros))
+			}
+		}
+	}
+	if advisoryCases == 0 {
+		t.Fatal("gold set has no advisory-class case — the #0063 routing is unguarded")
+	}
+}
 
 // The embedded gold set is the eval's ground truth; if it is internally
 // inconsistent the whole eval is meaningless, so CI guards it.
@@ -35,7 +64,9 @@ func TestLoadGold_ParsesAndIsConsistent(t *testing.T) {
 		if req.Record == nil || strings.TrimSpace(req.Record.Title) == "" {
 			t.Errorf("%s: empty record/title", c.ID)
 		}
-		if len(req.Repros) == 0 {
+		// Advisory-class cases (ADR-0016) carry no repro by design (#0063); every
+		// other case must render a repro the judge can read.
+		if len(req.Repros) == 0 && !req.Advisory {
 			t.Errorf("%s: no repros", c.ID)
 		}
 
