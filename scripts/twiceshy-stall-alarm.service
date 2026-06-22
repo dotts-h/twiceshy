@@ -1,0 +1,12 @@
+[Unit]
+Description=twiceshy corpus stall alarm — alert if import/validate PRs pile up (the corpus is frozen)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ori
+# Alert channel + thresholds via /etc/twiceshy/stall-alarm.env if present
+# (TWICESHY_ALERT_URL / NTFY_URL, TWICESHY_STALL_THRESHOLD_MIN, TWICESHY_STALL_COOLDOWN).
+EnvironmentFile=-/etc/twiceshy/stall-alarm.env
+ExecStart=/home/ori/.local/bin/corpus-stall-alarm.sh

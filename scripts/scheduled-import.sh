@@ -12,6 +12,13 @@
 # so re-running only adds genuinely-new advisories. Meant to be invoked by a
 # systemd timer on the brain; safe to run by hand.
 #
+# Fetch horizon (#0072 item 4): osv-live fetches the FULL OSV history per ecosystem
+# (internal/ingest/osvlive.go pulls <ecosystem>/all.zip — no date window). The LIMIT
+# below bounds how many NEW records are written per run, not what is fetched; with
+# dedup, "get everything" = run repeatedly until a run adds zero new records (the
+# corpus plateaus once caught up). No backfill mode is needed — the horizon is
+# already the whole history; raise LIMIT to catch up faster.
+#
 # Env knobs:
 #   TWICESHY_REPO          DEDICATED import clone (default /home/ori/twiceshy-import).
 #                          MUST NOT be a working checkout — this script does
@@ -20,6 +27,10 @@
 #   TWICESHY_IMPORT_LIMIT  max new records per run (default 25; the "no runaway" bound)
 #   TWICESHY_AUTOMERGE     1 = auto-merge the PR on green (default), 0 = leave it open
 #   NTFY_URL               ntfy topic URL for notifications (optional; skipped if unset)
+#   TWICESHY_PREFLIGHT_CMD pre-flight gate run on the new records BEFORE the PR is
+#                          opened (#0072 item 1); default = the fast corpus-guard
+#                          subset. On red, no PR is opened and ntfy fires — never
+#                          create an un-mergeable PR that piles up red (lesson exp-0746).
 #   GO                     go toolchain (default /usr/local/go/bin/go)
 set -euo pipefail
 
@@ -33,6 +44,10 @@ ECOSYSTEMS="${TWICESHY_IMPORT_ECOSYSTEMS:-npm PyPI Go}"
 AUTOMERGE="${TWICESHY_AUTOMERGE:-1}"
 GO="${GO:-/usr/local/go/bin/go}"
 NTFY_URL="${NTFY_URL:-}"
+# Pre-flight gate: the corpus-guard subset (schema/dup-id via LoadCorpus, the D2
+# staleness guard, the push-precision eval) — fast and Docker-free, so it runs on the
+# brain. Override to `make test` for the full gate.
+PREFLIGHT_CMD="${TWICESHY_PREFLIGHT_CMD:-$GO test ./internal/record/ ./internal/doctor/ ./internal/eval/ -count=1}"
 
 notify() { [ -n "$NTFY_URL" ] && curl -fsS -d "$1" "$NTFY_URL" >/dev/null 2>&1 || true; }
 
@@ -81,6 +96,19 @@ git commit -q \
   -m "Automated live ${SOURCE} import (issue 0022). Records are quarantined; promotion to validated is a separate human/harness step." \
   -m "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 sha="$(git rev-parse HEAD)"
+
+# Pre-flight gate (#0072 item 1): run the corpus guard on the committed batch BEFORE
+# opening a PR. The PR's CI runs the same gate, so a failure here is a failure there —
+# catch it now and DON'T open an un-mergeable PR that sits red and freezes the queue
+# (the exp-0746 freeze). Records stay committed on the local branch in the dedicated
+# clone for inspection; the next run dedups, so a transient failure self-heals.
+if ! gate_out="$(cd "$REPO" && eval "$PREFLIGHT_CMD" 2>&1)"; then
+  notify "twiceshy import PRE-FLIGHT FAILED (${n} ${SOURCE} records held, NO PR opened) — inspect branch ${branch} in ${REPO}: $(printf '%s' "$gate_out" | tail -n 3)"
+  echo "pre-flight gate failed — not opening a PR:"; printf '%s\n' "$gate_out" | tail -n 20
+  git checkout main -q
+  exit 1
+fi
+
 git push -q -u origin "$branch"
 
 api="http://192.168.50.244:3030/api/v1/repos/claude/twiceshy"
@@ -91,9 +119,19 @@ pr="$(jq -nc --arg t "corpus(${SOURCE}): ${n} new quarantined records [scheduled
       | curl -fsS -X POST "$api/pulls" -H "Authorization: token $tok" -H "Content-Type: application/json" -d @- \
       | jq -r '.number')"
 
-if [ "$AUTOMERGE" = "1" ] && command -v forgejo-ci-merge >/dev/null; then
-  forgejo-ci-merge claude/twiceshy "$pr" "$sha" "$REPO" || true
-fi
 git checkout main -q
-notify "twiceshy: imported ${n} new ${SOURCE} records (PR #${pr})"
+
+# Don't swallow the merge result (#0072 item 2, lesson exp-0746): forgejo-ci-merge
+# exits 0=merged, 1=CI red (left open), 3=timeout. A left-open PR is exactly the
+# silent-stall seed — announce it NOW so it's visible at creation, not only when the
+# periodic corpus-stall-alarm catches the pile-up hours later.
+if [ "$AUTOMERGE" != "1" ]; then
+  notify "twiceshy: imported ${n} new ${SOURCE} records (PR #${pr}) — auto-merge off, PR left open"
+elif ! command -v forgejo-ci-merge >/dev/null; then
+  notify "twiceshy: imported ${n} new ${SOURCE} records (PR #${pr}) — forgejo-ci-merge unavailable, PR left open"
+elif forgejo-ci-merge claude/twiceshy "$pr" "$sha" "$REPO"; then
+  notify "twiceshy: imported ${n} new ${SOURCE} records and merged PR #${pr}"
+else
+  notify "twiceshy: import PR #${pr} (${n} ${SOURCE} records) left OPEN — auto-merge refused (CI red or timeout); needs attention"
+fi
 echo "done: ${n} records, PR #${pr}"

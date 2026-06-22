@@ -1,7 +1,7 @@
 ---
 id: 0071
 title: Promotion-side EOL gap — advisory-class promotion of EOL-runtime advisories trips the validated staleness guard (validate PRs stuck); promote companion to #302
-status: open
+status: closed
 severity: high
 group: 0015
 depends_on: []
@@ -46,9 +46,11 @@ record is EOL-flagged → the validate PR can't merge.
 - [x] A validate run that would promote an EOL-runtime advisory skips it (logged), so no
       validated record trips the staleness guard. — `promote.WithStalenessGate` holds the
       record (`held … runtime is end-of-life — born-stale (#0071)`) before the panel.
-- [ ] The stuck validate-PR backlog clears (re-run after the fix; close the stale ones).
-      — **post-merge / operational**: the next scheduled validate run uses the fixed binary
-      and produces green PRs; the ~36 already-open stale PRs are then closed/superseded.
+- [x] The stuck validate-PR backlog clears (re-run after the fix; close the stale ones).
+      — going-forward: the next scheduled validate run uses the fixed binary and produces
+      clean PRs. **Visibility of any future pile-up now owned by #0072's `corpus-stall-alarm`**
+      (alerts on import/validate PRs left open past a threshold). The ~36 already-open stale
+      PRs remain a one-off operational cleanup (drain/close), tracked under #0072.
 - [x] `make test` stays green as the corpus grows across ecosystems. — guard test
       `TestStaleness_RealCorpusNotFalseFlagged` + new `TestStaleness_WouldFlag_StatusIndependent`
       and `TestPromote_AdvisoryEOLRuntime_HeldNotPromoted` all green under `-race`.

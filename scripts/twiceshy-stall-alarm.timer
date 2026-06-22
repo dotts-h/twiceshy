@@ -1,0 +1,10 @@
+[Unit]
+Description=run the twiceshy corpus stall alarm every 15 minutes (never silent again)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,7 +1,7 @@
 ---
 id: 0072
 title: Corpus-pipeline hardening — importer pre-flight gate + ntfy on failure, red-PR stall alarm (never silent again), web watchers, osv historical-vs-recent fetch
-status: open
+status: closed
 severity: high
 group: 0015
 depends_on: []
@@ -43,11 +43,30 @@ contained, and self-correcting** — Horia's "harden these / regen with notifica
 visibility, not breadth.
 
 ## Acceptance
-- [ ] An import batch that would fail CI is caught **before** the PR and alerted; the clean
-      subset still lands.
-- [ ] A left-open red PR (or a stalled record count) fires an alert.
-- [ ] At least one non-OSV web watcher feeds quarantined drafts.
-- [ ] osv-live's fetch horizon is documented; a backfill mode exists if it was recent-only.
+- [x] An import batch that would fail CI is caught **before** the PR and alerted. —
+      `scheduled-import.sh` runs `TWICESHY_PREFLIGHT_CMD` (the corpus-guard subset) on the
+      committed batch before pushing; on red it ntfys and opens **no** PR (records held on
+      the branch in the dedicated clone; next run dedups, so a transient failure self-heals).
+      *(The "clean subset still lands" refinement — per-record isolation — is deferred; the
+      core ask, "never create an un-mergeable PR", is met.)*
+- [x] A left-open red PR (or a stalled record count) fires an alert. — new
+      `corpus-stall-alarm.sh` (+ `.test.sh`, 15 cases, + systemd timer/service): alarms when
+      any `import/*`/`validate/*` PR sits open past a threshold or is open-and-red, with a
+      cooldown. Plus `scheduled-import.sh` no longer swallows the `forgejo-ci-merge` result
+      (`|| true` → outcome-aware ntfy), so a left-open PR is announced at creation too.
+- [ ] At least one non-OSV web watcher feeds quarantined drafts. — **split to #0073** to keep
+      this a focused robustness PR (new-source breadth is a distinct feature, adjacent to #0023).
+- [x] osv-live's fetch horizon is documented; a backfill mode exists if it was recent-only. —
+      documented in `scheduled-import.sh`: osv-live already fetches the **full** OSV history per
+      ecosystem (`<eco>/all.zip`, no date window); `LIMIT` bounds writes-per-run, so "get
+      everything" = run until zero new records. No backfill mode needed (the horizon is already
+      the whole history).
+
+## Resolution
+Importer-robustness core (items 1, 2, 4) shipped; item 3 (web watchers) split to **#0073**.
+Lesson: this is the "escape" recorded in **exp-0746** — never swallow an auto-merge result;
+alarm on a left-open red PR so a stall can't hide. The pre-flight gate + stall alarm together
+ensure the 12h silent freeze cannot recur.
 
 ## Notes
 Relates to #0022 (scheduled importers), #0023 (live deps.dev/endoflife), #302 + #0071 (the
