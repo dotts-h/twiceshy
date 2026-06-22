@@ -4,6 +4,7 @@ package judge_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -182,13 +183,24 @@ func TestModelJudge_PerRequestAdvisoryRoutesPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	sysOf := func(body string) string {
+		var w struct {
+			System string `json:"system"`
+		}
+		_ = json.Unmarshal([]byte(body), &w)
+		return w.System
+	}
+
 	adv := sampleRequest()
 	adv.Advisory = true
 	if _, err := j.Judge(context.Background(), adv); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(gotBody, "vulnerability advisory imported by a TRUSTED importer") {
-		t.Fatalf("req.Advisory=true must render the advisory prompt; body=%s", gotBody)
+		t.Fatalf("req.Advisory=true must render the advisory USER prompt; body=%s", gotBody)
+	}
+	if sysOf(gotBody) != judge.AdvisorySystemV1 {
+		t.Fatalf("req.Advisory=true must pair the advisory SYSTEM prompt; got system=%q", sysOf(gotBody))
 	}
 
 	prose := sampleRequest() // Advisory defaults false
@@ -196,7 +208,10 @@ func TestModelJudge_PerRequestAdvisoryRoutesPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(gotBody, "A sandbox already PROVED") {
-		t.Fatalf("req.Advisory=false must render the prose prompt; body=%s", gotBody)
+		t.Fatalf("req.Advisory=false must render the prose USER prompt; body=%s", gotBody)
+	}
+	if sysOf(gotBody) == judge.AdvisorySystemV1 {
+		t.Fatal("req.Advisory=false must NOT use the advisory system prompt")
 	}
 }
 

@@ -168,10 +168,18 @@ func (j *ModelJudge) Ping(ctx context.Context) error {
 // failure it returns an error and the zero Verdict, never a spurious approve.
 func (j *ModelJudge) Judge(ctx context.Context, req Request) (Verdict, error) {
 	prompt := BuildPrompt(req)
+	system := j.system
 	if j.advisory || req.Advisory {
 		prompt = BuildAdvisoryPrompt(req)
 	}
-	body, err := json.Marshal(wireRequest{Model: j.model, Prompt: prompt, System: j.system, Think: j.think})
+	if req.Advisory && !j.advisory {
+		// Per-request escalation (#0063): pair the advisory USER prompt with the
+		// advisory SYSTEM prompt too, so judgeeval measures the exact pairing the
+		// production advisory panel uses (Advisory:true + System:AdvisorySystemV1).
+		// A judge already configured advisory keeps its configured system.
+		system = AdvisorySystemV1
+	}
+	body, err := json.Marshal(wireRequest{Model: j.model, Prompt: prompt, System: system, Think: j.think})
 	if err != nil {
 		return Verdict{}, fmt.Errorf("judge: marshal request: %w", err)
 	}
