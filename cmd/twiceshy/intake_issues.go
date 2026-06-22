@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/dotts-h/twiceshy/internal/screen"
 	"github.com/dotts-h/twiceshy/internal/spool"
@@ -24,8 +25,9 @@ import (
 // allocator (the exp-0743 stale-id lesson applies to issue numbers too) — and the
 // drainer only fills the created file's body and screens the content. A spooled
 // issue whose normalized title already exists is skipped (no duplicate). A malformed
-// entry is logged and removed so it cannot wedge a scheduled drain; an allocation or
-// write failure aborts so the entry is retried next run. Issues land triage-flagged.
+// entry is logged and removed so it cannot wedge a scheduled drain; a partial
+// materialize is rolled back so the entry is retried rather than silently lost.
+// Issues land triage-flagged.
 func runIntakeIssues(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("intake-issues", flag.ContinueOnError)
 	repo := fs.String("repo", ".", "repo root containing docs/issues/ and scripts/new-issue.sh")
@@ -41,9 +43,15 @@ func runIntakeIssues(args []string, out io.Writer) error {
 	if newIssue == "" {
 		newIssue = filepath.Join(*repo, "scripts", "new-issue.sh")
 	}
-	issuesDir := filepath.Join(*repo, "docs", "issues")
+	indexPath := filepath.Join(*repo, "docs", "issues", "INDEX.md")
 
-	seen, err := existingIssueTitles(filepath.Join(issuesDir, "INDEX.md"))
+	// The repo root (new-issue.sh prints paths relative to it) is invariant across the
+	// whole batch — resolve it once, not per issue.
+	root, err := gitToplevel(*repo)
+	if err != nil {
+		return err
+	}
+	seen, err := existingIssueTitles(indexPath)
 	if err != nil {
 		return fmt.Errorf("reading issue index: %w", err)
 	}
@@ -72,7 +80,7 @@ func runIntakeIssues(args []string, out io.Writer) error {
 			dup++
 			continue
 		}
-		path, err := materializeIssue(*repo, newIssue, iss, today)
+		path, err := materializeIssue(*repo, root, newIssue, indexPath, iss, today)
 		if err != nil {
 			// Allocation/write failure is environmental — leave the entry queued for
 			// retry rather than dropping a captured issue.
@@ -87,15 +95,53 @@ func runIntakeIssues(args []string, out io.Writer) error {
 	return nil
 }
 
-// materializeIssue allocates the next issue number via the canonical new-issue.sh
-// (so numbering and the INDEX row never drift from the human path) and then rewrites
-// the created file's body with the agent's description, category, author and any
-// related record — re-screening the content so risky input is flagged before it
-// lands in docs/issues. It returns the created file's absolute path.
-func materializeIssue(repo, script string, iss spool.Issue, now string) (string, error) {
-	// The title is passed as a single argv (no shell), so agent text cannot inject
-	// flags or shell syntax; new-issue.sh takes $1 as the title verbatim.
-	cmd := exec.Command("bash", script, iss.Title, "--severity", "medium")
+// materializeIssue allocates the next issue number via the canonical new-issue.sh (so
+// numbering and the INDEX row never drift from the human path) and fills the created
+// file's body with the agent's submission. Everything that can fail without side
+// effects is computed BEFORE the allocator runs, so the only fallible step after the
+// script writes the file + INDEX row is the atomic body-write — which, on failure, is
+// rolled back so the spooled issue re-materializes cleanly rather than being silently
+// lost. It returns the created file's absolute path.
+func materializeIssue(repo, root, script, indexPath string, iss spool.Issue, now string) (string, error) {
+	// The title is agent-controlled: reduce it to a single safe line so it cannot
+	// inject YAML frontmatter lines, split the INDEX table row, or smuggle newlines
+	// into the filename. (The body is data, rendered below; the title goes through the
+	// unquoted new-issue.sh frontmatter + INDEX row, so it must be sanitized.)
+	safeTitle := sanitizeTitle(iss.Title)
+	if safeTitle == "" {
+		return "", errors.New("title is empty after sanitization")
+	}
+	flags := screen.Flags(screen.Scan(iss.Title, iss.Description))
+	body := iss.RenderBody(now, flags)
+
+	// Phase 1: allocate the number, append the INDEX row, write the template file. The
+	// title is a single argv (no shell), so it cannot inject flags or shell syntax.
+	rel, err := runNewIssue(repo, script, safeTitle)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(root, rel)
+
+	// Phase 2: swap the empty template body for the issue's content. Any failure here
+	// rolls back phase 1's file + INDEX row so the still-queued entry re-materializes
+	// cleanly (otherwise its own orphaned INDEX row would make the retry look like a
+	// duplicate and silently drop it).
+	final, err := fillIssueBody(path, body)
+	if err != nil {
+		rollbackAllocation(path, indexPath, issueID(rel))
+		return "", err
+	}
+	if err := writeFileAtomic(path, []byte(final), 0o644); err != nil {
+		rollbackAllocation(path, indexPath, issueID(rel))
+		return "", err
+	}
+	return path, nil
+}
+
+// runNewIssue invokes the canonical allocator and returns the created file's path
+// relative to the repo root (the path new-issue.sh prints on stdout).
+func runNewIssue(repo, script, title string) (string, error) {
+	cmd := exec.Command("bash", script, title, "--severity", "medium")
 	cmd.Dir = repo
 	stdout, err := cmd.Output()
 	if err != nil {
@@ -105,53 +151,82 @@ func materializeIssue(repo, script string, iss spool.Issue, now string) (string,
 	if rel == "" {
 		return "", errors.New("new-issue.sh printed no path")
 	}
-	// The script prints a path relative to the git toplevel it cd's to; resolve it
-	// against that same toplevel (which -repo points into).
-	root, err := gitToplevel(repo)
-	if err != nil {
-		return "", err
-	}
-	path := filepath.Join(root, rel)
+	return rel, nil
+}
 
+// fillIssueBody keeps the script-written frontmatter (the single source of the
+// id/title/severity shape) and swaps the empty template body for the issue's content.
+// The split is on the frontmatter delimiter; the title is single-line (sanitized) so it
+// cannot contain a spurious delimiter that would hijack the split.
+func fillIssueBody(path, body string) (string, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
-	// Keep the script's frontmatter (the single source of the id/title/severity
-	// shape) and replace the empty template body with the issue's content.
 	front, _, ok := strings.Cut(string(content), "\n---\n")
 	if !ok {
-		return "", fmt.Errorf("created issue %s has no frontmatter delimiter", rel)
+		return "", fmt.Errorf("created issue %s has no frontmatter delimiter", filepath.Base(path))
 	}
-	flags := screen.Flags(screen.Scan(iss.Title, iss.Description))
-	if err := os.WriteFile(path, []byte(front+"\n---\n\n"+renderIssueBody(iss, now, flags)), 0o644); err != nil {
-		return "", err
-	}
-	return path, nil
+	return front + "\n---\n\n" + body, nil
 }
 
-// renderIssueBody fills a materialized issue with the agent's submission, mirroring
-// the server's no-queue rendering (internal/server renderIssueMarkdown) so the two
-// report_issue paths produce the same docs/issues shape. The title already lives in
-// the script-written frontmatter; the screen flags ride the Notes.
-func renderIssueBody(iss spool.Issue, now string, flags []string) string {
+// rollbackAllocation undoes a partial materialize (best-effort): it removes the file
+// new-issue.sh created and strips the INDEX row it appended, so the still-queued spool
+// entry re-materializes cleanly on the next drain rather than colliding with its own
+// orphaned row.
+func rollbackAllocation(path, indexPath, id string) {
+	_ = os.Remove(path)
+	if id == "" {
+		return
+	}
+	data, err := os.ReadFile(indexPath)
+	if err != nil {
+		return
+	}
+	prefix := "| [" + id + "]"
+	var kept []string
+	for _, ln := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(ln, prefix) {
+			kept = append(kept, ln)
+		}
+	}
+	_ = writeFileAtomic(indexPath, []byte(strings.Join(kept, "\n")), 0o644)
+}
+
+// issueID extracts the NNNN number new-issue.sh allocated from the created path.
+func issueID(rel string) string {
+	base := filepath.Base(rel)
+	if len(base) >= 4 {
+		return base[:4]
+	}
+	return ""
+}
+
+// sanitizeTitle reduces an agent-controlled title to a single safe line: every run of
+// whitespace or control characters (including newlines and tabs) collapses to one
+// space, and a pipe — which would break the docs/issues markdown table row
+// new-issue.sh appends — becomes a slash. A one-line title cannot inject frontmatter
+// keys, split the INDEX row, or smuggle newlines into the filename (the contract is a
+// one-line summary).
+func sanitizeTitle(s string) string {
 	var b strings.Builder
-	b.WriteString("## Summary\n")
-	fmt.Fprintf(&b, "%s\n\n", strings.TrimSpace(iss.Description))
-	b.WriteString("## Notes\n")
-	fmt.Fprintf(&b, "Agent-submitted via report_issue (category: %s) by %s", iss.Category, iss.Author)
-	if iss.Session != "" {
-		fmt.Fprintf(&b, " (session %s)", iss.Session)
+	prevSpace := false
+	for _, r := range s {
+		switch {
+		case r == '|':
+			b.WriteByte('/')
+			prevSpace = false
+		case r < 0x20 || r == 0x7f || unicode.IsSpace(r):
+			if !prevSpace {
+				b.WriteByte(' ')
+				prevSpace = true
+			}
+		default:
+			b.WriteRune(r)
+			prevSpace = false
+		}
 	}
-	fmt.Fprintf(&b, " on %s. Triage-flagged: never auto-actioned (#0066).", now)
-	if iss.RelatedRecordID != "" {
-		fmt.Fprintf(&b, " Related record: %s.", iss.RelatedRecordID)
-	}
-	if len(flags) > 0 {
-		fmt.Fprintf(&b, " SECURITY flags: %s.", strings.Join(flags, ", "))
-	}
-	b.WriteString("\n")
-	return b.String()
+	return strings.TrimSpace(b.String())
 }
 
 // existingIssueTitles reads the normalized titles already tracked in docs/issues so

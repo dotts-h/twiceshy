@@ -150,6 +150,126 @@ func TestIntakeIssues_SkipsMalformedEntry(t *testing.T) {
 	}
 }
 
+// An agent-controlled title containing newlines, YAML metacharacters and a pipe must
+// not inject frontmatter keys, split the INDEX table row, or corrupt the filename — it
+// is reduced to a single safe line. The server's no-queue path %q-quotes the title for
+// exactly this reason; the drainer (which routes the title through the unquoted
+// new-issue.sh) must sanitize it instead. (Reviewer-found HIGH; #0075.)
+func TestIntakeIssues_SanitizesUnsafeTitle(t *testing.T) {
+	repo := setupIssuesRepo(t)
+	queue := filepath.Join(t.TempDir(), "queue")
+	if _, err := spool.EnqueueIssue(queue, spool.Issue{
+		Title:       "Boom\nstatus: closed\nseverity: critical | pwn",
+		Description: "x", Category: "bug", Author: "a", ReportedAt: "2026-06-22T12:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	if err := runIntakeIssues([]string{"-repo", repo, "-queue", queue}, &buf); err != nil {
+		t.Fatalf("runIntakeIssues: %v", err)
+	}
+
+	matches, _ := filepath.Glob(filepath.Join(repo, "docs", "issues", "0002-*.md"))
+	if len(matches) != 1 {
+		t.Fatalf("want one materialized issue 0002, got %v", matches)
+	}
+	fm := frontmatter(t, matches[0])
+	// Exactly one of each templated key — the malicious newlines did NOT add lines.
+	if n := countPrefixLines(fm, "status:"); n != 1 {
+		t.Fatalf("status injected: %d status lines in frontmatter:\n%s", n, fm)
+	}
+	if n := countPrefixLines(fm, "severity:"); n != 1 {
+		t.Fatalf("severity injected: %d severity lines:\n%s", n, fm)
+	}
+	if n := countPrefixLines(fm, "title:"); n != 1 {
+		t.Fatalf("title spans %d lines (newline injection):\n%s", n, fm)
+	}
+	if !strings.Contains(fm, "status: open") || !strings.Contains(fm, "severity: medium") {
+		t.Errorf("templated status/severity overwritten by injection:\n%s", fm)
+	}
+	// The INDEX row for 0002 is a single, well-formed table row (6 cells → 7 pipes),
+	// not split across physical lines by the title's newlines or broken by its pipe.
+	idx, _ := os.ReadFile(filepath.Join(repo, "docs", "issues", "INDEX.md"))
+	rows := 0
+	for _, ln := range strings.Split(string(idx), "\n") {
+		if strings.HasPrefix(ln, "| [0002]") {
+			rows++
+			if got := strings.Count(ln, "|"); got != 7 {
+				t.Errorf("INDEX row for 0002 malformed (%d pipes, want 7): %q", got, ln)
+			}
+		}
+	}
+	if rows != 1 {
+		t.Fatalf("want exactly one INDEX row for 0002, got %d", rows)
+	}
+}
+
+// rollbackAllocation undoes a partial materialize so a failed body-write leaves no
+// orphan file/INDEX row that would make the retry look like a duplicate and silently
+// drop the captured issue (#0075, reviewer-found). Unrelated rows are preserved.
+func TestRollbackAllocation_RemovesFileAndIndexRow(t *testing.T) {
+	dir := t.TempDir()
+	issuesDir := filepath.Join(dir, "docs", "issues")
+	if err := os.MkdirAll(issuesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(issuesDir, "0099-orphan.md")
+	if err := os.WriteFile(path, []byte("stub template"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	indexPath := filepath.Join(issuesDir, "INDEX.md")
+	index := "| id | title | status | severity | group | links |\n|----|----|----|----|----|----|\n" +
+		"| [0098](0098-keep.md) | Keep | open | medium | — | |\n" +
+		"| [0099](0099-orphan.md) | Orphan | open | medium | — | |\n"
+	if err := os.WriteFile(indexPath, []byte(index), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rollbackAllocation(path, indexPath, "0099")
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("orphan file should be removed; stat err=%v", err)
+	}
+	idx, _ := os.ReadFile(indexPath)
+	if strings.Contains(string(idx), "[0099]") {
+		t.Errorf("INDEX row for 0099 should be stripped:\n%s", idx)
+	}
+	if !strings.Contains(string(idx), "[0098]") {
+		t.Errorf("unrelated INDEX row 0098 must be preserved:\n%s", idx)
+	}
+}
+
+// frontmatter returns the YAML frontmatter block (between the first two `---`) of a
+// materialized issue file.
+func frontmatter(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if !strings.HasPrefix(s, "---\n") {
+		t.Fatalf("%s has no opening frontmatter:\n%s", path, s)
+	}
+	rest := s[len("---\n"):]
+	end := strings.Index(rest, "\n---\n")
+	if end < 0 {
+		t.Fatalf("%s has no closing frontmatter:\n%s", path, s)
+	}
+	return rest[:end]
+}
+
+func countPrefixLines(fm, prefix string) int {
+	n := 0
+	for _, ln := range strings.Split(fm, "\n") {
+		if strings.HasPrefix(ln, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
 // setupIssuesRepo builds a throwaway git repo carrying the REAL new-issue.sh and a
 // seeded docs/issues/, so intake-issues exercises the same allocator the human path
 // uses (the #0075 "no second allocator" requirement) rather than a test double.

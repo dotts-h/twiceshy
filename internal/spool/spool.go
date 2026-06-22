@@ -10,6 +10,7 @@ package spool
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -147,6 +148,32 @@ type Issue struct {
 	Author          string `json:"author"`
 	Session         string `json:"session,omitempty"`
 	ReportedAt      string `json:"reported_at"`
+}
+
+// RenderBody renders the docs/issues body for an agent-submitted issue: the
+// description under `## Summary`, then the provenance (category/author/session/related
+// record, plus any security-screen flags) under `## Notes`. Both report_issue paths —
+// the server's PR-ready no-queue fallback and the `intake-issues` drainer — share this
+// so the two never drift (one fact, one home). `now` is a pre-formatted YYYY-MM-DD
+// date; the title is NOT rendered here (it lives, escaped, in the frontmatter).
+func (i Issue) RenderBody(now string, flags []string) string {
+	var b strings.Builder
+	b.WriteString("## Summary\n")
+	fmt.Fprintf(&b, "%s\n\n", strings.TrimSpace(i.Description))
+	b.WriteString("## Notes\n")
+	fmt.Fprintf(&b, "Agent-submitted via report_issue (category: %s) by %s", i.Category, i.Author)
+	if i.Session != "" {
+		fmt.Fprintf(&b, " (session %s)", i.Session)
+	}
+	fmt.Fprintf(&b, " on %s. Triage-flagged: never auto-actioned (#0066).", now)
+	if i.RelatedRecordID != "" {
+		fmt.Fprintf(&b, " Related record: %s.", i.RelatedRecordID)
+	}
+	if len(flags) > 0 {
+		fmt.Fprintf(&b, " SECURITY flags: %s.", strings.Join(flags, ", "))
+	}
+	b.WriteString("\n")
+	return b.String()
 }
 
 // EnqueueIssue writes i as a JSON file in dir using the same atomic

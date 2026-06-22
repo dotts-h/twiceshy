@@ -156,20 +156,14 @@ func renderIssueMarkdown(title, description, category, relatedID, author, sessio
 	b.WriteString("links:\n  adr:\n  prs: []\n  issues: []\n  regression:\n")
 	b.WriteString("assets: []\n")
 	b.WriteString("---\n\n")
-	b.WriteString("## Summary\n")
-	fmt.Fprintf(&b, "%s\n\n", strings.TrimSpace(description))
-	b.WriteString("## Notes\n")
-	fmt.Fprintf(&b, "Agent-submitted via report_issue (category: %s) by %s", category, author)
-	if session != "" {
-		fmt.Fprintf(&b, " (session %s)", session)
-	}
-	fmt.Fprintf(&b, " on %s. Triage-flagged: never auto-actioned (#0066).", now.Format("2006-01-02"))
-	if relatedID != "" {
-		fmt.Fprintf(&b, " Related record: %s.", relatedID)
-	}
-	if len(flags) > 0 {
-		fmt.Fprintf(&b, " SECURITY flags: %s.", strings.Join(flags, ", "))
-	}
-	b.WriteString("\n")
+	// The body is shared with the intake-issues drainer so the queued and no-queue
+	// paths never drift (spool.Issue.RenderBody, #0075).
+	b.WriteString(spool.Issue{
+		Description:     description,
+		Category:        category,
+		RelatedRecordID: relatedID,
+		Author:          author,
+		Session:         session,
+	}.RenderBody(now.Format("2006-01-02"), flags))
 	return b.String()
 }
