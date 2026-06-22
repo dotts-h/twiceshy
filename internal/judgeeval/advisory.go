@@ -89,20 +89,48 @@ func advisoryStanzaInput(e AdvisoryEntry, lookup func(id string) (*record.Record
 	if len(checks) == 0 {
 		checks = inferChecks(e.Reason)
 	}
-	in.Mode = checks[0]
 	in.Checks = checks
+	// Mode is a single representative failure mode; pick it by canonical order so it is
+	// deterministic regardless of whether the checks came from the audit array (audit
+	// order) or the reason prose (scan order).
+	in.Mode = canonicalFirstCheck(checks)
 	return in, nil
+}
+
+// canonicalChecks is the fixed precedence used to pick a reject's representative mode.
+var canonicalChecks = []string{"meaning", "scope", "license", "poison"}
+
+// canonicalFirstCheck returns the first of checks in canonical order (checks is
+// non-empty by construction at the call site).
+func canonicalFirstCheck(checks []string) string {
+	has := make(map[string]bool, len(checks))
+	for _, c := range checks {
+		has[c] = true
+	}
+	for _, c := range canonicalChecks {
+		if has[c] {
+			return c
+		}
+	}
+	return checks[0]
 }
 
 // inferChecks recovers the failing checks for a reject the audit left with an empty
 // failed_checks array: the reason prose names them (e.g. "fails meaning and poison
-// checks"), so it collects every known check name mentioned, in canonical order. A
-// reason naming none defaults to meaning (an internally incorrect record).
+// checks"), so it collects every known check name that appears as a WHOLE WORD, in
+// canonical order. Whole-word matching avoids false positives inside larger words
+// ("telescope"→scope, "licensed"→license). A reason naming none defaults to meaning
+// (an internally incorrect record).
 func inferChecks(reason string) []string {
-	r := strings.ToLower(reason)
+	words := make(map[string]bool)
+	for _, w := range strings.FieldsFunc(strings.ToLower(reason), func(r rune) bool {
+		return r < 'a' || r > 'z'
+	}) {
+		words[w] = true
+	}
 	var found []string
-	for _, c := range []string{"meaning", "scope", "license", "poison"} {
-		if strings.Contains(r, c) {
+	for _, c := range canonicalChecks {
+		if words[c] {
 			found = append(found, c)
 		}
 	}

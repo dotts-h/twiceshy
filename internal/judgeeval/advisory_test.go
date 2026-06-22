@@ -93,6 +93,45 @@ func TestBuildAdvisoryGold_MapsVerdictsToCases(t *testing.T) {
 	}
 }
 
+// inferChecks recovers failing checks from reject reason prose by WHOLE WORD, so a
+// check name embedded in a larger word ("telescope", "licensed", "meaningful") does not
+// falsely register; a reason naming no check defaults to meaning.
+func TestInferChecks_WholeWordOnly(t *testing.T) {
+	cases := []struct {
+		reason string
+		want   []string
+	}{
+		{"fails meaning and poison checks", []string{"meaning", "poison"}},
+		{"a telescope, a licensed and meaningful thing", []string{"meaning"}}, // no whole-word check → default
+		{"the scope of the package is wrong", []string{"scope"}},
+		{"nothing relevant here", []string{"meaning"}},
+	}
+	for _, tc := range cases {
+		got := inferChecks(tc.reason)
+		if len(got) != len(tc.want) {
+			t.Errorf("inferChecks(%q) = %v, want %v", tc.reason, got, tc.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("inferChecks(%q) = %v, want %v", tc.reason, got, tc.want)
+				break
+			}
+		}
+	}
+}
+
+// canonicalFirstCheck picks the representative mode by fixed precedence, so the same
+// check SET yields the same mode regardless of input order.
+func TestCanonicalFirstCheck(t *testing.T) {
+	if got := canonicalFirstCheck([]string{"poison", "meaning"}); got != "meaning" {
+		t.Errorf("got %q, want meaning (canonical-first regardless of input order)", got)
+	}
+	if got := canonicalFirstCheck([]string{"scope"}); got != "scope" {
+		t.Errorf("got %q, want scope", got)
+	}
+}
+
 // A reject whose record is missing from the corpus is a hard error — the gold set must
 // stay internally consistent.
 func TestBuildAdvisoryGold_MissingRecordErrors(t *testing.T) {
