@@ -15,7 +15,7 @@ accepted ADR's decision — supersede it (`Status: superseded-by-NNNN`).
 | [0005](ADR-0005-stable-seams.md) | Register the stable seams in CONTRACTS.md | Accepted |
 | [0006](ADR-0006-defer-score-banding.md) | Keep three-state novelty; defer score-banding to the dense phase | Accepted |
 | [0007](ADR-0007-floor-on-the-read-path.md) | The relevance floor applies to the read path too, via a single injection seam | Accepted |
-| [0008](ADR-0008-write-path-persistence-is-a-cli-concern.md) | Persistence is a trusted-CLI concern — the MCP server never holds push credentials | Accepted (§1); §2–4 drifted → see ADR-0019 |
+| [0008](ADR-0008-write-path-persistence-is-a-cli-concern.md) | Persistence is a trusted-CLI concern — the MCP server never holds push credentials | §1 Accepted; §2–4 Superseded by ADR-0019 |
 | [0009](ADR-0009-dense-retrieval-is-pure-go-cosine.md) | Dense retrieval is pure-Go cosine, not sqlite-vec — preserve the CGO-free build | Accepted |
 | [0010](ADR-0010-doctors-build-d2-defer-the-rest.md) | Doctors — build the framework + D2 staleness now; defer D1/D3/D4/D5 | Accepted |
 | [0011](ADR-0011-corpus-growth-and-validation-engine.md) | Corpus growth as a live feed, with execution-validation as the moat | Proposed |
@@ -26,4 +26,4 @@ accepted ADR's decision — supersede it (`Status: superseded-by-NNNN`).
 | [0016](ADR-0016-advisory-class-panel-promotion.md) | Advisory-class records auto-promote via a diverse judge-panel (no repro) | Accepted |
 | [0017](ADR-0017-global-idf-push-gate-specificity.md) | A global dev/code IDF replaces the hand-maintained stoplist as the push gate's specificity signal | Proposed |
 | [0018](ADR-0018-session-retro-capture.md) | Session-retro capture — a SessionEnd hook spools the transcript; an off-pool analyzer drafts quarantined traps | Proposed |
-| [0019](ADR-0019-write-path-is-the-autonomous-validation-loop.md) | The write path is the autonomous validation loop + direct quarantined import — supersedes ADR-0008 §2–4 (preserves §1) | Proposed |
+| [0019](ADR-0019-write-path-is-the-autonomous-validation-loop.md) | The write path is the autonomous validation loop + direct quarantined import — supersedes ADR-0008 §2–4 (preserves §1) | Accepted |
