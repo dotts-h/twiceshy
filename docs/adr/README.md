@@ -28,3 +28,4 @@ accepted ADR's decision — supersede it (`Status: superseded-by-NNNN`).
 | [0018](ADR-0018-session-retro-capture.md) | Session-retro capture — a SessionEnd hook spools the transcript; an off-pool analyzer drafts quarantined traps | Proposed |
 | [0019](ADR-0019-write-path-is-the-autonomous-validation-loop.md) | The write path is the autonomous validation loop + direct quarantined import — supersedes ADR-0008 §2–4 (preserves §1) | Accepted |
 | [0020](ADR-0020-prose-class-panel-promotion.md) | Prose-class records auto-promote via a stronger, local-only judge panel — supersedes ADR-0013 §5 for prose | Proposed |
+| [0021](ADR-0021-decouple-corpus-as-a-data-product.md) | Decouple the corpus into a versioned data product (own store + schema contract, consumed via the -corpus seam) — the #0010 multi-tenant precondition | Proposed |
