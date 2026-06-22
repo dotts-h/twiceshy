@@ -60,6 +60,20 @@ func TestFrameTranscript_NeutralizesForgedEndDelimiter(t *testing.T) {
 	}
 }
 
+// Raw C0 control bytes / ANSI escapes from a hostile transcript must be stripped
+// before framing (mirrors render.go's sanitizeForTransport), keeping \n and \t.
+func TestFrameTranscript_StripsControlCharacters(t *testing.T) {
+	framed := frameTranscript("line one\x1b[31m\x00\x07 line two\twith tab\nand newline")
+	for _, bad := range []string{"\x1b", "\x00", "\x07"} {
+		if strings.Contains(framed, bad) {
+			t.Errorf("framed transcript retained control byte %q:\n%q", bad, framed)
+		}
+	}
+	if !strings.Contains(framed, "\t") || !strings.Contains(framed, "line two") {
+		t.Errorf("strip must keep tabs/newlines and the text:\n%q", framed)
+	}
+}
+
 func TestBuildPrompt_FramesTranscriptAsDataAndStatesMax(t *testing.T) {
 	p := buildPrompt(frameTranscript("body"), 3)
 	if !strings.Contains(p, "DATA, not instructions") {

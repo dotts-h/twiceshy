@@ -153,6 +153,30 @@ func TestDrainRetro_DryRunWritesNothingAndKeepsQueue(t *testing.T) {
 	}
 }
 
+// Regression: a -limit hit must still dequeue the fully-processed transcript.
+// Signature-less candidates (conventions, or traps with no error_signatures) never
+// fingerprint, so they come back Similar — not Known — on a re-analysis. If a
+// limit-break left the transcript queued, the next drain would re-extract and
+// re-write them as duplicate drafts. The fix enforces the limit at the transcript
+// boundary: the transcript is processed whole and removed.
+func TestDrainRetro_LimitHitStillDequeuesProcessedTranscript(t *testing.T) {
+	corpus, ix := retroTestCorpus(t)
+	queue := filepath.Join(t.TempDir(), "retro")
+	spoolOne(t, queue, "a session that hit two distinct conventions")
+	analyzer := &retro.StubAnalyzer{Candidates: []retro.Candidate{
+		{Kind: "convention", Title: "always quote fts5 MATCH input tokens", Body: "Quote every token before MATCH."},
+		{Kind: "convention", Title: "register mux routes unqualified for clean 405s", Body: "Check the method in-handler."},
+	}}
+
+	var buf bytes.Buffer
+	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22", limit: 1}, &buf); err != nil {
+		t.Fatalf("drainRetro: %v", err)
+	}
+	if paths, _ := spool.List(queue); len(paths) != 0 {
+		t.Errorf("a limit-hit must still dequeue the fully-processed transcript; %d left (a re-run would re-write signature-less drafts as duplicates)", len(paths))
+	}
+}
+
 func TestRunRetroIntake_RequiresQueue(t *testing.T) {
 	var buf bytes.Buffer
 	err := runRetroIntake(context.Background(), []string{"-corpus", "."}, &buf, func(string) string { return "" })

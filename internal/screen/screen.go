@@ -115,6 +115,19 @@ func ExecutionHazards(findings []Finding) []Finding {
 	return out
 }
 
+// HasSecret reports whether any finding is a secret. This is the single home of the
+// fail-closed gate the /retro endpoint and the `twiceshy screen` CLI both use to
+// refuse a transcript before it leaves the machine — harmful-code / pii are expected
+// in a coding transcript (shell snippets, private IPs) and do not block.
+func HasSecret(findings []Finding) bool {
+	for _, f := range findings {
+		if f.Category == "secret" {
+			return true
+		}
+	}
+	return false
+}
+
 // Flags renders findings as deduped, sorted "category:rule" tags for storage in
 // provenance.security_flags. It carries no secret material.
 func Flags(fs []Finding) []string {

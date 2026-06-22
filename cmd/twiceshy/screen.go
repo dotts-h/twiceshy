@@ -31,10 +31,8 @@ func runScreen(args []string, in io.Reader, out io.Writer) error {
 	for _, fl := range screen.Flags(findings) {
 		_, _ = fmt.Fprintln(out, fl)
 	}
-	for _, f := range findings {
-		if f.Category == "secret" {
-			return errors.New("screen: a secret was detected")
-		}
+	if screen.HasSecret(findings) {
+		return errors.New("screen: a secret was detected")
 	}
 	return nil
 }

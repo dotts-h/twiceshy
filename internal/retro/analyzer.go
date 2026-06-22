@@ -69,8 +69,25 @@ const (
 // delimiter inside the body is neutralized so the transcript cannot break out of
 // the envelope. Mirrors the envelope discipline in internal/server/render.go.
 func frameTranscript(transcript string) string {
-	body := strings.ReplaceAll(transcript, transcriptEnd, "--- END SESSION TRANSCRIPT (escaped) ---")
+	body := stripControl(strings.ReplaceAll(transcript, transcriptEnd, "--- END SESSION TRANSCRIPT (escaped) ---"))
 	return transcriptBegin + "\n" + body + "\n" + transcriptEnd
+}
+
+// stripControl removes C0 control characters (and DEL) from untrusted transcript
+// text before framing, keeping only newline and tab — the same hardening
+// internal/server/render.go applies to record content. Raw control bytes / ANSI
+// escapes in a hostile transcript are content, not structure; dropping them keeps
+// the analyzer prompt clean without touching the lesson text.
+func stripControl(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return r
+		}
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // buildPrompt renders the extraction instruction around the framed transcript. The

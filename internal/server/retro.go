@@ -72,15 +72,10 @@ func (h *handlers) retroHTTP(w http.ResponseWriter, r *http.Request) {
 	// (fail-closed). harmful-code / pii findings are expected in a coding transcript
 	// (shell snippets, private IPs) and do not block — the analyzer sees them framed
 	// as DATA and intake screens the built record again (defense in depth).
-	for _, f := range screen.Scan(args.Transcript) {
-		if f.Category == "secret" {
-			h.logger.Warn("retro refused: secret in transcript",
-				slog.String("route", route),
-				slog.String("rule", f.Rule),
-			)
-			http.Error(w, "transcript contains a secret; refused", http.StatusUnprocessableEntity)
-			return
-		}
+	if screen.HasSecret(screen.Scan(args.Transcript)) {
+		h.logger.Warn("retro refused: secret in transcript", slog.String("route", route))
+		http.Error(w, "transcript contains a secret; refused", http.StatusUnprocessableEntity)
+		return
 	}
 
 	author := strings.TrimSpace(args.Author)

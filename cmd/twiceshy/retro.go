@@ -132,7 +132,6 @@ func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, r
 			author = "retro-capture"
 		}
 
-		limitHit := false
 		for _, cand := range candidates {
 			draft := candidateDraft(cand)
 			key := batchKey(draft)
@@ -166,18 +165,21 @@ func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, r
 			}
 			created++
 			next++
-			if opts.limit > 0 && created >= opts.limit {
-				limitHit = true
-				break
-			}
 		}
 
-		// Dequeue only after a successful analysis (dry-run dequeues nothing). On a
-		// limit break, leave the entry queued — a re-run dedups what we already wrote.
-		if !opts.dryRun && !limitHit {
+		// Dequeue the transcript only after it is FULLY processed (dry-run dequeues
+		// nothing). Dequeuing only when complete is what makes a re-run safe: a
+		// signature-less draft (a convention, or a trap with no error_signatures)
+		// never fingerprints, so ingest.Prepare returns it as Similar — not Known — on
+		// a re-analysis; a half-processed transcript left queued would therefore have
+		// its candidates re-written as duplicate drafts.
+		if !opts.dryRun {
 			_ = spool.Remove(f)
 		}
-		if limitHit {
+		// Soft record limit, enforced at the transcript boundary so no transcript is
+		// ever left half-processed: stop before the NEXT transcript once enough has
+		// been written this run (may overshoot by the current transcript's candidates).
+		if opts.limit > 0 && created >= opts.limit {
 			_, _ = fmt.Fprintf(out, "retro-intake: record limit %d reached\n", opts.limit)
 			break
 		}
