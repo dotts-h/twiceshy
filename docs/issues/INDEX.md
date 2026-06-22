@@ -88,3 +88,4 @@ never a cycle).
 | [0067](0067-per-query-gate-decision-telemetry.md) | Per-query gate-decision telemetry | closed | medium | 0064 | PR#269 |
 | [0068](0068-global-idf-specificity-signal-for-the-push-gate-adr-proposal.md) | Global-IDF specificity signal for the push gate (ADR proposal) | closed | medium | 0064 | ADR-0017 |
 | [0069](0069-session-retro-helpfulness-signal-join-transcript-against-the-0067-decision-log-to-score-served-cards-used-vs-ignored.md) | Session-retro helpfulness signal — join transcript against the #0067 decision log to score served cards used vs ignored | open | medium | 0064 | |
+| [0070](0070-prose-class-promotion-path-captured-session-traps-are-quarantined-dead-weight-without-a-non-advisory-promoter-decide-via-adr-extend-adr-0016-panel.md) | Prose-class promotion path — captured session traps are quarantined dead-weight without a non-advisory promoter (decide via ADR, extend ADR-0016 panel) | open | high | 0064 | |
