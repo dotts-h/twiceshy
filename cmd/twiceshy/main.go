@@ -516,8 +516,12 @@ func importSource(name, ecosystem string) (ingest.Source, error) {
 		// ecosystem ("" ignored → Go) lets one importer cover a whole stack:
 		// npm (React/React Native), PyPI (Python), Go — one run per ecosystem.
 		return ingest.NewOSVLiveSource(ingest.WithEcosystem(ecosystem)), nil
+	case "eol-live":
+		// endoflife.date → deprecation records for end-of-life runtimes (#0023);
+		// the default product set covers the common runtimes (unknown ones 404→skip).
+		return ingest.NewEOLLiveSource(), nil
 	default:
-		return nil, fmt.Errorf("unknown ingest source %q (want: go, osv, osv-live, py)", name)
+		return nil, fmt.Errorf("unknown ingest source %q (want: go, osv, osv-live, eol-live, py)", name)
 	}
 }
 
