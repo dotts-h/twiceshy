@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/dotts-h/twiceshy/internal/record"
+	"github.com/dotts-h/twiceshy/internal/testcorpus"
 )
 
 // The orchestrator's gate for Marshal: serializing a Record back to markdown
@@ -85,7 +86,7 @@ func valEqualNilEmpty(a, b reflect.Value) bool {
 }
 
 func TestMarshal_RoundTripsCorpus(t *testing.T) {
-	recs, err := record.LoadCorpus("../..")
+	recs, err := record.LoadCorpus(testcorpus.Root())
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
 	}
@@ -106,7 +107,7 @@ func TestMarshal_RoundTripsCorpus(t *testing.T) {
 }
 
 func TestMarshal_OutputIsFencedWithBody(t *testing.T) {
-	recs, err := record.LoadCorpus("../..")
+	recs, err := record.LoadCorpus(testcorpus.Root())
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
 	}

@@ -18,6 +18,7 @@ import (
 
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/record"
+	"github.com/dotts-h/twiceshy/internal/testcorpus"
 )
 
 const usageTestRepo = "github.com/dotts-h/twiceshy"
@@ -117,7 +118,7 @@ func TestSearchEmptyResultRecordsNoUsage(t *testing.T) {
 // injects nothing records no impression.
 func TestPushRecordsImpression(t *testing.T) {
 	ctx := context.Background()
-	recs, err := record.LoadCorpus("../..")
+	recs, err := record.LoadCorpus(testcorpus.Root())
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
 	}

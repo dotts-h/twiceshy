@@ -22,6 +22,7 @@ import (
 	"github.com/dotts-h/twiceshy/internal/ingest"
 	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/server"
+	"github.com/dotts-h/twiceshy/internal/testcorpus"
 )
 
 const token = "s3cret-test-token"
@@ -30,7 +31,7 @@ const testRepo = "github.com/dotts-h/twiceshy"
 
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	recs, err := record.LoadCorpus("../..")
+	recs, err := record.LoadCorpus(testcorpus.Root())
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/dotts-h/twiceshy/internal/record"
+	"github.com/dotts-h/twiceshy/internal/testcorpus"
 )
 
 func guardWithRepros(front map[string]any, repros []map[string]any) {
@@ -50,7 +51,7 @@ func TestParseGuardReprosPositiveAndNegative(t *testing.T) {
 }
 
 func TestParseLegacyGuardReproOnlyStillValid(t *testing.T) {
-	rec, err := record.ParseFile(repoRoot, "experience/2026/0001-fts5-match-raw-user-input.md")
+	rec, err := record.ParseFile(testcorpus.Root(), "experience/2026/0001-fts5-match-raw-user-input.md")
 	if err != nil {
 		t.Fatalf("ParseFile: %v", err)
 	}

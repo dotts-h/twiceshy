@@ -3,7 +3,7 @@
 GO          ?= go
 COVER_FLOOR ?= 80
 
-.PHONY: ci lint test cover cover-check build tidy doctor sec vuln secret-scan eval
+.PHONY: ci lint test cover cover-check build tidy doctor sec vuln secret-scan eval test-livecorpus
 
 ci: lint cover-check sec
 
@@ -41,6 +41,9 @@ eval: build
 
 test:
 	$(GO) test -race ./...
+
+test-livecorpus:
+	$(GO) test -tags livecorpus ./...
 
 cover:
 	$(GO) test -race -covermode=atomic -coverprofile=coverage.out ./...
