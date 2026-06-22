@@ -1,7 +1,7 @@
 ---
 id: 0023
 title: Live deprecation importer — deps.dev/endoflife to deprecation+codemod records, quarantined
-status: open
+status: closed
 severity: medium
 group: 0015
 depends_on: []
@@ -35,5 +35,25 @@ embedded seed) — it stays **open** for that.
 
 ## Acceptance
 
-- [ ] Live deps.dev / endoflife fetch; deterministic distillation; quarantined
-- [ ] Idempotent; license-clean; passes the screen; test-first
+- [x] Live deps.dev / endoflife fetch; deterministic distillation; quarantined
+- [x] Idempotent; license-clean; passes the screen; test-first
+
+## Status
+
+Shipped the **endoflife.date** half: `twiceshy ingest eol-live` (`internal/ingest/eollive.go`,
+`EOLLiveSource`) live-fetches release cycles from endoflife.date and emits a quarantined
+deprecation record for every cycle past its end-of-life date (or `eol:true`), mirroring the
+live OSV importer (#0021): a `WithEOLLiveFetch` injection seam (fixture-tested, zero network
+in CI), deterministic distillation (sorted by `EOL:<product>:<cycle>` signature, clock
+injected via `WithEOLNow`), `AppliesTo.Runtime{product: cycle}` (the natural field for a
+record whose subject is a runtime version rather than a package), and license-clean
+facts-only prose (no third-party text;
+`SourceLicenseFactsOnly`). Born quarantined and idempotent via the shared `ingest.Prepare`
+dedup (`IncludeQuarantined`) — proven end-to-end by `TestEOLLive_PrepareQuarantinesAndDedups`.
+Future EOL dates are skipped until they pass (a later run picks them up). EOL-runtime records
+are born quarantined, so they never trip the validated-only staleness guard (the exp-0746 lesson).
+
+Deferred: the **deps.dev** per-package `isDeprecated` source (the API is per-package, not
+bulk, so it needs a package seed list) and wiring `eol-live` into the scheduled heartbeat
+(#0022, an ops choice of products/cadence) — neither is required by the acceptance, which the
+endoflife.date live source satisfies.
