@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package spool is the report intake queue (ADR-0013 §E1): report_outcome
-// enqueues an outcome report here instead of returning markdown for a human to
-// paste-PR, and the `intake-reports` CLI drains it into experience/ so adapt has
-// nightly input. The queue stores the report REQUEST (not a built record), so the
-// record id is allocated against the live corpus at intake time — never
-// colliding across reports queued before a drain.
+// Package spool is the intake queue for the two write-back channels that defer
+// record-building to a drain step. report_outcome enqueues an outcome Report
+// (ADR-0013 §E1) drained by `intake-reports`; the session-retro hook enqueues a
+// Transcript (ADR-0018, #0065) drained by `retro-intake`. Either queue stores the
+// REQUEST (not a built record), so the record id is allocated against the live
+// corpus at intake time — never colliding across entries queued before a drain.
 package spool
 
 import (
@@ -28,15 +28,22 @@ type Report struct {
 	ReportedAt string `json:"reported_at"`
 }
 
-// Enqueue writes r as a JSON file in dir (created if absent). It writes to a
-// hidden temp file then renames to a unique `*.json` name, so a concurrent List
-// never observes a half-written entry (rename is atomic within a directory). The
-// filename is prefixed with ReportedAt so List returns roughly time order.
+// Enqueue writes outcome report r as a JSON file in dir, prefixed with its
+// ReportedAt so List returns roughly time order.
 func Enqueue(dir string, r Report) (string, error) {
+	return enqueueJSON(dir, r.ReportedAt, r)
+}
+
+// enqueueJSON marshals v and writes it as a JSON file in dir (created if absent).
+// It writes to a hidden temp file then renames to a unique `*.json` name, so a
+// concurrent List never observes a half-written entry (rename is atomic within a
+// directory). The filename is prefixed with timePrefix so List returns roughly
+// time order.
+func enqueueJSON(dir, timePrefix string, v any) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	data, err := json.Marshal(r)
+	data, err := json.Marshal(v)
 	if err != nil {
 		return "", err
 	}
@@ -53,7 +60,7 @@ func Enqueue(dir string, r Report) (string, error) {
 	if err := tmp.Close(); err != nil {
 		return "", err
 	}
-	final := filepath.Join(dir, sanitize(r.ReportedAt)+"-"+filepath.Base(tmpName)+".json")
+	final := filepath.Join(dir, sanitize(timePrefix)+"-"+filepath.Base(tmpName)+".json")
 	if err := os.Rename(tmpName, final); err != nil {
 		return "", err
 	}
@@ -91,6 +98,39 @@ func Read(path string) (Report, error) {
 		return Report{}, err
 	}
 	return r, nil
+}
+
+// Transcript is one queued session-retro capture (#0065, ADR-0018): the SessionEnd
+// hook ships a bounded session transcript here instead of the agent authoring a
+// record, and the `retro-intake` CLI drains it through an off-pool analyzer into
+// quarantined experience drafts. Like Report it stores the request (transcript text
+// + metadata), not a built record — ids are allocated against the live corpus at
+// intake time.
+type Transcript struct {
+	SessionID  string `json:"session_id"`
+	Author     string `json:"author"`
+	Reason     string `json:"reason,omitempty"`
+	Transcript string `json:"transcript"`
+	CapturedAt string `json:"captured_at"`
+}
+
+// EnqueueTranscript writes t as a JSON file in dir using the same atomic
+// temp-then-rename discipline as Enqueue, prefixed with CapturedAt for time order.
+func EnqueueTranscript(dir string, t Transcript) (string, error) {
+	return enqueueJSON(dir, t.CapturedAt, t)
+}
+
+// ReadTranscript decodes a queued transcript file.
+func ReadTranscript(path string) (Transcript, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Transcript{}, err
+	}
+	var t Transcript
+	if err := json.Unmarshal(data, &t); err != nil {
+		return Transcript{}, err
+	}
+	return t, nil
 }
 
 // Remove deletes a processed queue file.

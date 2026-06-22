@@ -1,15 +1,15 @@
 ---
 id: 0065
 title: Session-retro capture hook — automatic trap submission at the lifecycle seam
-status: open
+status: closed
 severity: high
 group: 0064
 depends_on: []
 forgejo: 251
 links:
-  adr: docs/adr/ADR-0013-closed-loop-autonomous-validation.md
+  adr: docs/adr/ADR-0018-session-retro-capture.md
   prs: []
-  issues: [0064, 0067]
+  issues: [0064, 0067, 0069]
   regression:
 assets: []
 ---
@@ -65,3 +65,20 @@ design must not depend on agent volition at all.
 ## Notes
 Headline child of epic #0064. Soft-depends on #0067 for the used-vs-ignored
 signal, but the trap-extraction half can ship independently.
+
+## Resolution
+Shipped the **trap-extraction capture spine** ([ADR-0018](../adr/ADR-0018-session-retro-capture.md)):
+- A `SessionEnd` hook (`hooks/session-retro.sh`, fail-open) ships a bounded,
+  locally-screened transcript to a new **raw `POST /retro`** endpoint
+  (`internal/server`), which screens at the edge (secrets refused, never spooled)
+  and spools it (`internal/spool`).
+- The **`twiceshy retro-intake`** driver drains the spool through an off-pool
+  `retro.Analyzer` (`internal/retro`, stubbed in tests), feeding extracted traps
+  through the existing `ingest.Prepare` → quarantine → PR ladder — no new write
+  path, no promotion (the analyzer drafts only).
+- A `twiceshy screen` subcommand exposes the tested content screen for the hook's
+  client-side pass.
+
+Headline acceptance met: a session that solves a novel trap becomes a quarantined
+draft **without the agent calling `record_experience`**. The **used-vs-ignored
+helpfulness signal** (the measurement half) is split out to **#0069**.
