@@ -1,8 +1,8 @@
 # ADR-0019: The write path is the autonomous validation loop + direct quarantined import — superseding ADR-0008 §2–4
 
-- **Status:** Proposed (2026-06-22) — claude proposes, **documenting already-shipped
-  reality** for horia to accept. The superseding *decisions* (ADR-0013 closed loop,
-  ADR-0016 advisory panel) were horia-directed and are Accepted; this ADR only trues
+- **Status:** Accepted (2026-06-22) — horia accepted; claude authored,
+  **documenting already-shipped reality**. The superseding *decisions* (ADR-0013 closed
+  loop, ADR-0016 advisory panel) were horia-directed and are Accepted; this ADR trues
   the ADR log to what those, plus the scheduled importer, actually built.
 - **Supersedes:** [ADR-0008 §2–4](ADR-0008-write-path-persistence-is-a-cli-concern.md)
   (the `twiceshy propose` + `internal/publish` / `publish.Publisher` per-record write
@@ -71,8 +71,7 @@ as a statement of what is true. This ADR closes that gap.
   recorded description. Onboarding and audit can trust ADR-0008's status line.
 - **Unchanged security posture.** No new privilege: the network service still holds no
   push creds (ADR-0008 §1); writes happen in trusted contexts behind a CI-gated PR.
-- **On accept:** flip ADR-0008's header to `Superseded by ADR-0019` (its §1 carried
-  here), and update `docs/adr/README.md`. Until then ADR-0008 carries a drift note
-  pointing here, so the contradiction is at least visible.
+- **Done on accept (2026-06-22):** ADR-0008's header flipped to `Superseded by ADR-0019`
+  for §2–4 (its §1 carried here), and `docs/adr/README.md` updated.
 - **Scope.** This is documentation-trueing of shipped, Accepted decisions; it introduces
   no new behavior and no code change.

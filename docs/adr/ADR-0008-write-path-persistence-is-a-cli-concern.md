@@ -1,11 +1,10 @@
 # ADR-0008: Persistence is a trusted-CLI concern — the MCP server never holds push credentials
 
-- **Status:** Accepted (2026-06-17). **⚠️ Drift (2026-06-22):** §2–4 (the
-  `twiceshy propose` + `internal/publish` / `Publisher` per-record write path) was
-  never implemented and is overtaken by the ADR-0013/0016 autonomous loop + the
-  ADR-0011 corpus-level import — see **[ADR-0019](ADR-0019-write-path-is-the-autonomous-validation-loop.md)** (proposed
-  supersession). **§1 (server read-only, no forge creds) still holds** and is carried
-  forward verbatim by ADR-0019.
+- **Status:** **Superseded by [ADR-0019](ADR-0019-write-path-is-the-autonomous-validation-loop.md)** (2026-06-22)
+  for §2–4 (the `twiceshy propose` + `internal/publish` / `Publisher` per-record write
+  path — never implemented; overtaken by the ADR-0013/0016 autonomous loop + the
+  ADR-0011 corpus-level import). Originally Accepted (2026-06-17). **§1 (server
+  read-only, no forge creds) still holds** and is carried forward verbatim by ADR-0019.
 - **Deciders:** horia
 - **Related:** [ADR-0001 §5–6](ADR-0001-architecture.md) (pull channel + the
   quarantined-only write invariant — **locked**); [issue #3](../../) (Phase 3
