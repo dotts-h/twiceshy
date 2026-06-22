@@ -16,6 +16,24 @@
 #                     write access to the repo's branch protections
 set -euo pipefail
 
+# URL-derivation helpers (unit-tested in apply-branch-protection.test.sh).
+# Derive owner/name from a remote URL, stripping a trailing `.git`. ERE has no
+# lazy quantifier, so `([^/]+/[^/]+?)(\.git)?` does NOT strip it (the greedy
+# first group eats the `.git`); strip `.git` first, then take the last two path
+# segments. Handles https (with/without embedded creds) and ssh/scp forms.
+repo_from_origin() {
+  printf '%s' "$1" | sed -E 's#\.git$##; s#^.*[:/]([^/]+/[^/]+)$#\1#'
+}
+
+# Derive scheme://host from an https remote URL, dropping any embedded creds.
+server_from_origin() {
+  printf '%s' "$1" | sed -E 's#^(https?://)([^@/]*@)?([^/]+)/.*#\1\3#'
+}
+
+# When sourced (by the test) expose the helpers above and stop before the apply
+# logic; when executed, run normally.
+[ "${BASH_SOURCE[0]}" = "${0}" ] || return 0
+
 flavor="forgejo"
 dry=0 repo="" server="" token="${FORGEJO_TOKEN:-${GITEA_TOKEN:-}}"
 while [ $# -gt 0 ]; do case "$1" in
@@ -33,12 +51,8 @@ cfg="$here/../branch-protection.json"
 
 # Derive repo (owner/name) and server URL from the origin remote when not given.
 origin="$(git -C "$here/.." remote get-url origin 2>/dev/null || true)"
-if [ -z "$repo" ]; then
-  repo="$(printf '%s' "$origin" | sed -E 's#^.*[:/]([^/]+/[^/]+?)(\.git)?$#\1#')"
-fi
-if [ -z "$server" ]; then
-  server="$(printf '%s' "$origin" | sed -E 's#^(https?://)([^@/]*@)?([^/]+)/.*#\1\3#')"
-fi
+[ -n "$repo" ]   || repo="$(repo_from_origin "$origin")"
+[ -n "$server" ] || server="$(server_from_origin "$origin")"
 
 # The protected branch name, for the apply messages and the Forgejo PATCH URL.
 # (Derived in bash too — it was previously only bound inside the python heredoc,
