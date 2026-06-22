@@ -1,7 +1,7 @@
 ---
 id: 0075
 title: intake-issues drainer — materialize the report_issue spool into docs/issues/ (uses #0066 capture)
-status: open
+status: closed
 severity: medium
 group: 0064
 depends_on: []
@@ -35,9 +35,25 @@ issue is the **drain half**: an `intake-issues` CLI subcommand (mirror
   the triage doctor promotes them — never auto-actioned.
 
 ## Acceptance
-- [ ] `intake-issues` drains the spool into `docs/issues/NNNN-*.md` + INDEX rows.
-- [ ] Numbering reuses `new-issue.sh` (no second allocator); near-duplicate titles skipped.
-- [ ] Mirror to Forgejo via the existing `scripts/sync-forgejo.sh`.
+- [x] `intake-issues` drains the spool into `docs/issues/NNNN-*.md` + INDEX rows.
+- [x] Numbering reuses `new-issue.sh` (no second allocator); near-duplicate titles skipped.
+- [x] Mirror to Forgejo via the existing `scripts/sync-forgejo.sh` — the materialized
+      files are standard `docs/issues/` entries (with the empty `forgejo:` field
+      `sync-forgejo.sh` fills), so the existing mirror path covers them unchanged.
+
+## Status
+
+Shipped: `twiceshy intake-issues -queue <dir> [-repo <dir>]`
+(`cmd/twiceshy/intake_issues.go`) mirrors `intake-reports` — `spool.List` →
+`spool.ReadIssue` → materialize → `spool.Remove`. Numbering, the INDEX append and the
+file template come from the canonical `scripts/new-issue.sh` (shelled out, no second
+allocator — exp-0743's stale-id lesson); the drainer fills only the body (description
+in `## Summary`, category/author/related/security-flags in `## Notes`) and re-screens
+the content. A spooled issue whose normalized title (case/space/punctuation-insensitive)
+already exists in `docs/issues/INDEX.md` is skipped; malformed entries are logged and
+removed so they cannot wedge a scheduled drain; an allocation/write failure aborts so
+the entry is retried. Tested against the real `new-issue.sh` in a throwaway git repo
+(`cmd/twiceshy/intake_issues_test.go`).
 
 ## Notes
 Depends on #0066 (the tool + spool, merged). Mirrors `intake-reports`

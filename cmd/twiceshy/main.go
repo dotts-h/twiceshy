@@ -192,7 +192,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|draft|promote|repromote|adapt|intake-reports|retro-intake|screen|report|pack|doctor|eval|usage-flush|gold-add|judge-eval> [flags]")
+		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|draft|promote|repromote|adapt|intake-reports|intake-issues|retro-intake|screen|report|pack|doctor|eval|usage-flush|gold-add|judge-eval> [flags]")
 	}
 	switch args[0] {
 	case "index":
@@ -215,6 +215,8 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runAdapt(ctx, args[1:], out, getenv)
 	case "intake-reports":
 		return runIntakeReports(args[1:], out)
+	case "intake-issues":
+		return runIntakeIssues(args[1:], out)
 	case "retro-intake":
 		return runRetroIntake(ctx, args[1:], out, getenv)
 	case "screen":
@@ -234,7 +236,7 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	case "self-audit":
 		return runSelfAudit(args[1:], out)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, draft, promote, repromote, adapt, intake-reports, retro-intake, screen, report, pack, doctor, eval, usage-flush, gold-add, judge-eval, or self-audit)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, draft, promote, repromote, adapt, intake-reports, intake-issues, retro-intake, screen, report, pack, doctor, eval, usage-flush, gold-add, judge-eval, or self-audit)", args[0])
 	}
 }
 
