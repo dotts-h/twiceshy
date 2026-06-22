@@ -979,7 +979,7 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 				_, _ = fmt.Fprintf(out, "  candidate %s %s\n", rec.ID, rec.Path)
 			}
 		}
-		_, _ = fmt.Fprintf(out, "promote (dry-run): %d promotable candidate(s); proof-path needs attestation+judge, advisory-path needs panel\n", n)
+		_, _ = fmt.Fprintf(out, "promote (dry-run): %d promotable candidate(s); proof-path needs attestation+judge, advisory-path and prose-path need their panels\n", n)
 		return nil
 	}
 

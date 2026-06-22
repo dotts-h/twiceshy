@@ -215,6 +215,21 @@ func TestModelJudge_PerRequestAdvisoryRoutesPrompt(t *testing.T) {
 	}
 }
 
+// The privacy gate (ADR-0016 §5 / ADR-0020): a gemini judge is rejected by construction
+// for prose (it may carry sensitive content; gemini free tier trains on inputs), but is
+// still allowed for advisory (public OSV/GHSA data). agy is fine for prose.
+func TestNewModelJudge_RejectsGeminiForProse(t *testing.T) {
+	if _, err := judge.NewModelJudge(judge.Config{Endpoint: "http://x", Model: "gemini-2.5-pro", Prose: true}); err == nil || !strings.Contains(err.Error(), "gemini") {
+		t.Fatalf("a gemini prose judge must be rejected (privacy gate); got %v", err)
+	}
+	if _, err := judge.NewModelJudge(judge.Config{Endpoint: "http://x", Model: "gemini-2.5-pro", Advisory: true}); err != nil {
+		t.Fatalf("gemini must still be allowed for advisory (public data): %v", err)
+	}
+	if _, err := judge.NewModelJudge(judge.Config{Endpoint: "http://x", Model: "agy-pro", Prose: true}); err != nil {
+		t.Fatalf("agy must be allowed for prose: %v", err)
+	}
+}
+
 func TestModelJudge_PerRequestProseRoutesPrompt(t *testing.T) {
 	var gotBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

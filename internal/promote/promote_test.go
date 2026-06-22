@@ -390,7 +390,9 @@ func TestPromote_AdvisoryNoPanel_Skips(t *testing.T) {
 // (ADR-0020) that routes to neither the proof path nor the advisory panel.
 func proseRecord() *record.Record {
 	return &record.Record{
-		SchemaVersion: 1, ID: "exp-0200", Kind: "convention", Status: "quarantined",
+		// Kind "trap" (not "convention") is what retro-capture primarily emits and is
+		// subject to the validated-trap guard requirement — the prose panel is its proof.
+		SchemaVersion: 1, ID: "exp-0200", Kind: "trap", Status: "quarantined",
 		Title:   "Prefer errors.Is over == for wrapped sentinel errors, long enough title",
 		Symptom: &record.Symptom{Summary: "Comparing a wrapped error with == silently misses the sentinel."},
 		Resolution: &record.Resolution{

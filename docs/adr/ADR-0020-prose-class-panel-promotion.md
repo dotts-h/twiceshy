@@ -95,8 +95,12 @@ Two hard constraints shape the design:
 
 2. **The prose panel is strictly stronger than the advisory panel — five ways:**
    a. **Privacy gate, cross-family diversity preserved.** The gemini free tier is excluded
-      by construction (the class predicate is the routing guard, mirroring ADR-0016 §5);
-      its seat is the operator-designated `agy`, deemed privacy-acceptable for prose. So the
+      two ways: the class predicate routes only prose to the prose panel (mirroring
+      ADR-0016 §5), AND a **code guard rejects a gemini-family model on a prose judge at
+      construction** (`NewModelJudge` errors when `Prose && family=="gemini"`) — so a
+      misconfigured `TWICESHY_PROSE_PANEL_JUDGE_MODEL` cannot silently leak prose to a
+      training endpoint, matching the §6 denylist's "rejected by construction" posture. The
+      seat is the operator-designated `agy`, deemed privacy-acceptable for prose. So the
       panel keeps **cross-family** diversity (gpt-oss + agy) — comparable to the advisory
       panel's, not weaker — while the §6 local denylist stays fully enforced.
    b. **The poison check is foregrounded.** A prose-specific prompt (`ProseSystemV1`)

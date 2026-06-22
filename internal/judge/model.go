@@ -113,6 +113,13 @@ func NewModelJudge(cfg Config) (*ModelJudge, error) {
 	if localFamilies[fam] {
 		return nil, fmt.Errorf("judge: %q (family %q) is the cheap local model — forbidden as judge (ADR-0013 standing rule: local = drafter/flagger, never judge)", cfg.Model, fam)
 	}
+	// Privacy gate (ADR-0016 §5 / ADR-0020): prose may carry internal/sensitive content,
+	// and the gemini free tier trains on inputs — so a prose judge can NEVER be gemini.
+	// Rejected by construction here so a misconfigured TWICESHY_PROSE_PANEL_JUDGE_MODEL
+	// cannot silently leak prose to a training endpoint.
+	if cfg.Prose && fam == "gemini" {
+		return nil, fmt.Errorf("judge: %q (family %q) cannot judge prose — the gemini free tier trains on inputs and prose may carry sensitive content (privacy gate, ADR-0016 §5 / ADR-0020)", cfg.Model, fam)
+	}
 	if df := FamilyOf(cfg.DrafterModel); df != "" && df == fam {
 		return nil, fmt.Errorf("judge: model %q shares family %q with the drafter — the judge must be diverse (anti-monoculture, ADR-0013 §6)", cfg.Model, fam)
 	}
