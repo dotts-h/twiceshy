@@ -4,6 +4,7 @@ package judge_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -163,6 +164,54 @@ func TestModelJudgeApprove(t *testing.T) {
 		if !strings.Contains(gotBody, want) {
 			t.Errorf("request body missing %q; the judge cannot reason without it.\nbody=%s", want, gotBody)
 		}
+	}
+}
+
+// #0063: a per-request Advisory flag lets one judge render the advisory prompt for
+// an advisory-class case and the prose prompt otherwise — how judgeeval routes a
+// mixed gold set through a single judge. A prose-configured judge must honour it.
+func TestModelJudge_PerRequestAdvisoryRoutesPrompt(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf, _ := io.ReadAll(r.Body)
+		gotBody = string(buf)
+		_, _ = w.Write([]byte(approveBody()))
+	}))
+	defer srv.Close()
+	j, err := judge.NewModelJudge(judge.Config{Endpoint: srv.URL, Model: "gemini-2.5-pro", DrafterModel: "claude-opus-4-8", Client: srv.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sysOf := func(body string) string {
+		var w struct {
+			System string `json:"system"`
+		}
+		_ = json.Unmarshal([]byte(body), &w)
+		return w.System
+	}
+
+	adv := sampleRequest()
+	adv.Advisory = true
+	if _, err := j.Judge(context.Background(), adv); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gotBody, "vulnerability advisory imported by a TRUSTED importer") {
+		t.Fatalf("req.Advisory=true must render the advisory USER prompt; body=%s", gotBody)
+	}
+	if sysOf(gotBody) != judge.AdvisorySystemV1 {
+		t.Fatalf("req.Advisory=true must pair the advisory SYSTEM prompt; got system=%q", sysOf(gotBody))
+	}
+
+	prose := sampleRequest() // Advisory defaults false
+	if _, err := j.Judge(context.Background(), prose); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gotBody, "A sandbox already PROVED") {
+		t.Fatalf("req.Advisory=false must render the prose USER prompt; body=%s", gotBody)
+	}
+	if sysOf(gotBody) == judge.AdvisorySystemV1 {
+		t.Fatal("req.Advisory=false must NOT use the advisory system prompt")
 	}
 }
 
