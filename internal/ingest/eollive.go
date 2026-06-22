@@ -121,7 +121,10 @@ func (s *EOLLiveSource) Drafts(ctx context.Context) ([]Draft, error) {
 		decErr := json.NewDecoder(rc).Decode(&cycles)
 		_ = rc.Close()
 		if decErr != nil {
-			return nil, fmt.Errorf("eol-live: decode %s: %w", product, decErr)
+			// A malformed 200 body for ONE product must not zero out the others — skip it
+			// and continue (the bulk-importer "skip junk" principle; a later scheduled run
+			// retries). A fetch/HTTP error above is systemic, so it still fails loud.
+			continue
 		}
 		for _, c := range cycles {
 			if d, ok := eolDraft(product, c, s.now); ok {
@@ -173,9 +176,16 @@ func eolDraft(product string, c eolCycle, now time.Time) (Draft, bool) {
 	dateNote := "date unspecified"
 	switch {
 	case c.EOL.date != "":
+		t, err := time.Parse("2006-01-02", c.EOL.date)
+		if err != nil {
+			// An unparseable EOL date can't be placed before/after now — skip it rather
+			// than emit a record carrying the garbage token (the bulk-importer "skip
+			// junk" principle, like the OSV importer).
+			return Draft{}, false
+		}
 		// A future EOL date is not yet end-of-life — skip until it passes (a later run
 		// picks it up, born quarantined; dedup keeps re-imports idempotent).
-		if t, err := time.Parse("2006-01-02", c.EOL.date); err == nil && t.After(now) {
+		if t.After(now) {
 			return Draft{}, false
 		}
 		dateNote = c.EOL.date

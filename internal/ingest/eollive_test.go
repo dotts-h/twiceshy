@@ -141,6 +141,31 @@ func TestEOLLive_DeterministicOrder(t *testing.T) {
 	}
 }
 
+// A cycle with an unparseable EOL date is skipped (not emitted with a garbage token),
+// and a product returning a malformed 200 body is skipped WITHOUT aborting the batch —
+// the bulk-importer "skip junk, never fail the batch" principle (mirrors OSV-live).
+func TestEOLLive_SkipsJunk(t *testing.T) {
+	now := time.Date(2026, 6, 22, 0, 0, 0, 0, time.UTC)
+	bodies := map[string]string{
+		"python": `[{"cycle":"3.8","eol":"2024-10-07"},{"cycle":"3.9","eol":"tba"}]`, // 3.9: junk date
+		"broken": `{"message":"upstream error"}`,                                     // malformed 200 (object, not array)
+		"go":     `[{"cycle":"1.20","eol":"2024-02-06"}]`,
+	}
+	src := ingest.NewEOLLiveSource(
+		ingest.WithEOLProducts([]string{"python", "broken", "go"}),
+		ingest.WithEOLNow(now),
+		ingest.WithEOLLiveFetch(eolFixtureFetch(bodies)),
+	)
+	drafts, err := src.Drafts(context.Background())
+	if err != nil {
+		t.Fatalf("a malformed product body must not abort the batch: %v", err)
+	}
+	// python 3.8 + go 1.20 emitted; python 3.9 (junk date) and broken (malformed body) skipped.
+	if got := eolSigs(drafts); len(got) != 2 || got[0] != "EOL:go:1.20" || got[1] != "EOL:python:3.8" {
+		t.Fatalf("signatures = %v, want [EOL:go:1.20 EOL:python:3.8]", got)
+	}
+}
+
 // End-to-end through the shared ingest path: an EOL draft is born quarantined, is
 // schema-valid, carries facts-only provenance, and a re-import dedups against it — the
 // quarantine + idempotency #0023 requires (the same path the OSV live importer rides).

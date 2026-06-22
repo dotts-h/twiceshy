@@ -45,8 +45,9 @@ Shipped the **endoflife.date** half: `twiceshy ingest eol-live` (`internal/inges
 deprecation record for every cycle past its end-of-life date (or `eol:true`), mirroring the
 live OSV importer (#0021): a `WithEOLLiveFetch` injection seam (fixture-tested, zero network
 in CI), deterministic distillation (sorted by `EOL:<product>:<cycle>` signature, clock
-injected via `WithEOLNow`), `AppliesTo.Runtime{product: cycle}` (the field the D2 staleness
-doctor matches), and license-clean facts-only prose (no third-party text;
+injected via `WithEOLNow`), `AppliesTo.Runtime{product: cycle}` (the natural field for a
+record whose subject is a runtime version rather than a package), and license-clean
+facts-only prose (no third-party text;
 `SourceLicenseFactsOnly`). Born quarantined and idempotent via the shared `ingest.Prepare`
 dedup (`IncludeQuarantined`) — proven end-to-end by `TestEOLLive_PrepareQuarantinesAndDedups`.
 Future EOL dates are skipped until they pass (a later run picks them up). EOL-runtime records
