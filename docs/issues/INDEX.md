@@ -99,6 +99,6 @@ never a cycle).
 | [0078](0078-interim-take-corpus-imports-off-the-code-ci-shim-relax-outdated-branch-slower-cadence.md) | Interim: take corpus imports off the code CI (shim + relax outdated-branch + slower cadence) | closed | medium | 0076 | ADR-0021 |
 | [0079](0079-schema-contract-frozen-test-fixtures-engine-stops-loading-the-live-corpus-in-ci.md) | Schema contract + frozen test fixtures (engine stops loading the live corpus in CI) | closed | high | 0076 | ADR-0021 |
 | [0080](0080-stand-up-the-twiceshy-corpus-store-its-ci-the-no-silent-freeze-stall-alarm.md) | Stand up the twiceshy-corpus store + its CI + the no-silent-freeze stall alarm | closed | high | 0076 | ADR-0021 |
-| [0081](0081-quiesce-cut-over-make-the-corpus-store-authoritative-re-point-sync-importer-loop.md) | Quiesce + cut over: make the corpus store authoritative, re-point sync/importer/loop | open | critical | 0076 | |
-| [0082](0082-restart-on-the-new-home-verify-end-to-end.md) | Restart on the new home + verify end-to-end | open | high | 0076 | |
+| [0081](0081-quiesce-cut-over-make-the-corpus-store-authoritative-re-point-sync-importer-loop.md) | Quiesce + cut over: make the corpus store authoritative, re-point sync/importer/loop | closed | critical | 0076 | ADR-0021 |
+| [0082](0082-restart-on-the-new-home-verify-end-to-end.md) | Restart on the new home + verify end-to-end | closed | high | 0076 | ADR-0021 |
 | [0083](0083-decommission-the-engine-repo-corpus-path.md) | Decommission the engine-repo corpus path | open | medium | 0076 | |
