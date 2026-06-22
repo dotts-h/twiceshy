@@ -44,18 +44,35 @@ ECOSYSTEMS="${TWICESHY_IMPORT_ECOSYSTEMS:-npm PyPI Go}"
 AUTOMERGE="${TWICESHY_AUTOMERGE:-1}"
 GO="${GO:-/usr/local/go/bin/go}"
 NTFY_URL="${NTFY_URL:-}"
-# Pre-flight gate: the corpus-guard subset (schema/dup-id via LoadCorpus, the D2
-# staleness guard, the push-precision eval) — fast and Docker-free, so it runs on the
-# brain. Override to `make test` for the full gate.
-PREFLIGHT_CMD="${TWICESHY_PREFLIGHT_CMD:-$GO test ./internal/record/ ./internal/doctor/ ./internal/eval/ -count=1}"
+# Forge repo the PR is opened + merged against. Default = the engine repo; the
+# decoupled deployment sets TWICESHY_FORGEJO_REPO=claude/twiceshy-corpus (ADR-0021).
+FORGEJO_REPO="${TWICESHY_FORGEJO_REPO:-claude/twiceshy}"
+# Prebuilt engine binary (PATH-installed). When set, the script does NOT build from
+# source, so it runs against a DATA-ONLY corpus clone (the decoupled corpus carries
+# no Go source). Unset = legacy: build from ./cmd/twiceshy in $REPO.
+BIN="${TWICESHY_BIN:-}"
+# Pre-flight gate. Default is set below once $bin is resolved (the binary-based
+# corpus guard). Override TWICESHY_PREFLIGHT_CMD for a custom gate.
+PREFLIGHT_CMD="${TWICESHY_PREFLIGHT_CMD:-}"
 
 notify() { [ -n "$NTFY_URL" ] && curl -fsS -d "$1" "$NTFY_URL" >/dev/null 2>&1 || true; }
 
 cd "$REPO"
 git fetch origin -q && git checkout main -q && git reset --hard origin/main -q && git clean -fdq -- experience/
 
-bin="$(mktemp -d)/twiceshy"
-"$GO" build -o "$bin" ./cmd/twiceshy
+# Resolve the engine binary: a PATH-installed prebuilt (decoupled corpus — no
+# source in $REPO) or a build from this clone (legacy engine-repo deployment).
+if [ -n "$BIN" ]; then
+  bin="$BIN"
+else
+  bin="$(mktemp -d)/twiceshy"
+  "$GO" build -o "$bin" ./cmd/twiceshy
+fi
+# Default pre-flight: the binary-based corpus guard — strict LoadCorpus via `index`
+# (schema + dup-id + superseded_by + repro-presence over the WHOLE corpus), source-free.
+# This replaces the old `go test ./internal/...` gate, which after ADR-0021 #0079
+# exercises the frozen fixture, not the imported records.
+[ -n "$PREFLIGHT_CMD" ] || PREFLIGHT_CMD="$bin index -corpus $REPO -db $(mktemp -u).preflight.db"
 
 branch="import/${SOURCE}-$(date -u +%Y%m%d-%H%M%S)"
 git checkout -b "$branch" -q
@@ -111,7 +128,7 @@ fi
 
 git push -q -u origin "$branch"
 
-api="http://192.168.50.244:3030/api/v1/repos/claude/twiceshy"
+api="http://192.168.50.244:3030/api/v1/repos/${FORGEJO_REPO}"
 tok="$(git config --get remote.origin.url | sed -E 's#.*//[^:]+:([^@]+)@.*#\1#')"
 pr="$(jq -nc --arg t "corpus(${SOURCE}): ${n} new quarantined records [scheduled]" \
         --arg b "Automated live ${SOURCE} import (issue 0022). Quarantined records; the harness/human validates separately." \
@@ -129,7 +146,7 @@ if [ "$AUTOMERGE" != "1" ]; then
   notify "twiceshy: imported ${n} new ${SOURCE} records (PR #${pr}) — auto-merge off, PR left open"
 elif ! command -v forgejo-ci-merge >/dev/null; then
   notify "twiceshy: imported ${n} new ${SOURCE} records (PR #${pr}) — forgejo-ci-merge unavailable, PR left open"
-elif forgejo-ci-merge claude/twiceshy "$pr" "$sha" "$REPO"; then
+elif forgejo-ci-merge "$FORGEJO_REPO" "$pr" "$sha" "$REPO"; then
   notify "twiceshy: imported ${n} new ${SOURCE} records and merged PR #${pr}"
 else
   notify "twiceshy: import PR #${pr} (${n} ${SOURCE} records) left OPEN — auto-merge refused (CI red or timeout); needs attention"
