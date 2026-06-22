@@ -10,3 +10,7 @@ User=ori
 # (TWICESHY_ALERT_URL / NTFY_URL, TWICESHY_STALL_THRESHOLD_MIN, TWICESHY_STALL_COOLDOWN).
 EnvironmentFile=-/etc/twiceshy/stall-alarm.env
 ExecStart=/home/ori/.local/bin/corpus-stall-alarm.sh
+# main() returns 1 when it DETECTS a stall (and alerts) — that is the alarm working,
+# not failing, so don't mark the unit failed in `systemctl --failed`. (Distinct from
+# the watchdog, whose exit 1 means a genuine unrecovered outage.)
+SuccessExitStatus=1
