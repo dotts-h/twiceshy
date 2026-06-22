@@ -84,7 +84,7 @@ never a cycle).
 | [0063](0063-judgeeval-lacks-advisory-prompt-routing-can-t-measure-cheap-judges-on-the-sonnet-advisory-gold-set.md) | judgeeval lacks advisory-prompt routing — can't measure cheap judges on the Sonnet advisory gold-set | closed | medium | 0015 | |
 | [0064](0064-epic-agent-native-feedback-loop-capture-submit-measure.md) | Epic: Agent-native feedback loop — capture, submit, measure | open | high | — | |
 | [0065](0065-session-retro-capture-hook-automatic-trap-submission-at-the-lifecycle-seam.md) | Session-retro capture hook — automatic trap submission at the lifecycle seam | closed | high | 0064 | ADR-0018 |
-| [0066](0066-agent-issue-submission-tool-report-issue-intake.md) | Agent issue-submission tool (report_issue) + intake | open | medium | 0064 | |
+| [0066](0066-agent-issue-submission-tool-report-issue-intake.md) | Agent issue-submission tool (report_issue) + intake | closed | medium | 0064 | |
 | [0067](0067-per-query-gate-decision-telemetry.md) | Per-query gate-decision telemetry | closed | medium | 0064 | PR#269 |
 | [0068](0068-global-idf-specificity-signal-for-the-push-gate-adr-proposal.md) | Global-IDF specificity signal for the push gate (ADR proposal) | closed | medium | 0064 | ADR-0017 |
 | [0069](0069-session-retro-helpfulness-signal-join-transcript-against-the-0067-decision-log-to-score-served-cards-used-vs-ignored.md) | Session-retro helpfulness signal — join transcript against the #0067 decision log to score served cards used vs ignored | open | medium | 0064 | |
@@ -93,3 +93,4 @@ never a cycle).
 | [0072](0072-corpus-pipeline-hardening-importer-pre-flight-gate-ntfy-on-failure-red-pr-stall-alarm-never-silent-again-web-watchers-osv-historical-vs-recent-fetch.md) | Corpus-pipeline hardening — importer pre-flight gate + ntfy on failure, red-PR stall alarm (never silent again), web watchers, osv historical-vs-recent fetch | closed | high | 0015 | |
 | [0073](0073-non-osv-web-watchers-changelog-advisory-eol-deprecation-feeds-emit-quarantined-drafts-split-from-0072-item-3.md) | Non-OSV web watchers — changelog/advisory/EOL/deprecation feeds emit quarantined drafts (split from #0072 item 3) | open | medium | 0015 | |
 | [0074](0074-ingest-the-85-sonnet-advisory-labels-as-advisory-gold-cases-uses-0063-routing.md) | Ingest the 85 Sonnet advisory labels as advisory gold cases (uses #0063 routing) | open | medium | 0015 | |
+| [0075](0075-intake-issues-drainer-materialize-the-report-issue-spool-into-docs-issues-uses-0066-capture.md) | intake-issues drainer — materialize the report_issue spool into docs/issues/ (uses #0066 capture) | open | medium | 0064 | |
