@@ -18,13 +18,14 @@ import (
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/server"
+	"github.com/dotts-h/twiceshy/internal/testcorpus"
 )
 
 const logTestToken = "s3cret-test-token"
 
 func newLoggedTestServer(t *testing.T, buf *bytes.Buffer) *httptest.Server {
 	t.Helper()
-	recs, err := record.LoadCorpus("../..")
+	recs, err := record.LoadCorpus(testcorpus.Root())
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
 	}

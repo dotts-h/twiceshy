@@ -9,6 +9,7 @@ import (
 
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/record"
+	"github.com/dotts-h/twiceshy/internal/testcorpus"
 )
 
 // FuzzSearchNeverErrors generalizes TestSearchQuoteEscapesFTS5Input (exp-0001)
@@ -29,7 +30,7 @@ func FuzzSearchNeverErrors(f *testing.F) {
 		f.Add(s)
 	}
 
-	recs, err := record.LoadCorpus("../..")
+	recs, err := record.LoadCorpus(testcorpus.Root())
 	if err != nil {
 		f.Fatalf("LoadCorpus: %v", err)
 	}

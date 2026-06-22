@@ -11,14 +11,11 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/dotts-h/twiceshy/internal/record"
+	"github.com/dotts-h/twiceshy/internal/testcorpus"
 )
 
-// repoRoot is the corpus root for this repo's own records, which double as
-// the spec's worked examples (docs/SCHEMA.md).
-const repoRoot = "../.."
-
 func TestParseFileParsesAFullRecord(t *testing.T) {
-	rec, err := record.ParseFile(repoRoot, "experience/2026/0001-fts5-match-raw-user-input.md")
+	rec, err := record.ParseFile(testcorpus.Root(), "experience/2026/0001-fts5-match-raw-user-input.md")
 	if err != nil {
 		t.Fatalf("ParseFile: %v", err)
 	}
@@ -46,7 +43,7 @@ func TestParseFileParsesAFullRecord(t *testing.T) {
 }
 
 func TestParseFileAllowsRecordWithoutSymptom(t *testing.T) {
-	rec, err := record.ParseFile(repoRoot, "experience/2026/0003-mcp-streamable-http-not-sse.md")
+	rec, err := record.ParseFile(testcorpus.Root(), "experience/2026/0003-mcp-streamable-http-not-sse.md")
 	if err != nil {
 		t.Fatalf("ParseFile: %v", err)
 	}
@@ -59,7 +56,7 @@ func TestParseFileAllowsRecordWithoutSymptom(t *testing.T) {
 }
 
 func TestLoadCorpusLoadsAllExamples(t *testing.T) {
-	recs, err := record.LoadCorpus(repoRoot)
+	recs, err := record.LoadCorpus(testcorpus.Root())
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
 	}
@@ -436,5 +433,30 @@ func TestLoadCorpusIgnoresReproDirAndNonRecordFiles(t *testing.T) {
 	}
 	if len(recs) != 1 {
 		t.Errorf("want 1 record, got %d", len(recs))
+	}
+}
+
+// TestSchemaVersionContractRejected verifies the engine↔corpus version contract:
+// a record whose schema_version differs from record.SchemaVersion is rejected by
+// both Parse and LoadCorpus with an error that mentions "schema_version".
+func TestSchemaVersionContractRejected(t *testing.T) {
+	front := fm()
+	front["schema_version"] = record.SchemaVersion + 1 // one version ahead → unsupported
+
+	src := render(t, front)
+
+	// Single-record parse must fail and mention schema_version.
+	_, err := record.Parse(fmPath, src)
+	if err == nil {
+		t.Fatal("Parse: want schema_version error, got nil")
+	}
+	if !strings.Contains(err.Error(), "schema_version") {
+		t.Errorf("Parse error %q does not mention schema_version", err)
+	}
+
+	// LoadCorpus must also reject it.
+	root := writeCorpus(t, map[string][]byte{fmPath: src})
+	if _, err := record.LoadCorpus(root); err == nil || !strings.Contains(err.Error(), "schema_version") {
+		t.Errorf("LoadCorpus: want schema_version error, got %v", err)
 	}
 }

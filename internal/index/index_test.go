@@ -12,6 +12,7 @@ import (
 
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/record"
+	"github.com/dotts-h/twiceshy/internal/testcorpus"
 )
 
 const testRepo = "github.com/dotts-h/twiceshy"
@@ -74,7 +75,7 @@ func openIndex(t *testing.T, recs []*record.Record) *index.Index {
 
 func corpus(t *testing.T) []*record.Record {
 	t.Helper()
-	recs, err := record.LoadCorpus("../..")
+	recs, err := record.LoadCorpus(testcorpus.Root())
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
 	}

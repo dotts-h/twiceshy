@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/dotts-h/twiceshy/internal/record"
+	"github.com/dotts-h/twiceshy/internal/testcorpus"
 	"github.com/google/jsonschema-go/jsonschema"
 	"gopkg.in/yaml.v3"
 )
@@ -68,7 +69,7 @@ func frontmatterValue(t *testing.T, marshaled []byte) any {
 
 func TestMarshal_CorpusOutputSatisfiesSchema(t *testing.T) {
 	schema := loadRecordSchema(t)
-	recs, err := record.LoadCorpus("../..")
+	recs, err := record.LoadCorpus(testcorpus.Root())
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
 	}
