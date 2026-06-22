@@ -27,10 +27,16 @@ import (
 // "fixed in X") and requires the version to match a real product cycle — so a
 // deprecation record keyed on `introduced` (which persists) is never flagged,
 // and a package version that isn't a runtime cycle simply finds no match.
+//
+// WouldFlag exposes the same two signals WITHOUT the validated-status gate — the
+// promote-side mirror (#0071): the promoter calls it to refuse a born-stale
+// advisory before it ever becomes validated, since once validated it would trip
+// this very guard and red the validate PR.
 type Staleness struct {
 	eol      EOLSource
 	now      time.Time
-	products map[string]string // lower-cased ecosystem → endoflife product
+	products map[string]string  // lower-cased ecosystem → endoflife product
+	cache    map[string][]Cycle // product → cycles, memoized across calls (callers are sequential)
 }
 
 // NewStaleness builds D2. eol may be nil (only the valid.until signal runs).
@@ -43,6 +49,7 @@ func NewStaleness(eol EOLSource, now time.Time) *Staleness {
 			"npm":  "nodejs",
 			"pypi": "python",
 		},
+		cache: map[string][]Cycle{},
 	}
 }
 
@@ -90,8 +97,6 @@ func parseDate(s string) (time.Time, bool) {
 
 func (s *Staleness) Run(ctx context.Context, recs []*record.Record) (Report, error) {
 	rep := Report{Doctor: s.Name()}
-	cache := map[string][]Cycle{} // product → cycles, fetched once per run
-
 	for _, r := range recs {
 		// Staleness proposes a validated→stale demotion, so it evaluates ONLY
 		// validated records. Quarantined drafts (incl. imported advisories that
@@ -101,29 +106,45 @@ func (s *Staleness) Run(ctx context.Context, recs []*record.Record) (Report, err
 		if r.Status != "validated" {
 			continue
 		}
-		// Signal 1: an explicit validity window that has closed.
-		if u := r.Provenance.Valid.Until; u != nil {
-			if d, ok := parseDate(*u); ok && d.Before(s.now) {
-				rep.Findings = append(rep.Findings, Finding{
-					RecordID: r.ID, Path: r.Path,
-					Issue:    fmt.Sprintf("provenance.valid.until %s is in the past", *u),
-					Proposal: "confirm and set status: stale",
-				})
-				continue // one finding per record is enough to act on
-			}
-		}
-		// Signal 2: a Fixed version on an EOL product cycle.
-		if s.eol == nil {
-			continue
-		}
-		if f := s.staleByEOL(ctx, r, cache); f != nil {
+		if f := s.wouldFlag(ctx, r); f != nil {
 			rep.Findings = append(rep.Findings, *f)
 		}
 	}
 	return rep, nil
 }
 
-func (s *Staleness) staleByEOL(ctx context.Context, r *record.Record, cache map[string][]Cycle) *Finding {
+// WouldFlag reports the staleness finding a record WOULD receive if it were
+// validated — independent of its current status. It is the promote-side mirror of
+// the D2 guard (#0071, companion to #302): the promoter refuses a born-stale
+// advisory (an EOL runtime, or a valid.until already past) with it, because such a
+// record would be flagged the instant it became validated and red the guard test
+// that gates the validate PR. nil = would not be flagged. The cycles cache is
+// shared across calls (callers are sequential).
+func (s *Staleness) WouldFlag(ctx context.Context, r *record.Record) *Finding {
+	return s.wouldFlag(ctx, r)
+}
+
+// wouldFlag runs the two staleness signals with NO status gate (that lives in
+// Run). One finding per record is enough to act on, so it returns on the first.
+func (s *Staleness) wouldFlag(ctx context.Context, r *record.Record) *Finding {
+	// Signal 1: an explicit validity window that has closed.
+	if u := r.Provenance.Valid.Until; u != nil {
+		if d, ok := parseDate(*u); ok && d.Before(s.now) {
+			return &Finding{
+				RecordID: r.ID, Path: r.Path,
+				Issue:    fmt.Sprintf("provenance.valid.until %s is in the past", *u),
+				Proposal: "confirm and set status: stale",
+			}
+		}
+	}
+	// Signal 2: a Fixed version on an EOL product cycle.
+	if s.eol == nil {
+		return nil
+	}
+	return s.staleByEOL(ctx, r)
+}
+
+func (s *Staleness) staleByEOL(ctx context.Context, r *record.Record) *Finding {
 	for _, at := range r.AppliesTo {
 		product := s.products[strings.ToLower(at.Ecosystem)]
 		if product == "" || at.Versions == nil || at.Versions.Fixed == nil {
@@ -136,13 +157,9 @@ func (s *Staleness) staleByEOL(ctx context.Context, r *record.Record, cache map[
 		if cyc == "" {
 			continue
 		}
-		cycles, ok := cache[product]
+		cycles, ok := s.cycles(ctx, product)
 		if !ok {
-			c, err := s.eol.Cycles(ctx, product)
-			if err != nil {
-				continue // skip on no data — never a false flag
-			}
-			cycles, cache[product] = c, c
+			continue // skip on no data — never a false flag
 		}
 		for _, c := range cycles {
 			if c.Cycle != cyc {
@@ -159,4 +176,22 @@ func (s *Staleness) staleByEOL(ctx context.Context, r *record.Record, cache map[
 		}
 	}
 	return nil
+}
+
+// cycles returns the endoflife cycles for a product, memoized across calls so the
+// promote gate (one WouldFlag per record) never re-fetches the same product. ok is
+// false only when the source errored (caller skips — no data ⇒ no false flag); a
+// 404/unknown product is a successful empty result and is cached. No lock: the only
+// callers (Run's loop, the sequential promote loop) never touch one *Staleness
+// concurrently.
+func (s *Staleness) cycles(ctx context.Context, product string) ([]Cycle, bool) {
+	if c, ok := s.cache[product]; ok {
+		return c, true
+	}
+	c, err := s.eol.Cycles(ctx, product)
+	if err != nil {
+		return nil, false
+	}
+	s.cache[product] = c
+	return c, true
 }

@@ -1037,6 +1037,15 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 			return fmt.Errorf("configuring advisory panel: %w", err)
 		}
 		promoterOpts = append(promoterOpts, promote.WithAdvisoryPanel(panel))
+		// Born-stale gate (#0071, companion to #302), paired with the panel since it
+		// only fires on the advisory path: never promote an advisory whose runtime is
+		// already EOL — it would trip the (validated-scoped) D2 staleness guard the
+		// instant it became validated, the very thing that stuck ~36 validate PRs.
+		// Uses the public endoflife.date source (TWICESHY_EOL_URL overrides — e.g. a
+		// test/offline stub). Fails open (a source outage ⇒ no flag ⇒ promotion
+		// proceeds), with the deterministic D2 guard test as the backstop.
+		staleGate := doctor.NewStaleness(doctor.NewEndOfLifeSource(getenv("TWICESHY_EOL_URL")), time.Now().UTC())
+		promoterOpts = append(promoterOpts, promote.WithStalenessGate(staleGate.WouldFlag))
 	}
 	p := promote.NewPromoter(rv, judge.NewMajority(tj, *votes), *corpus, promoterOpts...)
 

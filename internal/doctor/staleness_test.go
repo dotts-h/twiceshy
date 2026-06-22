@@ -138,6 +138,41 @@ func TestStaleness_EvaluatesOnlyValidated(t *testing.T) {
 	}
 }
 
+// WouldFlag is the promote-side mirror of the D2 guard (#0071): it reports the
+// staleness finding a record WOULD receive if it were validated, independent of
+// its current status. The promoter calls it to refuse a born-stale advisory (an
+// EOL runtime) while it is still quarantined — Run, gated on validated status,
+// would not yet flag it, so the only thing that catches it post-promotion is the
+// guard test that reds the validate PR. WouldFlag closes that gap pre-promotion.
+func TestStaleness_WouldFlag_StatusIndependent(t *testing.T) {
+	eol := stubEOL{"python": {{Cycle: "3.8", EOL: "2024-10-01"}}}
+	s := doctor.NewStaleness(eol, fixedNow)
+	at := []record.AppliesTo{{Ecosystem: "PyPI", Versions: &record.VersionRange{Fixed: ptr("3.8")}}}
+
+	quar := recWith("0001", at, nil)
+	quar.Status = "quarantined"
+	// Run skips the quarantined draft (status gate) ...
+	if rep, _ := s.Run(context.Background(), []*record.Record{quar}); len(ids(rep)) != 0 {
+		t.Fatalf("Run must skip the quarantined draft, got %v", ids(rep))
+	}
+	// ... but WouldFlag reports it as born-stale (the gate's signal).
+	if f := s.WouldFlag(context.Background(), quar); f == nil {
+		t.Fatal("WouldFlag must report a quarantined EOL-runtime record as born-stale")
+	}
+
+	// A current runtime is not flagged (the gate must not over-block).
+	live := recWith("0002", []record.AppliesTo{{Ecosystem: "PyPI", Versions: &record.VersionRange{Fixed: ptr("3.13")}}}, nil)
+	if f := s.WouldFlag(context.Background(), live); f != nil {
+		t.Fatalf("WouldFlag must not flag a current runtime, got %+v", f)
+	}
+	// Signal 1 (past valid.until) is reported too, status notwithstanding.
+	expired := recWith("0003", nil, ptr("2020-01-01"))
+	expired.Status = "quarantined"
+	if f := s.WouldFlag(context.Background(), expired); f == nil {
+		t.Fatal("WouldFlag must report a past valid.until as born-stale")
+	}
+}
+
 func TestStaleness_RealCorpusNotFalseFlagged(t *testing.T) {
 	recs, err := record.LoadCorpus("../..")
 	if err != nil {

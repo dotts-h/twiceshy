@@ -437,3 +437,66 @@ func TestPromote_NonAdvisory_UnchangedProofPath(t *testing.T) {
 		t.Fatalf("non-advisory must use proof path: promoted=%v attestor_calls=%d", out.Promoted, att.Calls)
 	}
 }
+
+func eolFinding(_ context.Context, r *record.Record) *doctor.Finding {
+	return &doctor.Finding{RecordID: r.ID, Path: r.Path, Issue: "python 3.8 reached end-of-life 2024-10-01"}
+}
+
+// A born-stale advisory — one whose runtime is already EOL — must NOT be promoted
+// even when the panel would unanimously approve: a validated EOL record trips the
+// (validated-scoped) D2 staleness guard the instant it lands, which is what stuck
+// ~36 validate PRs (#0071, the promote-side companion to #302). The promoter
+// consults an injected staleness gate and holds the record, quarantined, BEFORE
+// the costly panel call.
+func TestPromote_AdvisoryEOLRuntime_HeldNotPromoted(t *testing.T) {
+	m1 := &captureJudge{verdict: judge.ApproveVerdict("gpt-oss:20b")}
+	m2 := &captureJudge{verdict: judge.ApproveVerdict("gemini-2.5-pro")}
+	panel, err := judge.NewPanel(
+		judge.PanelMember{Model: "gpt-oss:20b", Judge: m1},
+		judge.PanelMember{Model: "gemini-2.5-pro", Judge: m2},
+	)
+	if err != nil {
+		t.Fatalf("NewPanel: %v", err)
+	}
+	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, &judge.StubJudge{},
+		promote.WithAdvisoryPanel(panel), promote.WithStalenessGate(eolFinding))
+	rec := advisoryRecord()
+
+	out, err := p.Promote(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	if out.Promoted || rec.Status != "quarantined" {
+		t.Fatalf("born-stale advisory must stay quarantined; promoted=%v status=%q", out.Promoted, rec.Status)
+	}
+	if m1.last.Record != nil || m2.last.Record != nil {
+		t.Fatal("the panel must not be consulted once the staleness gate blocks (skip before the cost)")
+	}
+	if !strings.Contains(out.Reason, "end-of-life") {
+		t.Fatalf("held reason should explain the EOL skip, got %q", out.Reason)
+	}
+}
+
+// The gate must not over-block: a non-EOL advisory (gate returns nil) promotes
+// exactly as before — the gate is a born-stale filter, not a new approver.
+func TestPromote_AdvisoryNonEOLGate_Promotes(t *testing.T) {
+	panel, err := judge.NewPanel(
+		judge.PanelMember{Model: "gpt-oss:20b", Judge: &judge.StubJudge{Verdict: judge.ApproveVerdict("gpt-oss:20b")}},
+		judge.PanelMember{Model: "gemini-2.5-pro", Judge: &judge.StubJudge{Verdict: judge.ApproveVerdict("gemini-2.5-pro")}},
+	)
+	if err != nil {
+		t.Fatalf("NewPanel: %v", err)
+	}
+	notStale := func(context.Context, *record.Record) *doctor.Finding { return nil }
+	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, &judge.StubJudge{},
+		promote.WithAdvisoryPanel(panel), promote.WithStalenessGate(notStale))
+	rec := advisoryRecord()
+
+	out, err := p.Promote(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	if !out.Promoted || rec.Status != "validated" {
+		t.Fatalf("non-EOL advisory must promote; promoted=%v status=%q reason=%q", out.Promoted, rec.Status, out.Reason)
+	}
+}

@@ -39,9 +39,10 @@ type Attestor interface {
 type Promoter struct {
 	attestor      Attestor
 	judge         judge.Judge
-	advisoryPanel judge.Judge                            // ADR-0016: diverse panel for advisory-class records; nil = skip
-	readRepro     func(reproPath string) (string, error) // corpus-relative repro path → content
-	now           func() string                          // validated_at date, "YYYY-MM-DD"
+	advisoryPanel judge.Judge                                                   // ADR-0016: diverse panel for advisory-class records; nil = skip
+	stalenessGate func(ctx context.Context, rec *record.Record) *doctor.Finding // #0071: born-stale gate; nil = ungated
+	readRepro     func(reproPath string) (string, error)                        // corpus-relative repro path → content
+	now           func() string                                                 // validated_at date, "YYYY-MM-DD"
 }
 
 // Option configures a Promoter.
@@ -60,6 +61,16 @@ func WithClock(now func() string) Option { return func(p *Promoter) { p.now = no
 // (ADR-0016). When nil, advisory records skip with a human-left reason.
 func WithAdvisoryPanel(j judge.Judge) Option {
 	return func(p *Promoter) { p.advisoryPanel = j }
+}
+
+// WithStalenessGate refuses to promote a record the staleness doctor would
+// immediately flag — a born-stale advisory (an EOL runtime, or a valid.until
+// already past) is not promote-worthy: it would be demoted on the very next
+// staleness run and, while validated, trips the D2 guard that gates the validate
+// PR (#0071, the promote-side companion to #302). *doctor.Staleness.WouldFlag
+// satisfies this; nil leaves the advisory path ungated.
+func WithStalenessGate(f func(context.Context, *record.Record) *doctor.Finding) Option {
+	return func(p *Promoter) { p.stalenessGate = f }
 }
 
 // NewPromoter builds a Promoter. attestor proves the repro, j is the diverse
@@ -201,6 +212,16 @@ func (p *Promoter) Promote(ctx context.Context, rec *record.Record) (Outcome, er
 func (p *Promoter) promoteAdvisory(ctx context.Context, rec *record.Record) (Outcome, error) {
 	if p.advisoryPanel == nil {
 		return skip("no advisory panel configured — left for a human")
+	}
+	// Born-stale gate (#0071, companion to #302): an advisory whose runtime is
+	// already end-of-life would be flagged stale by the D2 guard the instant it
+	// became validated — promoting it just manufactures a validated record the next
+	// staleness run demotes, and reds the guard test that gates the validate PR.
+	// Refuse it here, BEFORE the costly panel; it stays quarantined.
+	if p.stalenessGate != nil {
+		if f := p.stalenessGate(ctx, rec); f != nil {
+			return skip("runtime is end-of-life — born-stale, not promoted (#0071): " + f.Issue)
+		}
 	}
 	verdict, err := p.advisoryPanel.Judge(ctx, judge.Request{Record: rec})
 	if err != nil {
