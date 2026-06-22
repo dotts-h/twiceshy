@@ -33,21 +33,36 @@ jobs:
     runs-on: twiceshy-ci  # dedicated hardened runner: gVisor + no host docker socket (ADR-0012)
     steps:
       - uses: actions/checkout@v4
+      # Interim D (ADR-0021 #0078): a data-only PR skips the heavy Go audit while
+      # this job still posts its required status context. Fail-closed (see ci.yml).
+      - name: Detect data-only change
+        id: detect
+        run: |
+          skip="$(EVENT_NAME='${{ github.event_name }}' \
+                  BASE_SHA='${{ github.event.pull_request.base.sha }}' \
+                  bash scripts/ci-data-only.sh)"
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          echo "data-only skip=$skip"
       - uses: actions/setup-go@v5
+        if: steps.detect.outputs.skip != 'true'
         with:
           go-version-file: go.mod
           # No GH-Actions cache service on this Forgejo runner; cache=true hangs
           # ~5min then fails (connect ETIMEDOUT). See .forgejo/workflows/ci.yml.
           cache: false
       - name: Verify module checksums (supply chain)
+        if: steps.detect.outputs.skip != 'true'
         run: go mod verify
       - name: install govulncheck
+        if: steps.detect.outputs.skip != 'true'
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.4.0
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: SAST (go vet)
+        if: steps.detect.outputs.skip != 'true'
         run: go vet ./...
       - name: Dependency / vulnerability audit (govulncheck)
+        if: steps.detect.outputs.skip != 'true'
         run: govulncheck ./...
 
   secret-scan:
@@ -64,14 +79,26 @@ jobs:
           # gitleaks diffs history on a push and the PR range on a PR; fetch the
           # full history so a secret added in an earlier commit is still caught.
           fetch-depth: 0
+      # Interim D (ADR-0021 #0078): a data-only PR skips the scan while this job
+      # still posts its required status context. Fail-closed (see ci.yml).
+      - name: Detect data-only change
+        id: detect
+        run: |
+          skip="$(EVENT_NAME='${{ github.event_name }}' \
+                  BASE_SHA='${{ github.event.pull_request.base.sha }}' \
+                  bash scripts/ci-data-only.sh)"
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          echo "data-only skip=$skip"
       # Install the gitleaks binary directly instead of gitleaks/gitleaks-action@v2:
       # this Forgejo runner resolves bare actions from data.forgejo.org, where that
       # action isn't mirrored ("repository not found"), and the action also wants a
       # license for some paths. The binary needs neither. Config + allowlist live in
       # .gitleaks.toml (exempts test fixtures).
       - name: install gitleaks
+        if: steps.detect.outputs.skip != 'true'
         run: |
           curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
             | tar -xz -C /usr/local/bin gitleaks
       - name: gitleaks
+        if: steps.detect.outputs.skip != 'true'
         run: gitleaks detect --source . --config .gitleaks.toml --redact --no-banner
