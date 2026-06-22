@@ -109,7 +109,10 @@ func validateStanzaInput(where string, in GoldStanzaInput) error {
 	if in.Record == nil || in.Record.Title == "" {
 		errs = append(errs, fmt.Errorf("%s: record with a title is required", where))
 	}
-	if len(in.Repros) == 0 {
+	// An advisory-class record (ADR-0016) carries NO repro — the panel judges fidelity,
+	// not execution — so it is exempt from the repro requirement, mirroring LoadGold
+	// (#0063, #0074).
+	if len(in.Repros) == 0 && !record.IsAdvisoryClass(in.Record) {
 		errs = append(errs, fmt.Errorf("%s: at least one repro is required (the judge reads it)", where))
 	}
 	if in.Rationale == "" {
