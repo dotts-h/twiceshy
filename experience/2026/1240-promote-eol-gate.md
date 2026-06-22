@@ -1,6 +1,6 @@
 ---
 schema_version: 1
-id: exp-0807
+id: exp-1240
 kind: trap
 status: quarantined
 title: Scoping a guard to a status needs the matching exclusion on the path that produces it

@@ -60,7 +60,7 @@ promote-side mirror of the validated-scoped guard #302 introduced); `promote.pro
 consults it and refuses a born-stale advisory **before** the costly panel. Wired in the
 `validate` command against the real endoflife.date source (`TWICESHY_EOL_URL` overrides;
 fails open with the guard test as backstop). Decision recorded as **ADR-0016 §7**
-(amendment 2026-06-22). Dogfood lesson: `experience/2026/0807-promote-eol-gate.md`.
+(amendment 2026-06-22). Dogfood lesson: `experience/2026/1240-promote-eol-gate.md` (exp-1240).
 Code fix lands in this PR; only the backlog-clear box above is a post-merge step.
 
 ## Notes
