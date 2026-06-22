@@ -27,7 +27,7 @@ func ptr(s string) *string { return &s }
 
 func recWith(id string, at []record.AppliesTo, until *string) *record.Record {
 	return &record.Record{
-		ID: id, Kind: "trap", Status: "quarantined", Title: "t",
+		ID: id, Kind: "trap", Status: "validated", Title: "t",
 		AppliesTo:  at,
 		Provenance: record.Provenance{Valid: record.Validity{From: "2020-01-01", Until: until}},
 		Path:       "experience/2026/" + id + ".md",
@@ -114,8 +114,27 @@ func TestStaleness_DoesNotMutateRecords(t *testing.T) {
 	d := doctor.NewStaleness(eol, fixedNow)
 	r := recWith("0001", []record.AppliesTo{{Ecosystem: "Go", Versions: &record.VersionRange{Fixed: ptr("1.16.0")}}}, ptr("2020-01-01"))
 	_, _ = d.Run(context.Background(), []*record.Record{r})
-	if r.Status != "quarantined" || (r.Provenance.Valid.Until != nil && *r.Provenance.Valid.Until != "2020-01-01") {
+	if r.Status != "validated" || (r.Provenance.Valid.Until != nil && *r.Provenance.Valid.Until != "2020-01-01") {
 		t.Fatalf("doctor mutated the record: status=%q until=%v", r.Status, r.Provenance.Valid.Until)
+	}
+}
+
+// Staleness demotes validated→stale, so it evaluates ONLY validated records. A
+// quarantined draft on an EOL runtime (e.g. an imported advisory for Python 3.8)
+// must NOT be flagged — only its validated copy is a demotion candidate.
+// Regression: the live osv-live importer piled up ~15 un-mergeable PRs because
+// quarantined EOL-runtime advisories tripped the D2 guard test, freezing the corpus
+// at 745 records (2026-06-22).
+func TestStaleness_EvaluatesOnlyValidated(t *testing.T) {
+	eol := stubEOL{"python": {{Cycle: "3.8", EOL: "2024-10-01"}}}
+	d := doctor.NewStaleness(eol, fixedNow)
+	at := []record.AppliesTo{{Ecosystem: "PyPI", Versions: &record.VersionRange{Fixed: ptr("3.8")}}}
+	quar := recWith("0001", at, nil)
+	quar.Status = "quarantined"
+	val := recWith("0002", at, nil) // recWith defaults to validated
+	rep, _ := d.Run(context.Background(), []*record.Record{quar, val})
+	if got := ids(rep); len(got) != 1 || got[0] != "0002" {
+		t.Fatalf("staleness flags = %v, want [0002] (quarantined draft exempt, validated flagged)", got)
 	}
 }
 
@@ -124,9 +143,10 @@ func TestStaleness_RealCorpusNotFalseFlagged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
 	}
-	// A populated EOL source for every mapped product — the committed corpus
-	// must still not trip signal 2 (its records are conventions/traps without
-	// EOL'd runtime Fixed-cycles), nor signal 1 (no past valid.until).
+	// A populated EOL source for every mapped product — the committed corpus's
+	// VALIDATED records must not trip signal 2 (EOL'd runtime Fixed-cycle) nor
+	// signal 1 (past valid.until). Quarantined imports (incl. EOL-runtime
+	// advisories) are exempt: the doctor evaluates only validated records.
 	eol := stubEOL{
 		"go":     {{Cycle: "1.16", EOL: "2022-08-01"}, {Cycle: "1.20", EOL: "2024-02-01"}},
 		"python": {{Cycle: "3.8", EOL: "2024-10-01"}},

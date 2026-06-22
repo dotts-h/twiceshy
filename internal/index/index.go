@@ -144,7 +144,7 @@ log logged logging login logs loop main map margin merge message method methods 
 migration mobile mock mode model models module modules name names namespace network node
 nodes null number object objects open option options order output package packages page
 pages parse parser password patch path pause permission permissions pipeline pod pods
-port post print private process production prop props provider providers proxy public
+port post print private process production prop props provider providers proxy public python
 query queries queue react read reads recipe recipes record refactor reference register
 release releases reload render rendered replica replicas repo repository request requests
 reset resolve resource resources response responses rest result results return returns
@@ -153,7 +153,7 @@ score screen script scroll search secret select send series server servers servi
 services session set settings setup shell side signal size slow socket source span split
 sql ssl stack staging state status stderr stdin stdout step steps storage store stored
 stores stream string style submit subscribe svelte sync system table tag tags target task
-tasks template test tests text theme thread threads timeout title token tokens transcript
+tasks template test tests text theme thread threads timeout title token tokens transcript transition
 type types ui update updated updates upgrade upload url use user users util value values
 variable version versions view views volume web webhook widget worker workflow wrapper
 write writable writes yaml
