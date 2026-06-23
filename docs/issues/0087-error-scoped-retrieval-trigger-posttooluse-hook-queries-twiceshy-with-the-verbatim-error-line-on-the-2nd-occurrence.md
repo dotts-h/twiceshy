@@ -1,7 +1,7 @@
 ---
 id: 0087
 title: Error-scoped retrieval trigger — PostToolUse hook queries twiceshy with the verbatim error line on the 2nd occurrence
-status: open
+status: closed
 severity: high
 group: 0064
 depends_on: []
@@ -56,3 +56,34 @@ test before shipping the hook.
 **Measure it (depends on #0005):** justify on precision/recall of **error-moment**
 firings — a different distribution from per-prompt — before trusting it. Belongs to
 the #0064 agent-native feedback-loop epic; complements #0069 (helpfulness signal).
+
+## Resolution (done 2026-06-23)
+
+Shipped the trigger — the hook *and* its blocking server prerequisite — as a
+fail-open consuming-agent hook over a hardened, guard-tested search path. The hook
+prototype landed earlier; this finalizes and de-prototypes it.
+
+- **Server prerequisite (the blocker), done:** the verbatim error line the hook
+  sends is dense with FTS5-hostile punctuation (`RCT-Folly`, `node.js`,
+  `@scope/pkg`, `[!]`, `modernc.org/sqlite`). exp-0001's tokenize-and-quote path
+  already escapes every token, but `RetrievePush` (the `/push` channel the hook
+  uses) was *not* under the never-errors property. Added
+  `TestErrorScopedQueriesSurviveHostileInput` (`internal/index/error_input_test.go`)
+  pinning the field-report lines through `RetrievePush` + `Search`, and extended
+  `FuzzSearchNeverErrors` to cover `RetrievePush` and seed it with those lines
+  (15 s / 38 k execs, zero crashes).
+- **Hook, shipped (de-prototyped):** `hooks/twiceshy-error-pull.sh` fires on the
+  *second* distinct error signature (the "before retrying what just failed"
+  tripwire), dedupes per session+signature, rejects benign prose via the
+  trailing-colon anchor, fails open throughout, and injects nothing on an empty
+  result. Now covered by `hooks/twiceshy-error-pull.test.sh` (8 cases, shellcheck
+  clean) with a `PostToolUse` registration example in `hooks/README.md`.
+- **Design note:** the hook queries `/push`, not raw `search_experience`, on
+  purpose — `/push` renders matching cards as `additionalContext` and applies the
+  discriminative-token gate (#0068), which is exactly what an *automatic* injection
+  hook (no agent in the loop) wants; an error line's rare identifiers are the
+  tokens that gate is built to pass.
+
+**Measurement rides on #0005** (this issue's "Measure it" note): the error-moment
+precision/recall of these firings — a different distribution from per-prompt push —
+is folded into the #0005 trap-avoidance eval, not asserted here.

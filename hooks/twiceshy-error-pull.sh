@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# twiceshy PostToolUse hook — error-scoped pull client (#0087, prototype).
+# twiceshy PostToolUse hook — error-scoped pull client (#0087).
 #
 # The reliable retrieval trigger is "an error appeared in tool output", NOT "a
 # prompt was submitted": per-prompt push is ~0% precision on real traffic (exp-0622),
