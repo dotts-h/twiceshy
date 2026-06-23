@@ -4,6 +4,7 @@ package repro
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -318,6 +319,30 @@ func TestRun_ExitCodePropagated(t *testing.T) {
 	}
 	if res.Execute.Stdout != "NOT REPRODUCED" {
 		t.Errorf("stdout=%q", res.Execute.Stdout)
+	}
+}
+
+// A non-timeout runner failure (docker missing, fork failure, a cancelled
+// context) returns execResult{} with exitCode 0. That MUST NOT be read as a
+// passing repro — otherwise a non-execution looks green and promotes a
+// quarantined record (the "promoted by execution, not by trust" invariant).
+func TestRun_RunnerErrorIsNotGreen(t *testing.T) {
+	s := &stubRunner{responder: func(rc recordedCall) (execResult, error) {
+		if rc.isRunPhase("-execute") {
+			return execResult{}, errors.New("docker: command not found")
+		}
+		return execResult{}, nil
+	}}
+	b := newTestBroker(s)
+	res, err := b.Run(context.Background(), goodJob())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Execute.ExitCode == 0 {
+		t.Error("execute exit=0 on a runner error — a non-execution must not look like a green repro")
+	}
+	if res.Execute.Stderr == "" {
+		t.Error("expected the runner error surfaced in Stderr")
 	}
 }
 

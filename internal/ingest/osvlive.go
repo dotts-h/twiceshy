@@ -200,12 +200,18 @@ func mapOSVLiveRecord(rec osvLiveRecord, ecosystem string) (Draft, bool) {
 			primaryPkg = aff.Package.Name
 		}
 		for _, r := range aff.Ranges {
-			introduced, fixed := osvLiveRangeEvents(r.Events)
-			applies = append(applies, record.AppliesTo{
-				Ecosystem: ecosystem,
-				Package:   aff.Package.Name,
-				Versions:  versionRange(introduced, fixed),
-			})
+			pairs := osvLiveRangePairs(r.Events)
+			if len(pairs) == 0 {
+				// No events → preserve the prior "whole package" mapping (nil range).
+				pairs = []versionInterval{{}}
+			}
+			for _, iv := range pairs {
+				applies = append(applies, record.AppliesTo{
+					Ecosystem: ecosystem,
+					Package:   aff.Package.Name,
+					Versions:  versionRange(iv.introduced, iv.fixed),
+				})
+			}
 		}
 	}
 	if len(applies) == 0 {
@@ -256,16 +262,37 @@ func osvLiveFixText(applies []record.AppliesTo, sourceURL string) string {
 	return fmt.Sprintf("No fix is published yet (the advisory lists no fixed version); see %s for status and mitigations.", sourceURL)
 }
 
-func osvLiveRangeEvents(events []osvLiveEvent) (introduced, fixed string) {
+// versionInterval is one (introduced, fixed) affected range; fixed=="" is open-ended.
+type versionInterval struct{ introduced, fixed string }
+
+// osvLiveRangePairs walks a range's ordered events and pairs each `introduced` with
+// the next `fixed`, so disjoint affected intervals stay separate instead of
+// collapsing to first-introduced/last-fixed (which would falsely claim the gap
+// between them is affected). A trailing open `introduced` closes as fixed:null.
+func osvLiveRangePairs(events []osvLiveEvent) []versionInterval {
+	var pairs []versionInterval
+	var cur versionInterval
+	open := false
 	for _, e := range events {
-		if e.Introduced != "" && introduced == "" {
-			introduced = e.Introduced
+		if e.Introduced != "" {
+			if open {
+				// a new introduced with no intervening fixed closes the prior open-ended
+				pairs = append(pairs, cur)
+			}
+			cur = versionInterval{introduced: e.Introduced}
+			open = true
 		}
 		if e.Fixed != "" {
-			fixed = e.Fixed
+			cur.fixed = e.Fixed
+			pairs = append(pairs, cur)
+			cur = versionInterval{}
+			open = false
 		}
 	}
-	return introduced, fixed
+	if open {
+		pairs = append(pairs, cur)
+	}
+	return pairs
 }
 
 func osvLiveGHSAURL(refs []osvLiveRef) string {

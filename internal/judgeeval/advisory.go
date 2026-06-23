@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/dotts-h/twiceshy/internal/judge"
 	"github.com/dotts-h/twiceshy/internal/record"
 )
 
@@ -98,7 +99,14 @@ func advisoryStanzaInput(e AdvisoryEntry, lookup func(id string) (*record.Record
 }
 
 // canonicalChecks is the fixed precedence used to pick a reject's representative mode.
-var canonicalChecks = []string{"meaning", "scope", "license", "poison"}
+// Derived from judge.Checks (the canonical ordered set) so the two can never drift.
+var canonicalChecks = func() []string {
+	out := make([]string, len(judge.Checks))
+	for i, c := range judge.Checks {
+		out[i] = string(c)
+	}
+	return out
+}()
 
 // canonicalFirstCheck returns the first of checks in canonical order (checks is
 // non-empty by construction at the call site).

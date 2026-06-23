@@ -138,13 +138,6 @@ var reapOrphans = func(ctx context.Context) (containers, volumes int, err error)
 	return repro.NewReaper().Reap(ctx)
 }
 
-// startupReap wires the Reaper into the loop start (#0052): before the corpus
-// walk, sweep any orphans a crashed prior run left so they don't accumulate. It
-// is skipped in a dry-run (-effect writes nothing, so it must delete nothing
-// either) and is best-effort — a sweep error is reported, never fatal (a healthy
-// substrate already passed preflight; cleanup hiccups shouldn't abort the run).
-// For belt-and-suspenders, also run `twiceshy` … with a periodic out-of-band
-// sweep (the Reaper is idempotent and safe on a schedule, see repro.Reaper).
 // logSkippedPoison reports records the resilient run-loader skipped (#0053): a
 // poison/unparseable file does not abort the run, but each one is surfaced
 // (slog + prose) so it is never silently dropped.
@@ -157,6 +150,13 @@ func logSkippedPoison(logger *slog.Logger, out io.Writer, stage string, skipped 
 	}
 }
 
+// startupReap wires the Reaper into the loop start (#0052): before the corpus
+// walk, sweep any orphans a crashed prior run left so they don't accumulate. It
+// is skipped in a dry-run (-effect writes nothing, so it must delete nothing
+// either) and is best-effort — a sweep error is reported, never fatal (a healthy
+// substrate already passed preflight; cleanup hiccups shouldn't abort the run).
+// For belt-and-suspenders, also run `twiceshy` … with a periodic out-of-band
+// sweep (the Reaper is idempotent and safe on a schedule, see repro.Reaper).
 func startupReap(ctx context.Context, stage string, dryRun bool, logger *slog.Logger, out io.Writer) {
 	if dryRun {
 		return
@@ -534,7 +534,7 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 	// stops at the first non-flag arg, so pull the source off the front before
 	// parsing (otherwise `ingest go -corpus X` would leave -corpus unparsed).
 	if len(args) < 1 {
-		return errors.New("usage: twiceshy ingest <source> [flags] (sources: go, osv, osv-live, py)")
+		return errors.New("usage: twiceshy ingest <source> [flags] (sources: go, osv, osv-live, eol-live, py)")
 	}
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	c := addCommonFlags(fs)
@@ -2491,10 +2491,13 @@ func runEvalPush(ctx context.Context, ix *index.Index, out io.Writer, asJSON boo
 }
 
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	// n is a character budget; index by rune so a multibyte codepoint is never
+	// split into invalid UTF-8.
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return string(r[:n]) + "…"
 }
 
 // judgeEvalConfig is one prompt×reasoning combination the A/B sweeps.
@@ -2681,9 +2684,9 @@ func names(results []judgeEvalNamedResult, i int) string {
 	return results[i].Name
 }
 
-func printJudgeEvalMisses(out io.Writer, title string, os []judgeeval.Outcome, pred func(judgeeval.Outcome) bool) {
+func printJudgeEvalMisses(out io.Writer, title string, outcomes []judgeeval.Outcome, pred func(judgeeval.Outcome) bool) {
 	var ids []string
-	for _, o := range os {
+	for _, o := range outcomes {
 		if pred(o) {
 			ids = append(ids, fmt.Sprintf("%s(%s)", o.CaseID, o.Mode))
 		}

@@ -4,6 +4,7 @@ package ingest_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -13,6 +14,31 @@ import (
 	"github.com/dotts-h/twiceshy/internal/ingest"
 	"github.com/dotts-h/twiceshy/internal/record"
 )
+
+// cancelDuringReadReader cancels the run on first Read and returns an error, so the
+// JSON decode fails with the context already cancelled (a cancel landing mid-decode).
+type cancelDuringReadReader struct{ cancel context.CancelFunc }
+
+func (r *cancelDuringReadReader) Read(_ []byte) (int, error) {
+	r.cancel()
+	return 0, errors.New("read aborted")
+}
+
+// A run cancelled while a product body is being decoded must fail loud (the cancel
+// is systemic), not be swallowed as a per-product malformed-body skip.
+func TestEOLLive_DraftsPropagatesContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	fetch := func(_ context.Context, _ string) (io.ReadCloser, error) {
+		return io.NopCloser(&cancelDuringReadReader{cancel: cancel}), nil
+	}
+	src := ingest.NewEOLLiveSource(
+		ingest.WithEOLProducts([]string{"python"}),
+		ingest.WithEOLLiveFetch(fetch),
+	)
+	if _, err := src.Drafts(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got %v", err)
+	}
+}
 
 // eolFixtureFetch injects per-product endoflife.date JSON bodies (zero network); an
 // unknown product returns a nil reader, mirroring the production 404→skip.

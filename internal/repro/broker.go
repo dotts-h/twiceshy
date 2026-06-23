@@ -374,6 +374,15 @@ func (b *dockerBroker) runPhase(ctx context.Context, id, vol, phase, network, us
 		if err != nil && pr.Stderr == "" {
 			pr.Stderr = err.Error()
 		}
+	} else if err != nil {
+		// A non-timeout runner failure (docker missing, fork failure, a cancelled
+		// context) returns execResult{} with exitCode 0. Force a non-zero exit so a
+		// non-execution is never read downstream as a passing repro (which would
+		// promote a quarantined record on trust, not on execution).
+		pr.ExitCode = -1
+		if pr.Stderr == "" {
+			pr.Stderr = err.Error()
+		}
 	}
 	return pr
 }

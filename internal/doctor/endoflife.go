@@ -3,15 +3,22 @@
 package doctor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
 
 // DefaultEOLBase is the public endoflife.date API base (MIT-licensed data).
 const DefaultEOLBase = "https://endoflife.date"
+
+// maxEOLRespBytes caps the endoflife.date response we will decode. The base URL
+// is operator-configurable, so bound the body a misbehaving/hostile source can
+// stream (mirrors drafter/model.go's response cap).
+const maxEOLRespBytes = 1 << 20
 
 // endoflifeSource fetches release cycles from an endoflife.date-compatible API.
 type endoflifeSource struct {
@@ -36,8 +43,17 @@ type eolField struct {
 }
 
 func (e *eolField) UnmarshalJSON(b []byte) error {
+	// A JSON null or an empty-string eol is "unknown", not "already EOL". Treating
+	// missing data as past-EOL is fail-unsafe — staleByEOL would propose demoting a
+	// current, supported runtime.
+	if bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
+		return nil
+	}
 	var s string
 	if err := json.Unmarshal(b, &s); err == nil {
+		if s == "" {
+			return nil
+		}
 		e.date, e.eol = s, true
 		return nil
 	}
@@ -82,7 +98,7 @@ func (s endoflifeSource) Cycles(ctx context.Context, product string) ([]Cycle, e
 		Cycle string   `json:"cycle"`
 		EOL   eolField `json:"eol"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxEOLRespBytes)).Decode(&raw); err != nil {
 		return nil, fmt.Errorf("endoflife %s: %w", product, err)
 	}
 	cycles := make([]Cycle, 0, len(raw))

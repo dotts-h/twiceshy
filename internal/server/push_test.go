@@ -5,6 +5,7 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -17,7 +18,52 @@ import (
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/server"
+	"github.com/dotts-h/twiceshy/internal/testcorpus"
 )
+
+// A single served record that fails to load/parse (e.g. corpus drift between the
+// FTS index and the records table) must not 500 the whole hot-path injection: the
+// bad card is dropped and the rest are served ("empty is a valid answer").
+func TestPushDegradesOnBadServedRecord(t *testing.T) {
+	recs, err := record.LoadCorpus(testcorpus.Root())
+	if err != nil {
+		t.Fatalf("LoadCorpus: %v", err)
+	}
+	dbPath := filepath.Join(t.TempDir(), "ix.db")
+	ix, err := index.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = ix.Close() })
+	if err := ix.Rebuild(context.Background(), recs, testRepo); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	// Corrupt the stored markdown of a served record so record.Parse fails at push
+	// time, while it stays in the FTS index (still served): real corpus drift.
+	raw, err := sql.Open("sqlite", "file:"+dbPath+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if _, err := raw.Exec("UPDATE records SET raw=? WHERE id=?", "not valid frontmatter", "exp-0001"); err != nil {
+		t.Fatalf("corrupt record: %v", err)
+	}
+	_ = raw.Close()
+
+	h, err := server.New(server.Config{Index: ix, Token: token, Repo: testRepo})
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	ts := httptest.NewServer(h)
+	t.Cleanup(ts.Close)
+
+	resp, out := postPush(t, ts.URL, token, map[string]string{"query": `FTS5: syntax error near "."`})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (one bad card must not 500 the push)", resp.StatusCode)
+	}
+	if contains(out.IDs, "exp-0001") {
+		t.Errorf("the unparseable served card must be dropped, got IDs %v", out.IDs)
+	}
+}
 
 func postPush(t *testing.T, tsURL, token string, body any) (*http.Response, server.PushResult) {
 	t.Helper()

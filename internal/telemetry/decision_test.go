@@ -97,6 +97,32 @@ func TestRecorder_HashRedactsQuery(t *testing.T) {
 	}
 }
 
+// When the rotate rename fails persistently, telemetry must STOP (the documented
+// "on any failure sets r.f = nil") rather than reset size and keep appending to the
+// un-rotated file, which would silently break the ~2*MaxBytes on-disk bound.
+func TestRecorder_StopsOnRotateRenameFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "d.jsonl")
+	r := newRec(t, path, 256) // tiny cap forces rotation
+	// Pre-create <path>.1 as a directory so os.Rename(path, path+".1") fails while
+	// a reopen of path would still succeed.
+	if err := os.Mkdir(path+".1", 0o755); err != nil {
+		t.Fatalf("mkdir blocker: %v", err)
+	}
+	for i := 0; i < 50; i++ {
+		r.Record(telemetry.Decision{Channel: "push", QueryHash: "h", Tokens: []string{"tok", "tok", "tok"}, Count: i})
+	}
+	_ = r.Close()
+
+	cur, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat current: %v", err)
+	}
+	if cur.Size() > 256*3 {
+		t.Errorf("active log unbounded after a failed rotate rename: %d bytes (cap 256)", cur.Size())
+	}
+}
+
 func TestRecorder_RotatesAtCap(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.jsonl")
 	r := newRec(t, path, 256) // tiny cap forces rotation

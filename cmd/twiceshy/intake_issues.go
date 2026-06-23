@@ -145,6 +145,12 @@ func runNewIssue(repo, script, title string) (string, error) {
 	cmd.Dir = repo
 	stdout, err := cmd.Output()
 	if err != nil {
+		// Surface the script's stderr (intake-issues is an unattended drainer that
+		// aborts the whole batch on failure; "exit status 1" alone is undebuggable).
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
+			return "", fmt.Errorf("new-issue.sh: %w: %s", err, strings.TrimSpace(string(ee.Stderr)))
+		}
 		return "", fmt.Errorf("new-issue.sh: %w", err)
 	}
 	rel := strings.TrimSpace(string(stdout))
@@ -281,6 +287,10 @@ func gitToplevel(dir string) (string, error) {
 	cmd := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel")
 	out, err := cmd.Output()
 	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
+			return "", fmt.Errorf("resolving git toplevel of %s: %w: %s", dir, err, strings.TrimSpace(string(ee.Stderr)))
+		}
 		return "", fmt.Errorf("resolving git toplevel of %s: %w", dir, err)
 	}
 	return strings.TrimSpace(string(out)), nil

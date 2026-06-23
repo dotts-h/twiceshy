@@ -313,3 +313,20 @@ func runGit(dir string, args ...string) (string, error) {
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
+
+// A non-zero new-issue.sh aborts the whole unattended intake batch, so its stderr
+// must be surfaced in the returned error, not reduced to "exit status N".
+func TestRunNewIssue_SurfacesScriptStderr(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "failing.sh")
+	if err := os.WriteFile(script, []byte("#!/usr/bin/env bash\necho 'BOOM_MARKER_42 not on a branch' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+	_, err := runNewIssue(dir, script, "a title")
+	if err == nil {
+		t.Fatal("expected an error from a failing script")
+	}
+	if !strings.Contains(err.Error(), "BOOM_MARKER_42") {
+		t.Errorf("error must surface the script stderr, got: %v", err)
+	}
+}

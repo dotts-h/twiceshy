@@ -452,12 +452,19 @@ func (ix *Index) RetrievePushTraced(ctx context.Context, q Query) (PushDecision,
 // is in [1, pushMaxDF]. It reuses the ftsQuery tokenization and quoting so df
 // counts agree with what the lexical search later matches (exp-0001).
 func (ix *Index) discriminativeTokens(ctx context.Context, text string) ([]string, error) {
+	return ix.discriminativeTokensVia(ctx, text, ix.validatedDF)
+}
+
+// discriminativeTokensVia is discriminativeTokens with the per-token validated-DF
+// lookup injected, so the serial-round-trip bound below can be asserted in a test.
+func (ix *Index) discriminativeTokensVia(ctx context.Context, text string, df func(context.Context, string) (int, error)) ([]string, error) {
 	eco, err := ix.ecosystemNames(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var out []string
+	scanned := 0
 	seen := map[string]bool{}
 	for _, field := range strings.Fields(strings.ToLower(text)) {
 		tok := stripControl(field)
@@ -465,14 +472,21 @@ func (ix *Index) discriminativeTokens(ctx context.Context, text string) ([]strin
 			continue
 		}
 		seen[tok] = true
-		df, err := ix.validatedDF(ctx, tok)
+		n, err := df(ctx, tok)
 		if err != nil {
 			return nil, err
 		}
-		if df >= 1 && df <= pushMaxDF {
+		if n >= 1 && n <= pushMaxDF {
 			out = append(out, tok)
 		}
 		if len(out) >= maxQueryTokens {
+			break
+		}
+		// Bound the SQLite round-trips themselves: a long off-topic push query is
+		// mostly non-discriminative tokens that never grow out, so without this an
+		// authenticated client could force one DF query per distinct token.
+		scanned++
+		if scanned >= maxQueryTokens {
 			break
 		}
 	}
