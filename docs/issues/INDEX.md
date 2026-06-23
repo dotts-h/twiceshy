@@ -104,3 +104,4 @@ never a cycle).
 | [0083](0083-decommission-the-engine-repo-corpus-path.md) | Decommission the engine-repo corpus path | open | medium | 0076 | |
 | [0084](0084-promote-throughput-throttle-decoupled-from-anomaly-halt-and-hold-cooldown.md) | Promote throughput — decouple the throttle from the anomaly halt + hold cooldown | closed | high | 0034 | ADR-0022 |
 | [0085](0085-approval-rate-anomaly-that-survives-a-throughput-cap.md) | Promotion-rate anomaly that survives a throughput cap | open | medium | 0034 | ADR-0022 |
+| [0086](0086-hybrid-gemini-sonnet-advisory-panel-frontier-judge.md) | Hybrid advisory-panel frontier judge — Gemini primary, Sonnet fallback | closed | medium | 0034 | ADR-0016 |

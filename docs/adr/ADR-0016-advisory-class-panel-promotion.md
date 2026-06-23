@@ -9,6 +9,12 @@
   the promote-side mirror of #302's import-side staleness scoping; without it,
   panel-promoted EOL advisories became validated records that tripped the D2 guard
   and stuck ~36 validate PRs.
+- **Amended 2026-06-23 (#0086):** the frontier (second-family) seat may run a
+  **hybrid** judge — Gemini primary (off-pool; §5 already permits Gemini on public
+  advisory data), Sonnet fallback consulted **only on a primary error** (free-tier
+  Gemini exhausting its daily quota → 429), never on a primary reject. Off-pool on
+  the happy path without the daily-quota stall a straight swap would cause; the
+  pooled fallback keeps throughput up. See `judge.FallbackJudge`.
 - **Related:** [ADR-0013](ADR-0013-closed-loop-autonomous-validation.md) (the
   closed loop this extends — §1 proof+judge, §2 veto window, §6 diversity/fail-safe,
   the standing rule *local LLM = drafter/flagger, never judge*); [ADR-0003 §4](ADR-0003-corpus-bootstrap-source-scope.md)

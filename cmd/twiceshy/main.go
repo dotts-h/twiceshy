@@ -858,6 +858,25 @@ func guardrailsFrom(getenv func(string) string, maxActions, maxPromotions, maxRu
 	}
 }
 
+// wrapFrontierFallback wraps the advisory panel's primary frontier judge with a
+// Gemini→Sonnet fallback (#0086) when fbURL is set; otherwise it returns primary
+// unchanged. The fallback fires only on a primary ERROR (free-tier Gemini exhausting
+// its daily quota → 429), never on a primary reject — so off-pool on the happy path
+// without the daily-quota stall a straight swap would cause.
+func wrapFrontierFallback(primary judge.Judge, fbURL, fbModel, drafterModel string, votes int) (judge.Judge, error) {
+	if fbURL == "" {
+		return primary, nil
+	}
+	fb, err := judge.NewModelJudge(judge.Config{
+		Endpoint: fbURL, Model: fbModel, DrafterModel: drafterModel,
+		System: judge.AdvisorySystemV1, Advisory: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("configuring advisory panel fallback judge: %w", err)
+	}
+	return judge.NewFallback(primary, judge.NewMajority(judge.NewTiming(fb), votes)), nil
+}
+
 // loopLogger returns logger, or one that discards everything when nil, so the
 // promote/adapt core can log unconditionally while tests pass nil to stay quiet.
 func loopLogger(logger *slog.Logger) *slog.Logger {
@@ -1046,9 +1065,24 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 		if err != nil {
 			return fmt.Errorf("configuring advisory panel secondary judge: %w", err)
 		}
+		// Frontier seat = the panel's diverse second family. Default: just the
+		// PANEL_JUDGE model. Hybrid (#0086): when TWICESHY_PANEL_JUDGE_FALLBACK_URL is
+		// set, wrap it so a primary FAILURE (e.g. a free-tier Gemini exhausting its
+		// daily quota → 429) falls back to a pooled secondary (Sonnet) instead of
+		// fail-safe-skipping the record. A primary REJECT does NOT fall back (it is a
+		// real verdict, not a failure). The panel member keeps the primary's family
+		// label for the construction-time diversity check; the runtime verdict.Model
+		// records whichever model actually answered.
+		frontier, err := wrapFrontierFallback(
+			judge.NewMajority(judge.NewTiming(aj2), *votes),
+			getenv("TWICESHY_PANEL_JUDGE_FALLBACK_URL"),
+			getenv("TWICESHY_PANEL_JUDGE_FALLBACK_MODEL"), *drafterModel, *votes)
+		if err != nil {
+			return err
+		}
 		panel, err := judge.NewPanel(
 			judge.PanelMember{Model: *judgeModel, Judge: judge.NewMajority(judge.NewTiming(aj1), *votes)},
-			judge.PanelMember{Model: panelModel, Judge: judge.NewMajority(judge.NewTiming(aj2), *votes)},
+			judge.PanelMember{Model: panelModel, Judge: frontier},
 		)
 		if err != nil {
 			return fmt.Errorf("configuring advisory panel: %w", err)
