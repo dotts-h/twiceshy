@@ -32,3 +32,11 @@ surface on its own.
 
 Wiring twiceshy into a consuming agent (MCP registration + the affordance pointer):
 [docs/CONSUMING.md](docs/CONSUMING.md).
+
+## Off-pool offload (brain VM only)
+When working on this repo **on the `claude-brain` VM**, route quota-saving work (research /
+review / rubber-duck / implement-under-gate) per the canonical **"Off-pool offload routing"**
+table in the brain's global `~/.claude/CLAUDE.md` — one tool per strength (`ask-agy --pro`,
+`ask-gemini`, `ask-local`, `code-exec`; Claude keeps final judgment). **DATA RULE:** off-pool
+engines are offsite → never send secrets or sensitive code; sensitive work stays on `ask-local`
+(LAN) or Claude. (Tools are brain-local; this note is a no-op off-brain.)
