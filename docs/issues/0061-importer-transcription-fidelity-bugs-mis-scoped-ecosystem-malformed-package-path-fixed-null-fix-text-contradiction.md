@@ -94,15 +94,34 @@ is a genuine bug** (fabricated `/v2`), not a Sonnet over-rejection; only **exp-0
       `internal/ingest/osvlive_test.go::TestOSVLiveSource_NoFixedVersionFixText`.
       Dogfooded as exp-0745. Pairs with #0062 (the judge side). *(This PR.)*
 - [ ] **Defect 1 — ecosystem mislabel** (non-Go package labeled `ecosystem: Go`).
-- [ ] **Defect 2 — malformed package path** (`https://` URL as the package).
-- [ ] **Defect 4 — `source_url`/advisory-id mismatch** (the most severe — the link
-      leads to a different vuln; cross-check the cited URL's id against the record's).
+      Not deterministically fixable in the importer: `github.com/strukturag/libheif`
+      is a *syntactically* valid Go module path, so only a semantic knowledge source
+      (a PURL/ecosystem cross-check against a real index, or a module-proxy probe)
+      can tell it is C/C++. The strict `aff.Package.Ecosystem != ecosystem` filter
+      already blocks any block OSV labels as a non-target ecosystem.
+- [x] **Defect 2 — malformed package path** (`https://` URL as the package). Fixed:
+      `normalizePackageName` (`internal/ingest/osvlive.go`) strips a leading
+      http(s):// from the OSV `affected.package.name` so the identifier is the clean
+      module path, not a link, and the URL form never reaches summary/title/body.
+      Guard: `osvlive_test.go::TestOSVLiveSource_PackagePathStripsURLScheme`. *(This PR.)*
+- [x] **Defect 4 — `source_url`/advisory-id mismatch** (the most severe — the link
+      leads to a different vuln). Fixed: `osvLiveGHSAURL` now cross-checks the GHSA id
+      embedded in each reference URL against the record's own id + aliases
+      (`ghsaIDPattern`); a URL citing a *different* advisory is rejected and the
+      source_url falls back to the always-correct osv.dev page for this record's id.
+      Guard: `osvlive_test.go::TestOSVLiveSource_SourceURLCrossCheck`. *(This PR.)*
 - [ ] **Defect 5 — Go major-version-suffix / case errors** (fabricated/missing
-      `/vN`, uppercase module paths).
+      `/vN`, uppercase module paths). Deferred — a naive normalization is itself
+      harmful: lowercasing breaks legitimately mixed-case modules (e.g.
+      `github.com/Azure/...`), and exp-0054 shows *removing* a required `/vN` suffix is
+      the bug, not the fix. Correctly normalizing major-version + canonical case needs
+      a real module-proxy / `go.mod` knowledge source, not a string heuristic.
 
-Issue stays **open** for Defects 1, 2, 4, 5 (importer ecosystem/package
-normalization + the source_url cross-check). The records already mis-transcribed are
-held by the ADR-0016 panel, not served; this fixes the importer so new ones are clean.
+Issue stays **open** for Defects 1 and 5 — both need a semantic knowledge source
+(PURL/ecosystem cross-check or a module-proxy probe), not an in-importer string rule,
+and a wrong heuristic would create new defects. The records already mis-transcribed
+are held by the ADR-0016 panel, not served; this PR fixes the importer so new ones are
+clean for the source_url and URL-prefixed-package classes.
 
 ## Notes
 

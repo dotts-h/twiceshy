@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -193,11 +194,12 @@ func mapOSVLiveRecord(rec osvLiveRecord, ecosystem string) (Draft, bool) {
 		if aff.Package.Ecosystem != ecosystem {
 			continue
 		}
-		if strings.TrimSpace(aff.Package.Name) == "" {
+		pkgName := normalizePackageName(aff.Package.Name)
+		if pkgName == "" {
 			continue // a vuln "in <nothing>" is not actionable; skip nameless affected blocks
 		}
 		if primaryPkg == "" {
-			primaryPkg = aff.Package.Name
+			primaryPkg = pkgName
 		}
 		for _, r := range aff.Ranges {
 			pairs := osvLiveRangePairs(r.Events)
@@ -208,7 +210,7 @@ func mapOSVLiveRecord(rec osvLiveRecord, ecosystem string) (Draft, bool) {
 			for _, iv := range pairs {
 				applies = append(applies, record.AppliesTo{
 					Ecosystem: ecosystem,
-					Package:   aff.Package.Name,
+					Package:   pkgName,
 					Versions:  versionRange(iv.introduced, iv.fixed),
 				})
 			}
@@ -227,7 +229,14 @@ func mapOSVLiveRecord(rec osvLiveRecord, ecosystem string) (Draft, bool) {
 		ids = fmt.Sprintf("%s (%s)", rec.ID, strings.Join(rec.Aliases, ", "))
 	}
 	summary := fmt.Sprintf("%s: known vulnerability in %s", ids, primaryPkg)
-	sourceURL := osvLiveGHSAURL(rec.References)
+	// ownIDs is the record's own id + aliases (lowercased) — the set a GHSA reference
+	// URL must cite to be a valid source link for THIS record (#0061 Defect 4).
+	ownIDs := make(map[string]bool, 1+len(rec.Aliases))
+	ownIDs[strings.ToLower(strings.TrimSpace(rec.ID))] = true
+	for _, a := range rec.Aliases {
+		ownIDs[strings.ToLower(strings.TrimSpace(a))] = true
+	}
+	sourceURL := osvLiveGHSAURL(rec.References, ownIDs)
 	if sourceURL == "" {
 		sourceURL = fmt.Sprintf("https://osv.dev/vulnerability/%s", rec.ID)
 	}
@@ -295,13 +304,42 @@ func osvLiveRangePairs(events []osvLiveEvent) []versionInterval {
 	return pairs
 }
 
-func osvLiveGHSAURL(refs []osvLiveRef) string {
+// ghsaIDPattern matches a GHSA advisory id (GHSA- + three 4-char groups) anywhere in
+// a string, so the id embedded in a reference URL can be compared to the record's own
+// ids (#0061 Defect 4). GHSA ids are case-insensitive; compare lowercased. Word
+// boundaries anchor the exact 4-4-4 form so a longer token (e.g.
+// "GHSA-aaaa-bbbb-ccccDEAD") cannot be truncated to a false match on the record's id.
+var ghsaIDPattern = regexp.MustCompile(`(?i)\bGHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}\b`)
+
+// osvLiveGHSAURL returns a reference URL that cites a GHSA advisory THIS record is
+// about — the GHSA id embedded in the URL must equal the record's own id or one of
+// its aliases (ownIDs, lowercased). A URL citing some OTHER GHSA (a related/transitive
+// advisory listed in the same OSV entry's references) is rejected: returning it would
+// point an agent at an UNRELATED vulnerability (#0061 Defect 4, the most severe
+// transcription defect). No own-citing GHSA ref → "" (the caller falls back to the
+// osv.dev page for this record's id, which is always correct).
+func osvLiveGHSAURL(refs []osvLiveRef, ownIDs map[string]bool) string {
 	for _, r := range refs {
-		if strings.Contains(r.URL, "GHSA-") {
+		if id := ghsaIDPattern.FindString(r.URL); id != "" && ownIDs[strings.ToLower(id)] {
 			return r.URL
 		}
 	}
 	return ""
+}
+
+// normalizePackageName cleans a package identifier copied from an OSV `affected`
+// block. Some entries carry the source URL in the name field (e.g.
+// "https://github.com/dadrus/heimdall"); a module/package identifier never carries a
+// URL scheme, so strip a leading http(s):// to recover the usable path (#0061 Defect
+// 2). A clean name is returned unchanged (trimmed).
+func normalizePackageName(name string) string {
+	name = strings.TrimSpace(name)
+	for _, scheme := range []string{"https://", "http://"} {
+		if rest := strings.TrimPrefix(name, scheme); rest != name {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return name
 }
 
 func osvLiveBody(id string, applies []record.AppliesTo, sourceURL string) string {

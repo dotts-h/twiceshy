@@ -296,6 +296,174 @@ func TestOSVLiveSource_NoFixedVersionFixText(t *testing.T) {
 	}
 }
 
+// Defect 4 (#0061), the MOST SEVERE transcription defect: the source_url must cite
+// the SAME advisory the record transcribes. osvLiveGHSAURL grabbed the first
+// reference URL containing "GHSA-" regardless of which advisory it pointed at, so an
+// OSV entry whose references include a GHSA link for a DIFFERENT (related/transitive)
+// advisory emitted a source_url that sends an agent to an UNRELATED vulnerability. The
+// cross-check: a GHSA reference is used only when its id is the record's own id or one
+// of its aliases; otherwise fall back to the osv.dev page for THIS record's id.
+func TestOSVLiveSource_SourceURLCrossCheck(t *testing.T) {
+	files := map[string]any{
+		// References cite GHSA-zzzz-yyyy-xxxx, but the record is GO-2020-MISMATCH /
+		// GHSA-aaaa-bbbb-cccc — the link is to a different advisory and must be rejected.
+		"GO-2020-MISMATCH.json": map[string]any{
+			"id":      "GO-2020-MISMATCH",
+			"aliases": []string{"GHSA-aaaa-bbbb-cccc"},
+			"summary": "advisory whose references cite an unrelated GHSA",
+			"affected": []map[string]any{{
+				"package": map[string]string{"ecosystem": "Go", "name": "github.com/example/mismatch"},
+				"ranges": []map[string]any{{
+					"type":   "SEMVER",
+					"events": []map[string]string{{"introduced": "0"}, {"fixed": "1.0.0"}},
+				}},
+			}},
+			"references": []map[string]string{
+				{"type": "ADVISORY", "url": "https://github.com/advisories/GHSA-zzzz-yyyy-xxxx"},
+			},
+		},
+		// References cite the record's OWN GHSA alias — the link is correct and is used.
+		"GO-2020-MATCH.json": map[string]any{
+			"id":      "GO-2020-MATCH",
+			"aliases": []string{"GHSA-aaaa-bbbb-cccc"},
+			"summary": "advisory whose references cite its own GHSA",
+			"affected": []map[string]any{{
+				"package": map[string]string{"ecosystem": "Go", "name": "github.com/example/match"},
+				"ranges": []map[string]any{{
+					"type":   "SEMVER",
+					"events": []map[string]string{{"introduced": "0"}, {"fixed": "1.0.0"}},
+				}},
+			}},
+			"references": []map[string]string{
+				{"type": "ADVISORY", "url": "https://github.com/advisories/GHSA-aaaa-bbbb-cccc"},
+			},
+		},
+		// References list an UNRELATED GHSA FIRST, then the record's OWN GHSA — the
+		// importer must skip the unrelated one and pick the own one, not return the
+		// first GHSA it sees. This is the real #0061 Defect 4 shape (a transitive
+		// advisory's link sitting alongside the correct one) and the case a
+		// return-on-first-match regression would slip past.
+		"GO-2020-MIXED.json": map[string]any{
+			"id":      "GO-2020-MIXED",
+			"aliases": []string{"GHSA-aaaa-bbbb-cccc"},
+			"summary": "advisory whose references list an unrelated GHSA before its own",
+			"affected": []map[string]any{{
+				"package": map[string]string{"ecosystem": "Go", "name": "github.com/example/mixed"},
+				"ranges": []map[string]any{{
+					"type":   "SEMVER",
+					"events": []map[string]string{{"introduced": "0"}, {"fixed": "1.0.0"}},
+				}},
+			}},
+			"references": []map[string]string{
+				{"type": "WEB", "url": "https://github.com/advisories/GHSA-zzzz-yyyy-xxxx"},
+				{"type": "ADVISORY", "url": "https://github.com/advisories/GHSA-aaaa-bbbb-cccc"},
+			},
+		},
+		// The record's PRIMARY id is itself a GHSA (the npm/PyPI shape, where OSV's id
+		// IS the GHSA, not an alias). A reference to that same GHSA must be used — this
+		// pins the rec.ID seed of ownIDs, distinct from the alias path above.
+		"GHSA-pppp-qqqq-rrrr.json": map[string]any{
+			"id":      "GHSA-pppp-qqqq-rrrr",
+			"summary": "advisory whose primary id is a GHSA",
+			"affected": []map[string]any{{
+				"package": map[string]string{"ecosystem": "Go", "name": "github.com/example/primary"},
+				"ranges": []map[string]any{{
+					"type":   "SEMVER",
+					"events": []map[string]string{{"introduced": "0"}, {"fixed": "1.0.0"}},
+				}},
+			}},
+			"references": []map[string]string{
+				{"type": "ADVISORY", "url": "https://github.com/advisories/GHSA-pppp-qqqq-rrrr"},
+			},
+		},
+	}
+	src := ingest.NewOSVLiveSource(ingest.WithOSVLiveFetch(func(_ context.Context) (io.ReadCloser, error) {
+		return buildOSVLiveZip(t, files), nil
+	}))
+	drafts, err := src.Drafts(context.Background())
+	if err != nil {
+		t.Fatalf("Drafts: %v", err)
+	}
+	srcURL := func(title string) string {
+		t.Helper()
+		for i := range drafts {
+			if strings.Contains(drafts[i].Title, title) {
+				return drafts[i].SourceURL
+			}
+		}
+		t.Fatalf("no draft %q", title)
+		return ""
+	}
+	// The unrelated GHSA link must NOT be the source_url; fall back to osv.dev for this id.
+	if got := srcURL("GO-2020-MISMATCH"); strings.Contains(got, "GHSA-zzzz-yyyy-xxxx") {
+		t.Errorf("source_url cites an UNRELATED advisory: %q", got)
+	}
+	if got := srcURL("GO-2020-MISMATCH"); got != "https://osv.dev/vulnerability/GO-2020-MISMATCH" {
+		t.Errorf("mismatched-reference advisory should fall back to osv.dev; got %q", got)
+	}
+	// A reference citing the record's own GHSA alias is the correct source_url.
+	if got := srcURL("GO-2020-MATCH"); got != "https://github.com/advisories/GHSA-aaaa-bbbb-cccc" {
+		t.Errorf("matching GHSA reference should be the source_url; got %q", got)
+	}
+	// References listing an unrelated GHSA BEFORE the record's own: skip the unrelated,
+	// use the own one (not the first GHSA seen).
+	if got := srcURL("GO-2020-MIXED"); got != "https://github.com/advisories/GHSA-aaaa-bbbb-cccc" {
+		t.Errorf("mixed references must skip the unrelated GHSA and use the record's own; got %q", got)
+	}
+	// A record whose PRIMARY id is a GHSA pins the rec.ID seed of ownIDs (npm/PyPI shape).
+	if got := srcURL("GHSA-pppp-qqqq-rrrr"); got != "https://github.com/advisories/GHSA-pppp-qqqq-rrrr" {
+		t.Errorf("a reference to the record's own primary-GHSA id must be the source_url; got %q", got)
+	}
+}
+
+// Defect 2 (#0061): some OSV entries carry a source URL in the package `name` field
+// (e.g. "https://github.com/dadrus/heimdall"), which is not a usable module path. The
+// importer strips the URL scheme so the identifier is the clean module path the record
+// claims to be about, not a link — and the malformed form never leaks into rendered
+// prose (summary/title/body).
+func TestOSVLiveSource_PackagePathStripsURLScheme(t *testing.T) {
+	files := map[string]any{
+		"GO-2020-URLPKG.json": map[string]any{
+			"id":      "GO-2020-URLPKG",
+			"summary": "advisory whose package name is a URL",
+			"affected": []map[string]any{{
+				"package": map[string]string{"ecosystem": "Go", "name": "https://github.com/dadrus/heimdall"},
+				"ranges": []map[string]any{{
+					"type":   "SEMVER",
+					"events": []map[string]string{{"introduced": "0"}, {"fixed": "1.0.0"}},
+				}},
+			}},
+		},
+	}
+	src := ingest.NewOSVLiveSource(ingest.WithOSVLiveFetch(func(_ context.Context) (io.ReadCloser, error) {
+		return buildOSVLiveZip(t, files), nil
+	}))
+	drafts, err := src.Drafts(context.Background())
+	if err != nil {
+		t.Fatalf("Drafts: %v", err)
+	}
+	if len(drafts) != 1 {
+		t.Fatalf("want 1 draft, got %d", len(drafts))
+	}
+	d := drafts[0]
+	const wantPkg = "github.com/dadrus/heimdall"
+	if len(d.AppliesTo) != 1 || d.AppliesTo[0].Package != wantPkg {
+		t.Fatalf("applies_to package = %q, want clean module path %q", d.AppliesTo[0].Package, wantPkg)
+	}
+	// The malformed URL-prefixed package must not leak into any rendered prose. The
+	// body legitimately ends with the osv.dev source link, so assert on the package
+	// fragment specifically, not a bare "https://".
+	if strings.Contains(d.Symptom.Summary, "https://") {
+		t.Errorf("summary carries the URL-prefixed package: %q", d.Symptom.Summary)
+	}
+	if strings.Contains(d.Title, "https://") {
+		t.Errorf("title carries the URL-prefixed package: %q", d.Title)
+	}
+	if strings.Contains(d.Body, "https://github.com/dadrus") {
+		t.Errorf("body carries the URL-prefixed package: %q", d.Body)
+	}
+}
+
 func symptomEqual(a, b *record.Symptom) bool {
 	if a == nil && b == nil {
 		return true
