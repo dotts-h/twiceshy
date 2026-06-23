@@ -4,19 +4,7 @@
 engineering experience (traps, dead-ends, root causes, validated fixes) to
 LLM coding agents at decision time.
 
-## Read these before changing anything
-
-1. [docs/CONTEXT.md](docs/CONTEXT.md) — the ubiquitous language. Use these
-   terms, exactly, everywhere.
-2. [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — how we build: TDD,
-   dependency budget, commit style, security rules.
-3. [docs/adr/ADR-0001-architecture.md](docs/adr/ADR-0001-architecture.md) —
-   the ten **locked** architecture decisions. Do not relitigate them;
-   they are grounded in
-   [docs/research/EXPERIENCE_SERVICE_RESEARCH.md](docs/research/EXPERIENCE_SERVICE_RESEARCH.md).
-4. [docs/SCHEMA.md](docs/SCHEMA.md) — the experience-record format
-   (normative), with JSON Schema in `schema/` and worked examples in
-   `experience/`.
+See AGENTS.md for onboarding (context, conventions, ADRs, schema).
 
 ## Hard rules
 
