@@ -64,7 +64,7 @@ func TestPushGateExcludesCommonVocabulary(t *testing.T) {
 	ctx := context.Background()
 	recs, err := record.LoadCorpus("../..")
 	if err != nil {
-		t.Fatalf("LoadCorpus: %v", err)
+		t.Skipf("live corpus unavailable at ../.. (decoupled to twiceshy-corpus, ADR-0021): %v", err)
 	}
 	ix, err := Open(filepath.Join(t.TempDir(), "vocab.db"))
 	if err != nil {

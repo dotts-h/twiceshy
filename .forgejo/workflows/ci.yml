@@ -33,21 +33,7 @@ jobs:
     runs-on: twiceshy-ci  # dedicated hardened runner: gVisor + no host docker socket (ADR-0012)
     steps:
       - uses: actions/checkout@v4
-      # Interim D (ADR-0021 #0078): a data-only (experience/-only) PR skips the
-      # heavy Go pipeline below while this job STILL runs and posts its required
-      # status context — the *steps* are gated, never the job (a skipped required
-      # check posts no status and hangs the PR; see the "No paths-ignore" note).
-      # ci-data-only.sh is FAIL-CLOSED: only a confident data-only PR -> skip=true.
-      - name: Detect data-only change
-        id: detect
-        run: |
-          skip="$(EVENT_NAME='${{ github.event_name }}' \
-                  BASE_SHA='${{ github.event.pull_request.base.sha }}' \
-                  bash scripts/ci-data-only.sh)"
-          echo "skip=$skip" >> "$GITHUB_OUTPUT"
-          echo "data-only skip=$skip"
       - uses: actions/setup-go@v5
-        if: steps.detect.outputs.skip != 'true'
         with:
           go-version-file: go.mod
           # This Forgejo runner has no GH-Actions cache service; setup-go's
@@ -55,7 +41,6 @@ jobs:
           # Go module/build cache persists on the runner volume regardless.
           cache: false
       - name: install golangci-lint
-        if: steps.detect.outputs.skip != 'true'
         run: |
           curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh \
             | sh -s -- -b "$(go env GOPATH)/bin" v2.5.0
@@ -66,5 +51,4 @@ jobs:
       # comparison enforces the 80% floor and FAILS below it). This is the same
       # gate `make ci` runs locally, so green-here == green-there.
       - name: Lint, race tests & coverage floor
-        if: steps.detect.outputs.skip != 'true'
         run: make ci

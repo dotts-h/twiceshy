@@ -47,7 +47,7 @@ func readDecisions(t *testing.T, path string) []telemetry.Decision {
 func TestTelemetryRecordsPushGateDecision(t *testing.T) {
 	recs, err := record.LoadCorpus("../..")
 	if err != nil {
-		t.Fatalf("LoadCorpus: %v", err)
+		t.Skipf("live corpus unavailable at ../.. (decoupled to twiceshy-corpus, ADR-0021): %v", err)
 	}
 	ix, err := index.Open(filepath.Join(t.TempDir(), "ix.db"))
 	if err != nil {

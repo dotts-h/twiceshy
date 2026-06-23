@@ -1,7 +1,7 @@
 ---
 id: 0076
 title: Epic: Decouple the corpus into a versioned data product (ADR-0021)
-status: open
+status: closed
 severity: high
 group: 
 depends_on: []

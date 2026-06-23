@@ -15,7 +15,7 @@ import (
 func TestStaleness_RealCorpusNotFalseFlagged(t *testing.T) {
 	recs, err := record.LoadCorpus("../..")
 	if err != nil {
-		t.Fatalf("LoadCorpus: %v", err)
+		t.Skipf("live corpus unavailable at ../.. (decoupled to twiceshy-corpus, ADR-0021): %v", err)
 	}
 	// A populated EOL source for every mapped product — the committed corpus's
 	// VALIDATED records must not trip signal 2 (EOL'd runtime Fixed-cycle) nor
