@@ -9,9 +9,11 @@ curated, validated StackOverflow that injects itself at the right moment.
 
 ## How it works (the locked architecture)
 
-- **Source of truth:** git-backed markdown experience records
-  (YAML frontmatter + narrative) under [`experience/`](experience/) —
-  format in [docs/SCHEMA.md](docs/SCHEMA.md).
+- **Source of truth:** git-backed markdown experience records (YAML frontmatter
+  + narrative) — format in [docs/SCHEMA.md](docs/SCHEMA.md). The corpus is a
+  separate versioned data product (`twiceshy-corpus`,
+  [ADR-0021](docs/adr/ADR-0021-decouple-corpus-as-a-data-product.md)); the engine
+  ships a small frozen fixture (`internal/testcorpus/`) for tests.
 - **Index:** one derived, always-rebuildable SQLite file (FTS5; sqlite-vec
   later).
 - **Retrieval:** fingerprint-exact → BM25 → dense (RRF), stack-fingerprint

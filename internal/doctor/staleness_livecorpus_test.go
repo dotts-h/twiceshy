@@ -6,6 +6,7 @@ package doctor_test
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/dotts-h/twiceshy/internal/doctor"
@@ -13,9 +14,12 @@ import (
 )
 
 func TestStaleness_RealCorpusNotFalseFlagged(t *testing.T) {
+	if _, err := os.Stat("../../experience"); err != nil {
+		t.Skip("live corpus not present at ../.. (decoupled to twiceshy-corpus, ADR-0021)")
+	}
 	recs, err := record.LoadCorpus("../..")
 	if err != nil {
-		t.Skipf("live corpus unavailable at ../.. (decoupled to twiceshy-corpus, ADR-0021): %v", err)
+		t.Fatalf("LoadCorpus: %v", err)
 	}
 	// A populated EOL source for every mapped product — the committed corpus's
 	// VALIDATED records must not trip signal 2 (EOL'd runtime Fixed-cycle) nor
