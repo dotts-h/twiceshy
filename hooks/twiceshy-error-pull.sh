@@ -36,9 +36,11 @@ text="$(printf '%s' "$input" | jq -r '
 ' 2>/dev/null)" || fail_open
 [ -n "$text" ] || fail_open
 
-# Error-signature tripwire — take the FIRST matching line as the query.
+# Error-signature tripwire — take the FIRST matching line as the query. Anchor the
+# error/exception forms on the trailing ':' (Error:, TypeError:, error:, SyntaxError:)
+# so a bare 'Error:' is caught while benign prose ('no errors found') is not.
 errline="$(printf '%s\n' "$text" | grep -m1 -aE \
-  'Traceback \(most recent|panic:|[A-Z][A-Za-z]*Error\b|error:|\bERROR\b|\[!\]|fatal:|Exception|command not found|No such file or directory' \
+  'Traceback \(most recent|panic:|[A-Za-z]*[Ee]rror:|\bERROR\b|[A-Za-z]*Exception\b|fatal:|\[!\]|command not found|[Nn]o such file or directory' \
   2>/dev/null || true)"
 errline="$(printf '%s' "$errline" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | cut -c1-300)"
 [ -n "$errline" ] || fail_open
