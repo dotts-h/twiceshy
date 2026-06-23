@@ -853,14 +853,27 @@ const defaultMaxActions = 25
 // or disabled) so a normal batch stops cleanly instead of tripping the anomaly halt.
 const defaultMaxPromotions = 0
 
+// defaultMaxActionRate is the default approval-rate anomaly baseline (#0085): 0 = off,
+// so behaviour is unchanged until an operator opts in (like the throughput cap). When
+// enabled (e.g. 0.6), a capped run promoting/demoting more than this fraction of the
+// records it judged is flagged as a likely compromised judge — the spike detector
+// that SURVIVES a cap, where the raw-count anomaly (-max-actions) goes moot.
+const defaultMaxActionRate = 0
+
+// defaultMinSample is the default minimum judged records before the rate anomaly can
+// fire, so a tiny batch (e.g. 3/3) is never flagged on too little signal (#0085).
+const defaultMinSample = 10
+
 // guardrailsFrom builds the safety limits for a promote/adapt run: the emergency
 // stop from TWICESHY_PAUSE, the throughput cap (clean stop), and the anomaly +
 // budget backstops.
-func guardrailsFrom(getenv func(string) string, maxActions, maxPromotions, maxRuns int) guard.Guardrails {
+func guardrailsFrom(getenv func(string) string, maxActions, maxPromotions, maxRuns int, maxActionRate float64, minSample int) guard.Guardrails {
 	return guard.Guardrails{
 		Paused:        guard.Truthy(getenv("TWICESHY_PAUSE")),
 		MaxActions:    maxActions,
 		MaxPromotions: maxPromotions,
+		MaxActionRate: maxActionRate,
+		MinSample:     minSample,
 		MaxRuns:       maxRuns,
 	}
 }
@@ -994,6 +1007,8 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	asJSON := fs.Bool("json", false, "emit a machine-readable run manifest (every record's transition) to stdout instead of prose; the daily audit reads this")
 	maxActions := fs.Int("max-actions", defaultMaxActions, "anomaly-halt backstop for UNBOUNDED runs: promotions per run above which the loop halts (0 = off; moot when -max-promotions is set)")
 	maxPromotions := fs.Int("max-promotions", defaultMaxPromotions, "throughput cap: stop CLEANLY after this many promotions (a mergeable batch; re-run to continue). 0 = unlimited (#0084)")
+	maxActionRate := fs.Float64("max-action-rate", defaultMaxActionRate, "approval-rate anomaly: flag a run whose promoted/judged fraction exceeds this (survives a throughput cap, unlike -max-actions). 0 = off (#0085)")
+	minSample := fs.Int("min-sample", defaultMinSample, "minimum judged records before -max-action-rate can fire, so a tiny run isn't flagged (#0085)")
 	holdCooldown := fs.Duration("hold-cooldown", defaultHoldCooldown, "skip re-judging a record held within this window — stops the held backlog re-judging itself every run. 0 = off (#0084)")
 	maxRuns := fs.Int("max-runs", 0, "budget cap: max records processed (broker/judge runs) per invocation (0 = unlimited)")
 	votes := fs.Int("votes", judge.DefaultVotes, "judge each record this many times and promote on majority-approve only — closes the model's single-shot non-determinism (ADR-0013 §F1; min 1)")
@@ -1150,7 +1165,7 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 		return err
 	}
 
-	g := guardrailsFrom(getenv, *maxActions, *maxPromotions, *maxRuns)
+	g := guardrailsFrom(getenv, *maxActions, *maxPromotions, *maxRuns, *maxActionRate, *minSample)
 	runID := newRunID()
 	runLog := newRunLogger(runID)
 	// Guardrail trips fire to TWICESHY_ALERT_URL (ntfy) when set; unset = no-op.
@@ -1505,6 +1520,18 @@ func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, ru
 		journal.record(action)
 	}
 	anomaly := budget.Anomalous()
+	// Approval-RATE anomaly (#0085): the count anomaly above is moot once a throughput
+	// cap is set (a normal run stops at the cap). A compromised judge approving
+	// ~everything instead shows as a high promoted/judged fraction, which survives the
+	// cap — assess it post-loop on the full sample and fold it into the halt/alert.
+	if budget.RateAnomalous() {
+		anomaly = true
+		msg := fmt.Sprintf("promote: APPROVAL-RATE ANOMALY — %d/%d promoted (%.0f%%) over the %.0f%% baseline (min sample %d); a batch approving ~everything signals a compromised judge even under a throughput cap (investigate; TWICESHY_PAUSE=1)",
+			budget.Actions(), budget.Runs(), 100*budget.ActionRate(), 100*g.MaxActionRate, g.MinSample)
+		_, _ = fmt.Fprintln(out, msg)
+		log.Warn("approval-rate anomaly", "outcome", "rate_anomaly", "promoted", budget.Actions(), "judged", budget.Runs(), "rate", budget.ActionRate())
+		alert.Alert(ctx, "rate_anomaly", msg)
+	}
 	log.Info("run complete", "outcome", "summary", "promoted", st.promoted, "held", st.held, "ineligible", st.ineligible, "anomaly", anomaly, "duration_ms", time.Since(start).Milliseconds())
 	// Marking complete here (including an anomaly halt or a budget-cap break) is
 	// deliberate: only a hard mid-record error is a resumable abort (it set
@@ -1557,6 +1584,8 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 	asJSON := fs.Bool("json", false, "emit a machine-readable run manifest (every record's transition) to stdout instead of prose; the daily audit reads this")
 	maxActions := fs.Int("max-actions", defaultMaxActions, "anomaly-halt backstop for UNBOUNDED runs: demotions per run above which the loop halts (0 = off; moot when -max-promotions is set)")
 	maxPromotions := fs.Int("max-promotions", defaultMaxPromotions, "throughput cap: stop CLEANLY after this many demote/dispute actions (re-run to continue). 0 = unlimited (#0084)")
+	maxActionRate := fs.Float64("max-action-rate", defaultMaxActionRate, "action-rate anomaly: flag a run whose demote-dispute/judged fraction exceeds this (survives a throughput cap, unlike -max-actions). 0 = off (#0085)")
+	minSample := fs.Int("min-sample", defaultMinSample, "minimum judged records before -max-action-rate can fire, so a tiny run isn't flagged (#0085)")
 	maxRuns := fs.Int("max-runs", 0, "budget cap: max reports processed (broker/judge runs) per invocation (0 = unlimited)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
@@ -1616,7 +1645,7 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 		return err
 	}
 
-	g := guardrailsFrom(getenv, *maxActions, *maxPromotions, *maxRuns)
+	g := guardrailsFrom(getenv, *maxActions, *maxPromotions, *maxRuns, *maxActionRate, *minSample)
 	runID := newRunID()
 	runLog := newRunLogger(runID)
 	// Guardrail trips fire to TWICESHY_ALERT_URL (ntfy) when set; unset = no-op.
@@ -1813,6 +1842,18 @@ func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run 
 		}
 	}
 	anomaly := budget.Anomalous()
+	// Action-RATE anomaly (#0085): like promote, the count anomaly is moot under a
+	// throughput cap; a judge demoting/disputing ~everything instead shows as a high
+	// action/judged fraction that survives the cap. Assess post-loop on the full
+	// sample and fold into the halt/alert.
+	if budget.RateAnomalous() {
+		anomaly = true
+		msg := fmt.Sprintf("adapt: ACTION-RATE ANOMALY — %d/%d demote/dispute actions (%.0f%%) over the %.0f%% baseline (min sample %d); a judge demoting ~everything signals compromise even under a throughput cap (investigate; TWICESHY_PAUSE=1)",
+			budget.Actions(), budget.Runs(), 100*budget.ActionRate(), 100*g.MaxActionRate, g.MinSample)
+		_, _ = fmt.Fprintln(out, msg)
+		log.Warn("action-rate anomaly", "outcome", "rate_anomaly", "actions", budget.Actions(), "judged", budget.Runs(), "rate", budget.ActionRate())
+		alert.Alert(ctx, "rate_anomaly", msg)
+	}
 	log.Info("run complete", "outcome", "summary", "demoted", st.demoted, "disputed", st.disputed, "held", st.held, "orphan", st.orphan, "anomaly", anomaly, "duration_ms", time.Since(start).Milliseconds())
 	// Complete (incl. anomaly halt / budget-cap break) is deliberate: only a hard
 	// mid-record error is a resumable abort (StoppedAt set). See promoteCorpus.

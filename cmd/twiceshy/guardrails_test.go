@@ -191,3 +191,53 @@ func TestAdaptCorpus_AnomalyOnFinalActionStillHalts(t *testing.T) {
 		t.Fatalf("both demotions persist (nothing after to halt); demoted=%d, want 2", st.demoted)
 	}
 }
+
+// #0085: the approval-RATE anomaly survives a throughput cap. Five eligible records,
+// judge approves ALL, cap 3: the count-anomaly is moot under the cap, but 3/3 promoted
+// = 100% over the 50% baseline (min sample 3) trips the rate anomaly post-loop — the
+// run halts (errAnomalyHalt) even though the cap was the clean stop.
+func TestPromoteCorpus_RateAnomalyHaltsUnderCap(t *testing.T) {
+	recs := []*record.Record{
+		eligibleRec("exp-0100"), eligibleRec("exp-0101"), eligibleRec("exp-0102"),
+		eligibleRec("exp-0103"), eligibleRec("exp-0104"),
+	}
+	fp := &fakePromoter{promote: map[string]bool{
+		"exp-0100": true, "exp-0101": true, "exp-0102": true, "exp-0103": true, "exp-0104": true,
+	}}
+	persist := func(_ string, _ *record.Record) error { return nil }
+	var buf bytes.Buffer
+
+	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist,
+		guard.Guardrails{MaxPromotions: 3, MaxActionRate: 0.5, MinSample: 3}, nil, nil, &buf, "")
+	if !errors.Is(err, errAnomalyHalt) {
+		t.Fatalf("a high approval rate under a cap must return errAnomalyHalt, got %v", err)
+	}
+	if st.promoted != 3 {
+		t.Fatalf("the cap promotes 3 before the post-loop rate halt; promoted=%d", st.promoted)
+	}
+	if !strings.Contains(buf.String(), "APPROVAL-RATE ANOMALY") {
+		t.Fatalf("expected an approval-rate anomaly notice; got %q", buf.String())
+	}
+}
+
+// Symmetric with promote (#0085): 5 reports each demoting its original, cap 3, judge
+// demotes ALL → 3/3 = 100% over the 50% baseline (min sample 3). The rate anomaly
+// halts the adapt run even under the cap.
+func TestAdaptCorpus_RateAnomalyHaltsUnderCap(t *testing.T) {
+	recs, runner := adaptDemoting(t, 5)
+	adapter := promote.NewAdapter(&judge.StubJudge{Verdict: judge.ApproveVerdict("g")})
+	persist := func(_ string, _ *record.Record) error { return nil }
+	var buf bytes.Buffer
+
+	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist,
+		guard.Guardrails{MaxPromotions: 3, MaxActionRate: 0.5, MinSample: 3}, nil, nil, &buf, "")
+	if !errors.Is(err, errAnomalyHalt) {
+		t.Fatalf("a high demote rate under a cap must return errAnomalyHalt, got %v", err)
+	}
+	if st.demoted != 3 {
+		t.Fatalf("the cap demotes 3 before the post-loop rate halt; demoted=%d", st.demoted)
+	}
+	if !strings.Contains(buf.String(), "ACTION-RATE ANOMALY") {
+		t.Fatalf("expected an action-rate anomaly notice; got %q", buf.String())
+	}
+}

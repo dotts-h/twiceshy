@@ -1,7 +1,7 @@
 ---
 id: 0085
 title: Promotion-rate anomaly that survives a throughput cap (successor to the count-anomaly retired in capped mode)
-status: open
+status: closed
 severity: medium
 group: 0034
 depends_on: [0084]
@@ -34,8 +34,24 @@ sample so a tiny run of 3/3 isn't flagged). A compromised judge approving ~every
 shows up as a rate spike regardless of the cap. Wire it as the halt/alert that
 `MaxActions` used to be, gated on a minimum number of judged records.
 
-## Acceptance (draft)
-- [ ] A run with an abnormally high approve-rate over a minimum sample halts/alerts
-      even when `-max-promotions` is set.
-- [ ] A normal mixed run (most records held) does not trip it.
-- [ ] Baseline + minimum-sample are flag/env tunable; defaults documented in ADR-0022.
+## Acceptance
+- [x] A run with an abnormally high approve-rate over a minimum sample halts/alerts
+      even when `-max-promotions` is set. *(`guard.Budget.RateAnomalous()` does not
+      short-circuit on a cap, unlike `Anomalous()`; folded into the post-loop anomaly
+      halt in both promote and adapt. Guard:
+      `TestBudget_RateAnomalyFiresUnderCap`.)*
+- [x] A normal mixed run (most records held) does not trip it. *(low promoted/judged
+      fraction → quiet. Guard: `TestBudget_RateAnomalyQuietOnNormalRun`.)*
+- [x] Baseline + minimum-sample are flag/env tunable; defaults documented in ADR-0022.
+      *(`-max-action-rate` (default 0 = off) + `-min-sample` (default 10) on promote and
+      adapt; documented in ADR-0022 §Update. Guards: `TestBudget_RateAnomalyNeedsMinSample`,
+      `TestBudget_RateAnomalyStrictThreshold`, `TestBudget_RateAnomalyDisabledByDefault`.)*
+
+## Resolution
+
+Shipped `guard.Budget.RateAnomalous()` (and `ActionRate()`): a run whose
+promoted-or-demoted/judged fraction exceeds `MaxActionRate` over at least `MinSample`
+judged records is flagged — assessed post-loop on the full sample and folded into the
+existing `errAnomalyHalt` path. Because it is gated on the *rate*, not a raw count, it
+fires under a throughput cap where the count-anomaly is moot. Default **off** mirrors the
+cap's rollout (#0084). See ADR-0022 §Update.
