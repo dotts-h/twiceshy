@@ -33,6 +33,12 @@ var (
 
 // Normalize canonicalizes an error signature for fingerprinting.
 func Normalize(s string) string {
+	// Trim outer whitespace up front. strings.TrimSpace recognizes all Unicode
+	// whitespace (e.g. a vertical tab, NEL, no-break space), but the regexes' \s
+	// class does not — so without this a leading such char survived the first pass,
+	// then the final TrimSpace stripped it, re-exposing a /path token at ^ on a
+	// second pass and breaking idempotence.
+	s = strings.TrimSpace(s)
 	s = strings.ToLower(s)
 	s = reUUID.ReplaceAllString(s, "<uuid>")
 	s = reAddr.ReplaceAllString(s, "<addr>")
