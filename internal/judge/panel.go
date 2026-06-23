@@ -71,9 +71,16 @@ func (p *PanelJudge) Judge(ctx context.Context, req Request) (Verdict, error) {
 		if err != nil {
 			return Verdict{}, err
 		}
-		v.Model = m.Model
+		// Keep the model that ACTUALLY answered (e.g. the Sonnet fallback behind a
+		// gemini-labelled seat, #0086) so the manifest's per-member + combined
+		// JudgeModel stay honest. Fall back to the construction-time label only when
+		// the member did not name a model. The family-diversity check (NewPanel) runs
+		// on the labels at construction, so honest runtime ids never weaken it.
+		if v.Model == "" {
+			v.Model = m.Model
+		}
 		memberVerdicts = append(memberVerdicts, v)
-		models = append(models, m.Model)
+		models = append(models, v.Model)
 		if !v.Approved() {
 			p.lastMembers = memberVerdicts
 			return v, nil

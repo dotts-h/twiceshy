@@ -80,6 +80,33 @@ func TestPanel_UnanimousApprove(t *testing.T) {
 	}
 }
 
+// When a seat's judge answers with a DIFFERENT model than its construction label
+// (e.g. a Sonnet fallback behind a gemini-labelled frontier seat, #0086), the panel
+// must record the model that actually answered — not silently relabel it.
+func TestPanel_RecordsAnsweringModelNotLabel(t *testing.T) {
+	local := &judge.StubJudge{Verdict: judge.ApproveVerdict("gpt-oss:20b")}
+	// Seat labelled gemini, but the judge answers as claude-sonnet-4-6 (the fallback).
+	frontier := &judge.StubJudge{Verdict: judge.ApproveVerdict("claude-sonnet-4-6")}
+	panel, err := judge.NewPanel(
+		judge.PanelMember{Model: "gpt-oss:20b", Judge: local},
+		judge.PanelMember{Model: "gemini-2.5-flash", Judge: frontier},
+	)
+	if err != nil {
+		t.Fatalf("NewPanel: %v", err)
+	}
+	v, err := panel.Judge(context.Background(), judge.Request{})
+	if err != nil {
+		t.Fatalf("Judge: %v", err)
+	}
+	if v.Model != "gpt-oss:20b+claude-sonnet-4-6" {
+		t.Fatalf("combined Model = %q, want the answering models joined", v.Model)
+	}
+	members := panel.(interface{ PanelMembers() []judge.Verdict }).PanelMembers()
+	if members[1].Model != "claude-sonnet-4-6" {
+		t.Fatalf("frontier member must record the answering model, got %q", members[1].Model)
+	}
+}
+
 func TestPanel_MemberErrorPropagates(t *testing.T) {
 	panel, err := judge.NewPanel(
 		judge.PanelMember{Model: "gpt-oss:20b", Judge: &judge.StubJudge{Verdict: judge.ApproveVerdict("gpt-oss:20b")}},
