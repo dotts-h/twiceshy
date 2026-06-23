@@ -9,7 +9,8 @@ discipline decided in
 reasoning and horia's sign-off) and grounded in
 [ADR-0003 §4](adr/ADR-0003-corpus-bootstrap-source-scope.md) ("distill, never
 copy"). Record shape is normative in [SCHEMA.md](SCHEMA.md); vocabulary in
-[CONTEXT.md](CONTEXT.md). This file does not restate those — it links.
+[CONTEXT.md](CONTEXT.md). This file is the *procedure*; the *decision* and its
+legal theory live in ADR-0011 §5 and the memo — linked, not restated.
 
 > **Scope of the decision.** ADR-0011 §5 is **accepted for the INTERNAL /
 > single-tenant corpus only** (horia, 2026-06-23). The **commercial pack stays
@@ -49,11 +50,12 @@ problem class exists — the topic, never the content.** Then:
 4. Record provenance **honestly** as authored — never a false `source_url` /
    "derived from <url>" (we did not derive from it and owe no attribution).
 
-Why this is clean (plain terms; the memo has the full theory): facts are not
-copyrightable (*Feist*; idea/expression, 17 USC §102(b)); CC-BY-SA's ShareAlike
-attaches only to adaptations of the licensed *expression*, which we never make;
-and a set of independently-authored, *executed* tests is structurally our own
-work. **This is not legal advice** — which is exactly why the commercial pack
+**Why this is clean** is the legal theory of
+[ADR-0011 §5](adr/ADR-0011-corpus-growth-and-validation-engine.md) and the
+[decision memo](adr/ADR-0011-section-5-decision-memo.md) — their canonical home,
+not restated here (facts vs. copyrightable expression, ShareAlike scope, the
+executed test as the structural firewall). This canon is the *procedure*; that
+ADR is the *decision*. It is not legal advice — which is why the commercial pack
 stays gated.
 
 ## The procedure: re-derive → author → original tests → execution-validate
@@ -84,7 +86,8 @@ stays gated.
   [`record.SourceLicenseAuthoredInternal`](../internal/record/record.go) sentinel.
   It says: no external license obligation, **and** not cleared for commercial use.
 - **No `provenance.source_url`** — there is no URL we derived from. Setting one
-  would be the dishonest "derived from <url>" provenance §5 forbids.
+  would be the dishonest "derived from <url>" provenance §5 forbids; the record
+  validator rejects a `source_url` on an authored-internal record.
 
 ## Lifecycle: born quarantined → validated
 

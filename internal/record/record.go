@@ -177,6 +177,9 @@ const SourceLicenseFactsOnly = "none (facts only)"
 // accepted for the INTERNAL / single-tenant corpus only; the commercial pack
 // stays gated on a real legal review, so the pack builder keeps these out of
 // commercial packs (pack.Classify, fail-closed). (ADR-0011 §5, extends ADR-0003 §4)
+//
+// This reuses source_license as a sentinel (as SourceLicenseFactsOnly does); if
+// authored records later need richer provenance, a dedicated field may supersede it.
 const SourceLicenseAuthoredInternal = "none (authored, internal-only)"
 
 type Source struct {
@@ -767,6 +770,11 @@ func (r *Record) validateProvenance(fail func(string, ...any)) {
 	}
 	if u := p.SourceURL; u != "" && !reHTTPURL.MatchString(u) {
 		fail("provenance.source_url %q is not an http(s) URL", u)
+	}
+	// ADR-0011 §5: an authored-internal fact is re-derived, not distilled from a
+	// URL, so it must carry no source_url — enforce the discipline mechanically.
+	if p.SourceLicense == SourceLicenseAuthoredInternal && p.SourceURL != "" {
+		fail("provenance.source_url must be empty when source_license is %q (ADR-0011 §5: re-derived, not distilled from a URL)", SourceLicenseAuthoredInternal)
 	}
 }
 
