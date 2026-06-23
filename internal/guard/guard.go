@@ -31,6 +31,17 @@ type Guardrails struct {
 	// MaxActions it bounds a normal batch, so a full run is never mis-flagged as a
 	// compromised-judge spike. 0 is unlimited (then MaxActions is the only ceiling).
 	MaxPromotions int
+	// MaxActionRate is the approval-RATE anomaly baseline (#0085): the fraction of
+	// judged records promoted/demoted above which a run is flagged as a likely
+	// compromised judge. Unlike MaxActions this is NOT moot under a throughput cap —
+	// a capped run that approves ~everything still shows a high promoted/judged
+	// fraction — so it is the spike detector that survives capped (production) mode.
+	// 0 disables it (off until an operator opts in, like MaxPromotions).
+	MaxActionRate float64
+	// MinSample is the minimum number of judged records (StartRun calls) before the
+	// rate anomaly can fire, so a tiny run (e.g. 3/3) is not flagged on too little
+	// signal. Below it, RateAnomalous() always returns false.
+	MinSample int
 	// MaxRuns is the budget cap — records processed (broker/judge runs) per
 	// invocation. 0 is unlimited.
 	MaxRuns int
@@ -74,14 +85,36 @@ func (b *Budget) Capped() bool { return b.g.MaxPromotions > 0 && b.actions >= b.
 // — the blunt "judge approving everything" backstop for UNBOUNDED runs. When a
 // throughput cap is set (MaxPromotions > 0) the cap is the governor: a normal run
 // stops cleanly at the cap, so the count-anomaly is moot and reports false (it
-// would otherwise mis-flag every capped batch). In capped mode the compromised-
-// judge defense is the veto window + per-record gate/attestation + daily audit;
-// an approval-RATE anomaly that survives a cap is the tracked follow-up (#0085).
+// would otherwise mis-flag every capped batch). In capped mode the raw-count
+// backstop is gone; RateAnomalous (#0085) is the approval-RATE anomaly that survives
+// a cap and catches a compromised judge there.
 func (b *Budget) Anomalous() bool {
 	if b.g.MaxPromotions > 0 {
 		return false
 	}
 	return b.g.MaxActions > 0 && b.actions > b.g.MaxActions
+}
+
+// ActionRate is the fraction of judged records that resulted in a promotion/demotion
+// (actions/runs) for this run — 0 when nothing has been judged (no divide-by-zero).
+func (b *Budget) ActionRate() float64 {
+	if b.runs == 0 {
+		return 0
+	}
+	return float64(b.actions) / float64(b.runs)
+}
+
+// RateAnomalous reports whether this run's action rate exceeds MaxActionRate over at
+// least MinSample judged records — the compromised-judge backstop that SURVIVES a
+// throughput cap (#0085). Where Anomalous() (a raw count) goes moot once
+// MaxPromotions caps the run, a judge approving ~everything still shows as a high
+// promoted/judged fraction here. Disabled when MaxActionRate <= 0; quiet below
+// MinSample (too little signal) and on an empty run.
+func (b *Budget) RateAnomalous() bool {
+	if b.g.MaxActionRate <= 0 || b.runs == 0 || b.runs < b.g.MinSample {
+		return false
+	}
+	return b.ActionRate() > b.g.MaxActionRate
 }
 
 // Truthy parses an on/off environment flag (e.g. TWICESHY_PAUSE).

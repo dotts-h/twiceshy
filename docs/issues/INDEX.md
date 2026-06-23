@@ -103,7 +103,7 @@ never a cycle).
 | [0082](0082-restart-on-the-new-home-verify-end-to-end.md) | Restart on the new home + verify end-to-end | closed | high | 0076 | ADR-0021 |
 | [0083](0083-decommission-the-engine-repo-corpus-path.md) | Decommission the engine-repo corpus path | closed | medium | 0076 | |
 | [0084](0084-promote-throughput-throttle-decoupled-from-anomaly-halt-and-hold-cooldown.md) | Promote throughput — decouple the throttle from the anomaly halt + hold cooldown | closed | high | 0034 | ADR-0022 |
-| [0085](0085-approval-rate-anomaly-that-survives-a-throughput-cap.md) | Promotion-rate anomaly that survives a throughput cap | open | medium | 0034 | ADR-0022 |
+| [0085](0085-approval-rate-anomaly-that-survives-a-throughput-cap.md) | Promotion-rate anomaly that survives a throughput cap | closed | medium | 0034 | ADR-0022 |
 | [0086](0086-hybrid-gemini-sonnet-advisory-panel-frontier-judge.md) | Hybrid advisory-panel frontier judge — Gemini primary, Sonnet fallback | closed | medium | 0034 | ADR-0016 |
 | [0087](0087-error-scoped-retrieval-trigger-posttooluse-hook-queries-twiceshy-with-the-verbatim-error-line-on-the-2nd-occurrence.md) | Error-scoped retrieval trigger — PostToolUse hook queries twiceshy with the verbatim error line on the 2nd occurrence | closed | high | 0064 | |
 | [0088](0088-corpus-coverage-seed-engineering-traps-across-the-full-stack-rn-react-ts-python-native-not-just-security-advisories.md) | Corpus coverage — seed engineering traps across the full stack (RN/React/TS/Python/native), not just security advisories | open | high | 0015 | |

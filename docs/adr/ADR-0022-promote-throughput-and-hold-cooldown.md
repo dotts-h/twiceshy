@@ -80,3 +80,21 @@ the `-corpus` dir it is handed (#0081) — exactly what the journals already do.
 - **Rollout.** The driver defaults the cap **off** (`TWICESHY_MAX_PROMOTIONS=0`) so
   behaviour is unchanged until an operator opts in. Enable the cap only **after** the
   cooldown is live, else a capped run still re-judges the held backlog.
+
+## Update — the rate-anomaly successor (#0085, 2026-06-23)
+
+The count-anomaly going moot under a cap (the §Consequences tradeoff above) is closed by an
+approval-**RATE** anomaly that survives the cap. Two new knobs on both `promote` and `adapt`:
+
+- **`-max-action-rate`** (float, default **0 = off**) — the baseline fraction of judged
+  records that may be promoted (promote) / demoted-or-disputed (adapt) before the run is
+  flagged. A compromised judge approving ~everything shows as a rate near 1.0 regardless of
+  the cap; a normal run holds most records, so its rate is low.
+- **`-min-sample`** (int, default **10**) — the minimum judged records before the rate
+  anomaly can fire, so a tiny run (e.g. 3/3 = 100%) is not flagged on too little signal.
+
+It is assessed **post-loop on the full sample** (the rate is only meaningful once the run
+completes) and folded into the same anomaly halt/alert (`errAnomalyHalt`, exit 3) the
+count-anomaly used — `guard.Budget.RateAnomalous()`. Default **off** mirrors the cap's
+rollout: behaviour is unchanged until an operator sets a baseline. The residual capped-mode
+defenses (veto window + per-record gate/attestation + daily audit) remain.

@@ -191,3 +191,82 @@ func TestAdaptCorpus_AnomalyOnFinalActionStillHalts(t *testing.T) {
 		t.Fatalf("both demotions persist (nothing after to halt); demoted=%d, want 2", st.demoted)
 	}
 }
+
+// #0085: the approval-RATE anomaly survives a throughput cap. Five eligible records,
+// judge approves ALL, cap 3: the count-anomaly is moot under the cap, but 3/3 promoted
+// = 100% over the 50% baseline (min sample 3) trips the rate anomaly post-loop — the
+// run halts (errAnomalyHalt) even though the cap was the clean stop.
+func TestPromoteCorpus_RateAnomalyHaltsUnderCap(t *testing.T) {
+	recs := []*record.Record{
+		eligibleRec("exp-0100"), eligibleRec("exp-0101"), eligibleRec("exp-0102"),
+		eligibleRec("exp-0103"), eligibleRec("exp-0104"),
+	}
+	fp := &fakePromoter{promote: map[string]bool{
+		"exp-0100": true, "exp-0101": true, "exp-0102": true, "exp-0103": true, "exp-0104": true,
+	}}
+	persist := func(_ string, _ *record.Record) error { return nil }
+	var buf bytes.Buffer
+
+	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist,
+		guard.Guardrails{MaxPromotions: 3, MaxActionRate: 0.5, MinSample: 3}, nil, nil, &buf, "")
+	if !errors.Is(err, errAnomalyHalt) {
+		t.Fatalf("a high approval rate under a cap must return errAnomalyHalt, got %v", err)
+	}
+	if st.promoted != 3 {
+		t.Fatalf("the cap promotes 3 before the post-loop rate halt; promoted=%d", st.promoted)
+	}
+	// Assert the full numeric body, not just the headline: this pins the denominator
+	// (3/3, the rate is promoted/JUDGED), the rendered percentage, the baseline, and
+	// the min-sample — so a denominator regression or a message-template drift is caught.
+	if !strings.Contains(buf.String(), "3/3 promoted (100%) over the 50% baseline (min sample 3)") {
+		t.Fatalf("expected the full approval-rate anomaly body; got %q", buf.String())
+	}
+}
+
+// Inverse of the above (#0085): a capped run with a HIGH rate but FEWER judged records
+// than MinSample must NOT halt — too little signal — even with the rate knob enabled.
+// Pins that the cmd wiring respects the MinSample gate inside RateAnomalous (a raw
+// ActionRate()>baseline check, dropping the gate, would wrongly halt this run).
+func TestPromoteCorpus_RateAnomalyQuietBelowMinSample(t *testing.T) {
+	recs := []*record.Record{eligibleRec("exp-0100"), eligibleRec("exp-0101")}
+	fp := &fakePromoter{promote: map[string]bool{"exp-0100": true, "exp-0101": true}}
+	persist := func(_ string, _ *record.Record) error { return nil }
+	var buf bytes.Buffer
+
+	// 2 judged, both promoted = 100% rate, but MinSample 5 > 2 → no halt, clean stop.
+	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist,
+		guard.Guardrails{MaxPromotions: 5, MaxActionRate: 0.5, MinSample: 5}, nil, nil, &buf, "")
+	if err != nil {
+		t.Fatalf("a run below the minimum sample must be a clean stop, got %v", err)
+	}
+	if st.promoted != 2 {
+		t.Fatalf("both eligible records promote; promoted=%d", st.promoted)
+	}
+	if strings.Contains(buf.String(), "ANOMALY") {
+		t.Fatalf("a run below the minimum sample must not flag an anomaly; got %q", buf.String())
+	}
+}
+
+// Symmetric with promote (#0085): 5 reports each demoting its original, cap 3, judge
+// demotes ALL → 3/3 = 100% over the 50% baseline (min sample 3). The rate anomaly
+// halts the adapt run even under the cap.
+func TestAdaptCorpus_RateAnomalyHaltsUnderCap(t *testing.T) {
+	recs, runner := adaptDemoting(t, 5)
+	adapter := promote.NewAdapter(&judge.StubJudge{Verdict: judge.ApproveVerdict("g")})
+	persist := func(_ string, _ *record.Record) error { return nil }
+	var buf bytes.Buffer
+
+	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist,
+		guard.Guardrails{MaxPromotions: 3, MaxActionRate: 0.5, MinSample: 3}, nil, nil, &buf, "")
+	if !errors.Is(err, errAnomalyHalt) {
+		t.Fatalf("a high demote rate under a cap must return errAnomalyHalt, got %v", err)
+	}
+	if st.demoted != 3 {
+		t.Fatalf("the cap demotes 3 before the post-loop rate halt; demoted=%d", st.demoted)
+	}
+	// Full numeric body — pins the denominator (3/3 = demote-or-dispute/JUDGED), the
+	// percentage, baseline, and min-sample, not just the headline.
+	if !strings.Contains(buf.String(), "3/3 demote/dispute actions (100%) over the 50% baseline (min sample 3)") {
+		t.Fatalf("expected the full action-rate anomaly body; got %q", buf.String())
+	}
+}

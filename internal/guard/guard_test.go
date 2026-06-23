@@ -135,6 +135,101 @@ func TestBudget_AnomalyThreshold(t *testing.T) {
 	}
 }
 
+// #0085: an approval-RATE anomaly that survives a throughput cap. Under a cap the
+// count-anomaly is moot (Anomalous() returns false), but a compromised judge
+// approving ~everything still shows up as a high promoted/judged fraction.
+// RateAnomalous() flags a run whose action rate exceeds MaxActionRate, gated on a
+// minimum sample so a tiny run isn't flagged.
+func TestBudget_RateAnomalyFiresUnderCap(t *testing.T) {
+	// Capped run, judge approves everything: 10 judged, 10 promoted = 100% > 60%
+	// baseline, sample 10 >= MinSample 5. The count-anomaly is moot under the cap,
+	// yet the rate-anomaly fires — the gap #0085 closes.
+	b := guard.Guardrails{MaxPromotions: 10, MaxActions: 25, MaxActionRate: 0.6, MinSample: 5}.Budget()
+	for i := 0; i < 10; i++ {
+		b.StartRun()
+		b.CountAction()
+	}
+	if b.Anomalous() {
+		t.Fatal("the count-anomaly must stay moot under a throughput cap")
+	}
+	if !b.RateAnomalous() {
+		t.Fatalf("100%% approval over the baseline must be a rate anomaly; rate=%v", b.ActionRate())
+	}
+}
+
+// A normal mixed run (most records held) has a low action rate and does NOT trip.
+func TestBudget_RateAnomalyQuietOnNormalRun(t *testing.T) {
+	// 50 judged, 10 promoted = 20% < 60% baseline.
+	b := guard.Guardrails{MaxPromotions: 10, MaxActionRate: 0.6, MinSample: 5}.Budget()
+	for i := 0; i < 50; i++ {
+		b.StartRun()
+	}
+	for i := 0; i < 10; i++ {
+		b.CountAction()
+	}
+	if b.RateAnomalous() {
+		t.Fatalf("a 20%% approval rate must not be anomalous; rate=%v", b.ActionRate())
+	}
+}
+
+// Minimum sample: a tiny run (3/3 = 100%) is NOT flagged — too little signal, exactly
+// the case #0085 calls out ("a tiny run of 3/3 isn't flagged").
+func TestBudget_RateAnomalyNeedsMinSample(t *testing.T) {
+	b := guard.Guardrails{MaxActionRate: 0.6, MinSample: 5}.Budget()
+	for i := 0; i < 3; i++ {
+		b.StartRun()
+		b.CountAction()
+	}
+	if b.RateAnomalous() {
+		t.Fatal("a 3/3 run below the minimum sample must not be flagged")
+	}
+	if b.ActionRate() != 1.0 {
+		t.Fatalf("ActionRate() = %v, want 1.0", b.ActionRate())
+	}
+}
+
+// Disabled by default: MaxActionRate 0 never fires, regardless of rate/sample — the
+// rollout pattern (off until an operator opts in), like the throughput cap.
+func TestBudget_RateAnomalyDisabledByDefault(t *testing.T) {
+	b := guard.Guardrails{}.Budget() // MaxActionRate 0 = off
+	for i := 0; i < 100; i++ {
+		b.StartRun()
+		b.CountAction() // 100% rate, large sample
+	}
+	if b.RateAnomalous() {
+		t.Fatal("MaxActionRate 0 must disable the rate anomaly")
+	}
+}
+
+// Threshold is strict (>, not >=): a rate exactly at the baseline does not trip.
+func TestBudget_RateAnomalyStrictThreshold(t *testing.T) {
+	b := guard.Guardrails{MaxActionRate: 0.5, MinSample: 5}.Budget()
+	for i := 0; i < 10; i++ {
+		b.StartRun()
+	}
+	for i := 0; i < 5; i++ {
+		b.CountAction() // 5/10 = 0.5 exactly, at the baseline
+	}
+	if b.RateAnomalous() {
+		t.Fatalf("a rate exactly at the baseline must not trip (>, not >=); rate=%v", b.ActionRate())
+	}
+	b.CountAction() // 6/10 = 0.6 > 0.5
+	if !b.RateAnomalous() {
+		t.Fatalf("6/10 over the 0.5 baseline must trip; rate=%v", b.ActionRate())
+	}
+}
+
+// ActionRate is promoted/judged, 0 when nothing was judged (no divide-by-zero).
+func TestBudget_ActionRateZeroWhenNothingJudged(t *testing.T) {
+	b := guard.Guardrails{MaxActionRate: 0.6, MinSample: 0}.Budget()
+	if b.ActionRate() != 0 {
+		t.Fatalf("ActionRate() with no runs = %v, want 0", b.ActionRate())
+	}
+	if b.RateAnomalous() {
+		t.Fatal("no judged records must not be a rate anomaly even with MinSample 0")
+	}
+}
+
 func TestTruthy(t *testing.T) {
 	for _, s := range []string{"1", "true", "TRUE", "yes", "on", " on "} {
 		if !guard.Truthy(s) {
