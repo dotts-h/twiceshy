@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -179,7 +180,7 @@ func TestEndOfLifeSource_ParsesDateAndBoolEOL(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = w.Write([]byte(`[{"cycle":"1.23","eol":"2099-01-01"},{"cycle":"1.16","eol":true},{"cycle":"1.24","eol":false}]`))
+		_, _ = w.Write([]byte(`[{"cycle":"1.23","eol":"2099-01-01"},{"cycle":"1.16","eol":true},{"cycle":"1.24","eol":false},{"cycle":"1.10","eol":null},{"cycle":"1.11","eol":""}]`))
 	}))
 	defer srv.Close()
 	cycles, err := doctor.NewEndOfLifeSource(srv.URL).Cycles(context.Background(), "go")
@@ -193,8 +194,27 @@ func TestEndOfLifeSource_ParsesDateAndBoolEOL(t *testing.T) {
 	if got["1.23"] != "2099-01-01" || got["1.16"] == "" || got["1.24"] != "" {
 		t.Fatalf("eol parse = %v (want 1.23 date, 1.16 past-sentinel, 1.24 empty)", got)
 	}
+	// A JSON null or an empty-string eol is "unknown", NOT "already EOL" — flagging
+	// a current runtime stale on missing data is fail-unsafe (would demote a live one).
+	if got["1.10"] != "" || got["1.11"] != "" {
+		t.Fatalf("eol null/empty = %v (want both empty/not-EOL)", map[string]string{"1.10": got["1.10"], "1.11": got["1.11"]})
+	}
 	// unknown product → 404 → nil, no error (caller skips)
 	if c, err := doctor.NewEndOfLifeSource(srv.URL).Cycles(context.Background(), "nope"); err != nil || c != nil {
 		t.Fatalf("unknown product = (%v, %v), want (nil, nil)", c, err)
+	}
+}
+
+// The endoflife base URL is operator-configurable, so the response body is bounded.
+// A source streaming past the cap is truncated mid-JSON and fails the decode rather
+// than buffering an unbounded body into memory.
+func TestEndOfLifeSource_BoundsResponseBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A single cycle whose eol string is far larger than the 1 MiB cap.
+		_, _ = w.Write([]byte(`[{"cycle":"1","eol":"` + strings.Repeat("a", 2<<20) + `"}]`))
+	}))
+	defer srv.Close()
+	if _, err := doctor.NewEndOfLifeSource(srv.URL).Cycles(context.Background(), "go"); err == nil {
+		t.Fatal("oversized response decoded without error — body is not bounded")
 	}
 }

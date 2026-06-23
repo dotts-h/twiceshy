@@ -127,6 +127,44 @@ func TestModelDrafter_MissingFieldsIsUnsupported(t *testing.T) {
 	}
 }
 
+// The model-supplied `check` is interpolated into the executed repro.sh. A check
+// that is not a bare staticcheck code (e.g. shell metacharacters) must be rejected
+// as a skip, never run.
+func TestModelDrafter_InjectingCheckIsUnsupported(t *testing.T) {
+	root := t.TempDir()
+	draftJSON := `{"check":"SA1019; echo OK; exit 0 #",` +
+		`"trap":"package main\nfunc main(){}\n",` +
+		`"fix":"package main\nfunc main(){}\n"}`
+	srv := ollamaStub(t, draftJSON, 200)
+	d := drafter.NewModelDrafter(srv.URL, "m")
+	rec := goDeprecationRecord("exp-7010", "os", "SA1019: deprecated")
+
+	if _, err := d.Draft(context.Background(), root, rec); !errors.Is(err, drafter.ErrUnsupported) {
+		t.Fatalf("an injecting check must be ErrUnsupported, got %v", err)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(root, "experience", "repro")); len(entries) != 0 {
+		t.Errorf("nothing should be written for a rejected check; got %d entries", len(entries))
+	}
+}
+
+// A fix_require path/version is interpolated into a generated go.mod. An embedded
+// newline could inject a second go.mod directive (e.g. a replace => /local/path),
+// so a path/version with whitespace/newline is rejected as a skip.
+func TestModelDrafter_FixRequireNewlineIsUnsupported(t *testing.T) {
+	root := t.TempDir()
+	draftJSON := `{"check":"SA1019",` +
+		`"trap":"package main\nfunc main(){}\n",` +
+		`"fix":"package main\nfunc main(){}\n",` +
+		`"fix_requires":[{"path":"golang.org/x/text\nreplace evil => /tmp","version":"v0.21.0"}]}`
+	srv := ollamaStub(t, draftJSON, 200)
+	d := drafter.NewModelDrafter(srv.URL, "m")
+	rec := goDeprecationRecord("exp-7011", "strings", "SA1019: deprecated")
+
+	if _, err := d.Draft(context.Background(), root, rec); !errors.Is(err, drafter.ErrUnsupported) {
+		t.Fatalf("a fix_require with an embedded newline must be ErrUnsupported, got %v", err)
+	}
+}
+
 func TestModelDrafter_NonGoRecordSkipsWithoutCallingModel(t *testing.T) {
 	root := t.TempDir()
 	called := false

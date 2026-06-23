@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -138,6 +139,18 @@ type modelDraftJSON struct {
 	} `json:"fix_requires"`
 }
 
+// Untrusted model output is interpolated into an executed repro.sh (the check) and
+// a generated go.mod (fix_require path/version). These patterns shape-validate that
+// input so it cannot inject extra commands or directives. The decisive property is
+// "no whitespace/newline": a check is a bare staticcheck code; a module path and a
+// semver carry no spaces, so an embedded newline that would open a second go.mod
+// line (e.g. a `replace => /local/path`) is rejected.
+var (
+	reStaticcheckCode = regexp.MustCompile(`^[A-Z]{1,4}[0-9]{3,5}$`)
+	modulePathRe      = regexp.MustCompile(`^[A-Za-z0-9.~_/-]+$`)
+	semverRe          = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
+)
+
 // parseModelDraft extracts the JSON object from the model output (tolerating any
 // prose/markdown fence around it), validates the required fields, and returns a
 // goDeprecation ready for emitGoDeprecationRepro. A missing field is "unusable",
@@ -154,6 +167,11 @@ func parseModelDraft(raw string) (goDeprecation, error) {
 	if m.Check == "" || m.Trap == "" || m.Fix == "" {
 		return goDeprecation{}, errors.New("missing required check/trap/fix")
 	}
+	// The check is interpolated into the executed repro.sh — it must be a bare
+	// staticcheck code, never shell-bearing input.
+	if !reStaticcheckCode.MatchString(m.Check) {
+		return goDeprecation{}, fmt.Errorf("check %q is not a staticcheck code", m.Check)
+	}
 	td := goDeprecation{check: m.Check, trap: m.Trap, fix: m.Fix}
 	for _, r := range m.FixRequires {
 		if r.Path == "" || r.Version == "" {
@@ -164,6 +182,14 @@ func parseModelDraft(raw string) (goDeprecation, error) {
 		// prepare and burn a broker run. Reject up front so the draft is skipped.
 		if !strings.Contains(r.Path, ".") {
 			return goDeprecation{}, fmt.Errorf("fix_require %q is not a module path", r.Path)
+		}
+		// The path and version are interpolated into a generated go.mod; reject any
+		// shape with whitespace/newline so a value can't inject a second directive.
+		if !modulePathRe.MatchString(r.Path) {
+			return goDeprecation{}, fmt.Errorf("fix_require path %q has invalid characters", r.Path)
+		}
+		if !semverRe.MatchString(r.Version) {
+			return goDeprecation{}, fmt.Errorf("fix_require version %q is not semver", r.Version)
 		}
 		td.fixReqs = append(td.fixReqs, goRequire{path: r.Path, version: r.Version})
 	}

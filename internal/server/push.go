@@ -87,6 +87,17 @@ func (h *handlers) pushHTTP(w http.ResponseWriter, r *http.Request) {
 	for _, hit := range decision.Served {
 		stored, err := h.ix.Get(ctx, hit.ID)
 		if err != nil {
+			// Corpus drift (a served id no longer in the records table): drop this
+			// card and serve the rest — "empty is a valid answer". An unexpected DB
+			// error is genuine infra failure, so it still 500s rather than masking it.
+			if errors.Is(err, index.ErrNotFound) {
+				h.logger.Warn("push get: served id missing, dropping card",
+					slog.String("route", route),
+					slog.String("id", hit.ID),
+					slog.String("error", err.Error()),
+				)
+				continue
+			}
 			h.logger.Error("push get failed",
 				slog.String("route", route),
 				slog.String("id", hit.ID),
@@ -97,13 +108,15 @@ func (h *handlers) pushHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		rec, err := record.Parse(stored.Path, []byte(stored.Markdown))
 		if err != nil {
-			h.logger.Error("push parse failed",
+			// A single unparseable served record must not 500 the whole hot-path
+			// injection; drop it and serve the others. The served set already passed
+			// status:validated gating, so this is resilience, not a policy bypass.
+			h.logger.Warn("push parse: dropping unparseable card",
 				slog.String("route", route),
 				slog.String("id", hit.ID),
 				slog.String("error", err.Error()),
 			)
-			http.Error(w, "record parse failed", http.StatusInternalServerError)
-			return
+			continue
 		}
 		cards = append(cards, RenderTrapCard(rec))
 		ids = append(ids, hit.ID)
