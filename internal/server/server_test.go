@@ -348,6 +348,50 @@ func TestRecordExperienceListed(t *testing.T) {
 	}
 }
 
+// Two record_experience calls in one session must allocate distinct ids (#0089):
+// ingest.NextID is corpus-derived and stateless, so without an in-process reservation
+// both novel drafts would carry the same exp-NNNN and collide.
+func TestRecordExperienceAllocatesDistinctIDsInOneSession(t *testing.T) {
+	ts := newTestServer(t)
+	session := connect(t, ts)
+	call := func(marker string) string {
+		t.Helper()
+		res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+			Name: "record_experience",
+			Arguments: map[string]any{
+				"kind":             "trap",
+				"title":            "Distinct novel trap " + marker,
+				"summary":          "A novel symptom about " + marker + " not present in the corpus.",
+				"body":             "A reproducible lesson about " + marker + " that is novel to the corpus and long enough to be a real record body.",
+				"error_signatures": []string{"ZZZ-UNIQUE-" + marker + "-marker"},
+				"root_cause":       "the " + marker + " path mishandled an edge case",
+				"fix":              "handle the " + marker + " edge case explicitly",
+				"author":           "test",
+			},
+		})
+		if err != nil {
+			t.Fatalf("CallTool: %v", err)
+		}
+		if res.IsError {
+			t.Fatalf("record_experience error: %s", toolText(res))
+		}
+		var rr server.RecordResult
+		b, _ := json.Marshal(res.StructuredContent)
+		if err := json.Unmarshal(b, &rr); err != nil {
+			t.Fatalf("unmarshal result: %v", err)
+		}
+		if rr.RecordID == "" {
+			t.Fatalf("no record_id allocated (novelty=%q): %s", rr.Novelty, rr.Message)
+		}
+		return rr.RecordID
+	}
+	id1 := call("alpha")
+	id2 := call("beta")
+	if id1 == id2 {
+		t.Errorf("two record_experience calls collided on id %q — must be distinct (#0089)", id1)
+	}
+}
+
 // A new (non-duplicate) lesson is accepted as a QUARANTINED draft with an
 // allocated id — never written validated; git/PR is the trust boundary.
 // (It may classify novel OR similar depending on incidental lexical overlap;

@@ -7,6 +7,7 @@ from the environment.
 | hook | event | what it does |
 |------|-------|--------------|
 | [`twiceshy-push.sh`](twiceshy-push.sh) | `UserPromptSubmit` | pull channel: POSTs the prompt to `/push` and injects matching trap cards as `additionalContext` (ADR-0001 §5). |
+| [`twiceshy-error-pull.sh`](twiceshy-error-pull.sh) | `PostToolUse` | **error-scoped pull (#0087, prototype):** on the *second* appearance of an error signature in tool output, queries `/push` with the verbatim error line — the reliable, high-signal trigger that per-prompt push and judgment-based pull both miss. Dedupes per session+signature; `TWICESHY_ERROR_PULL_ON_FIRST=1` fires on the first occurrence. |
 | [`session-retro.sh`](session-retro.sh) | `SessionEnd` | capture channel: ships the bounded session transcript to `/retro` so the off-pool analyzer can extract quarantined trap drafts (#0065, [ADR-0018](../docs/adr/ADR-0018-session-retro-capture.md)). |
 
 ## Environment
