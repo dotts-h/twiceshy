@@ -7,6 +7,7 @@ group: 0015
 depends_on: []
 forgejo:
 links:
+  prs: [375]
   adr:
   prs: []
   issues: [0015, 0072, 0023]

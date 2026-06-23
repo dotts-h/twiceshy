@@ -542,7 +542,7 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 	// stops at the first non-flag arg, so pull the source off the front before
 	// parsing (otherwise `ingest go -corpus X` would leave -corpus unparsed).
 	if len(args) < 1 {
-		return errors.New("usage: twiceshy ingest <source> [flags] (sources: go, osv, osv-live, eol-live, py)")
+		return errors.New("usage: twiceshy ingest <source> [flags] (sources: go, osv, osv-live, eol-live, npm-deprecation, py)")
 	}
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	c := addCommonFlags(fs)

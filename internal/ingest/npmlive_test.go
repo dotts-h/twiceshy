@@ -4,6 +4,7 @@ package ingest_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -113,5 +114,54 @@ func TestNpmLive_NotDeprecatedNoDraft(t *testing.T) {
 func TestNpmLive_Name(t *testing.T) {
 	if got := ingest.NewNpmLiveSource().Name(); got != "npm-deprecation" {
 		t.Errorf("Name = %q, want npm-deprecation", got)
+	}
+}
+
+// A draft must map to a schema-valid, quarantined, facts-only record through the
+// ingest ladder — not just be a well-formed Draft struct (parity with eollive).
+func TestNpmLive_PrepareQuarantinesValidRecord(t *testing.T) {
+	ctx := context.Background()
+	src := ingest.NewNpmLiveSource(
+		ingest.WithNpmPackages([]string{"request"}),
+		stubNpm(map[string]string{"request": `{"version":"2.88.2","deprecated":"request has been deprecated"}`}),
+	)
+	drafts, err := src.Drafts(ctx)
+	if err != nil {
+		t.Fatalf("Drafts: %v", err)
+	}
+	if len(drafts) != 1 {
+		t.Fatalf("want 1 draft, got %d", len(drafts))
+	}
+
+	ix := openIx(t)
+	meta := ingest.Meta{ID: "exp-0001", Author: "twiceshy-importer", Now: "2026-06-23", IncludeQuarantined: true}
+	out, err := ingest.Prepare(ctx, ix, repo, drafts[0], meta)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if out.Record == nil || out.Record.Status != "quarantined" {
+		t.Fatalf("must quarantine the import, got record=%v", out.Record)
+	}
+	if out.Record.Provenance.SourceLicense != record.SourceLicenseFactsOnly {
+		t.Errorf("facts-only provenance not carried: %+v", out.Record.Provenance)
+	}
+	if err := record.Validate(out.Record); err != nil {
+		t.Errorf("prepared record is not schema-valid: %v", err)
+	}
+}
+
+// A context cancelled mid-decode is systemic and must fail loud, not be swallowed
+// as a per-package skip (parity with eollive).
+func TestNpmLive_DraftsPropagatesContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	fetch := func(_ context.Context, _ string) (io.ReadCloser, error) {
+		return io.NopCloser(&cancelDuringReadReader{cancel: cancel}), nil
+	}
+	src := ingest.NewNpmLiveSource(
+		ingest.WithNpmPackages([]string{"request"}),
+		ingest.WithNpmFetch(fetch),
+	)
+	if _, err := src.Drafts(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got %v", err)
 	}
 }
