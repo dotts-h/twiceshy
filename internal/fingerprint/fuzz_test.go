@@ -58,6 +58,12 @@ func FuzzNormalizeIdempotent(f *testing.F) {
 		// and TrimSpace then removes uniformly on every pass.
 		"\f\r  trailing space   \v",
 		"path \v\f\r here",
+		// Regression (now fixed by the leading TrimSpace): Unicode whitespace the
+		// regex \s class does NOT match (vertical tab, NEL, no-break space) leading a
+		// /path — previously survived pass 1 then was trimmed, re-anchoring the path.
+		"\v/0",
+		"\u0085/etc/passwd",
+		"\u00a0/var/log/x crashed",
 	}
 	for _, s := range seeds {
 		f.Add(s)

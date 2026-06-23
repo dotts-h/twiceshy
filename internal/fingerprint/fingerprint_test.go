@@ -69,6 +69,19 @@ func TestNormalizeIsIdempotent(t *testing.T) {
 	}
 }
 
+// Regression: unicode whitespace that strings.TrimSpace strips but the regex \s
+// class does NOT match (vertical tab, NEL, no-break space). A leading one of these
+// survived the first pass but was trimmed by the final TrimSpace, re-exposing a
+// /path token at ^ on the second pass — breaking idempotence.
+func TestNormalizeIdempotentOnLeadingUnicodeWhitespace(t *testing.T) {
+	for _, in := range []string{"\v/0", "\u0085/etc/passwd", "\u00a0/var/log/x crashed"} {
+		once := fingerprint.Normalize(in)
+		if twice := fingerprint.Normalize(once); twice != once {
+			t.Errorf("not idempotent for %q: %q -> %q", in, once, twice)
+		}
+	}
+}
+
 func TestFingerprintFormatAndDomainSeparation(t *testing.T) {
 	const (
 		sig  = `fts5: syntax error near "."`
