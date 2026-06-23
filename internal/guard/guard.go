@@ -25,6 +25,12 @@ type Guardrails struct {
 	// MaxActions is the anomaly alert threshold — promotions/demotions per run
 	// above which a notification fires. 0 disables the alert.
 	MaxActions int
+	// MaxPromotions is the intended throughput cap — the per-run ceiling on
+	// promotions/demotions at which the loop stops CLEANLY (a normal, mergeable
+	// batch; "re-run to continue"). It is distinct from MaxActions: set below
+	// MaxActions it bounds a normal batch, so a full run is never mis-flagged as a
+	// compromised-judge spike. 0 is unlimited (then MaxActions is the only ceiling).
+	MaxPromotions int
 	// MaxRuns is the budget cap — records processed (broker/judge runs) per
 	// invocation. 0 is unlimited.
 	MaxRuns int
@@ -60,10 +66,23 @@ func (b *Budget) CountAction() { b.actions++ }
 // Actions returns how many promotions/demotions have been taken.
 func (b *Budget) Actions() int { return b.actions }
 
-// Anomalous reports whether the action count has crossed the alert threshold —
-// the "judge approving everything" signal. It is a notification, not a halt: the
-// emergency stop is what halts.
-func (b *Budget) Anomalous() bool { return b.g.MaxActions > 0 && b.actions > b.g.MaxActions }
+// Capped reports whether the intended throughput cap is reached — a clean stop
+// at the per-run ceiling, NOT an anomaly. 0 (unset) never caps.
+func (b *Budget) Capped() bool { return b.g.MaxPromotions > 0 && b.actions >= b.g.MaxPromotions }
+
+// Anomalous reports whether the raw action count has crossed the alert threshold
+// — the blunt "judge approving everything" backstop for UNBOUNDED runs. When a
+// throughput cap is set (MaxPromotions > 0) the cap is the governor: a normal run
+// stops cleanly at the cap, so the count-anomaly is moot and reports false (it
+// would otherwise mis-flag every capped batch). In capped mode the compromised-
+// judge defense is the veto window + per-record gate/attestation + daily audit;
+// an approval-RATE anomaly that survives a cap is the tracked follow-up (#0085).
+func (b *Budget) Anomalous() bool {
+	if b.g.MaxPromotions > 0 {
+		return false
+	}
+	return b.g.MaxActions > 0 && b.actions > b.g.MaxActions
+}
 
 // Truthy parses an on/off environment flag (e.g. TWICESHY_PAUSE).
 func Truthy(s string) bool {
