@@ -261,7 +261,7 @@ type SearchResult struct {
 // be able to turn one call into that much work.
 const maxQueryBytes = 16 << 10
 
-func (h *handlers) search(ctx context.Context, _ *mcp.CallToolRequest, args SearchArgs) (*mcp.CallToolResult, SearchResult, error) {
+func (h *handlers) search(ctx context.Context, req *mcp.CallToolRequest, args SearchArgs) (*mcp.CallToolResult, SearchResult, error) {
 	start := time.Now()
 	const tool = "search_experience"
 
@@ -311,7 +311,19 @@ func (h *handlers) search(ctx context.Context, _ *mcp.CallToolRequest, args Sear
 		ids[i] = hit.ID
 	}
 	h.usage.record(ids)
-	h.recordSearchDecision(args.Query, hits)
+	// The MCP session id correlates this retrieval with the session's captured
+	// transcript so the retro helpfulness join can attribute served cards (#0069). It
+	// is hashed (never stored raw) in recordSearchDecision; nil req / no session → "".
+	// GetSession returns the *ServerSession as a Session interface, so a nil pointer
+	// is a non-nil interface (the typed-nil gotcha) — assert to the concrete type and
+	// nil-check that, the SDK's own idiom, before reading the id.
+	sessionID := ""
+	if req != nil {
+		if ss, ok := req.GetSession().(*mcp.ServerSession); ok && ss != nil {
+			sessionID = ss.ID()
+		}
+	}
+	h.recordSearchDecision(args.Query, hits, sessionID)
 	h.logger.Info("tool call",
 		slog.String("tool", tool),
 		slog.String("outcome", "ok"),
@@ -324,9 +336,12 @@ func (h *handlers) search(ctx context.Context, _ *mcp.CallToolRequest, args Sear
 }
 
 // recordSearchDecision logs this query's search decision (#0067): the served
-// records and their scores, for measuring retrieval precision on real traffic.
-// Best-effort and async; the raw query is hashed, never stored. nil recorder = no-op.
-func (h *handlers) recordSearchDecision(query string, hits []index.Hit) {
+// records and their scores, for measuring retrieval precision on real traffic, plus
+// the SALTED hash of the MCP session id (#0069) so served cards can be attributed to
+// the session's captured transcript. Best-effort and async; the raw query and the raw
+// session id are hashed, never stored. An empty sessionID records no correlation key.
+// nil recorder = no-op.
+func (h *handlers) recordSearchDecision(query string, hits []index.Hit, sessionID string) {
 	if h.telemetry == nil {
 		return
 	}
@@ -334,9 +349,14 @@ func (h *handlers) recordSearchDecision(query string, hits []index.Hit) {
 	for i, hit := range hits {
 		served[i] = telemetry.ServedHit{ID: hit.ID, Score: hit.Score}
 	}
+	session := ""
+	if sessionID != "" {
+		session = h.telemetry.Hash(sessionID)
+	}
 	h.telemetry.Record(telemetry.Decision{
 		Channel:   "search",
 		QueryHash: h.telemetry.Hash(query),
+		Session:   session,
 		Served:    served,
 		Count:     len(hits),
 	})
