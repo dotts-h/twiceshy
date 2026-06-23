@@ -29,3 +29,6 @@ accepted ADR's decision — supersede it (`Status: superseded-by-NNNN`).
 | [0019](ADR-0019-write-path-is-the-autonomous-validation-loop.md) | The write path is the autonomous validation loop + direct quarantined import — supersedes ADR-0008 §2–4 (preserves §1) | Accepted |
 | [0020](ADR-0020-prose-class-panel-promotion.md) | Prose-class records auto-promote via a stronger, local-only judge panel — supersedes ADR-0013 §5 for prose | Proposed |
 | [0021](ADR-0021-decouple-corpus-as-a-data-product.md) | Decouple the corpus into a versioned data product (own store + schema contract, consumed via the -corpus seam) — the #0010 multi-tenant precondition | Proposed |
+| [0022](ADR-0022-promote-throughput-and-hold-cooldown.md) | Promote throughput — a clean cap (`-max-promotions`) decoupled from the anomaly halt, plus a per-record hold cooldown | Accepted |
+| [0023](ADR-0023-thin-main-orchestration-split.md) | Lift the batch-orchestration core out of `cmd/twiceshy/main.go` into `internal/` (thin main; reuse the existing seams) | Proposed |
+| [0024](ADR-0024-validator-clock-injection.md) | Inject the record validator's clock instead of a package-level mutable global (convention compliance + a testable #0050 boundary) | Proposed |
