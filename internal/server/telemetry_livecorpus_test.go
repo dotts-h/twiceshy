@@ -45,6 +45,9 @@ func readDecisions(t *testing.T, path string) []telemetry.Decision {
 // never persisted. BM25 + the discriminative-df gate are corpus-relative (exp-0098),
 // so this exercises the gate against the real corpus, the way push runs in production.
 func TestTelemetryRecordsPushGateDecision(t *testing.T) {
+	if _, err := os.Stat("../../experience"); err != nil {
+		t.Skip("live corpus not present at ../.. (decoupled to twiceshy-corpus, ADR-0021)")
+	}
 	recs, err := record.LoadCorpus("../..")
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)

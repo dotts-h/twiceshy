@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/dotts-h/twiceshy/internal/record"
+	"github.com/dotts-h/twiceshy/internal/testcorpus"
 )
 
 // lockedBuffer lets the test read serve's output while the server
@@ -40,8 +41,10 @@ func (l *lockedBuffer) String() string {
 	return l.b.String()
 }
 
-// the repo itself is a valid corpus (the three worked examples).
-const corpus = "../.."
+// corpus is the frozen fixture (internal/testcorpus) — the live corpus is now a
+// separate data product (twiceshy-corpus, ADR-0021), so command tests run against
+// the bundled fixture instead of the repo root.
+var corpus = testcorpus.Root()
 
 // writeFixture marshals rec into dir's corpus at its Path (mirrors how a real
 // record lands on disk), for tests that need a controlled corpus.
@@ -558,25 +561,9 @@ func TestRunServeKeepsServingWhenSIGHUPReloadFails(t *testing.T) {
 	}
 }
 
-// eval -push runs the push-precision eval over the real corpus: off-domain
-// prompts must inject nothing (precision) and genuine traps must surface (recall).
-// End-to-end guard for the CLI path the push channel is gated on.
-func TestRunEvalPush(t *testing.T) {
-	var out bytes.Buffer
-	err := run(context.Background(), []string{
-		"eval", "-push", "-corpus", "../..", "-db", filepath.Join(t.TempDir(), "pe.db"),
-	}, &out, noEnv)
-	if err != nil {
-		t.Fatalf("eval -push: %v\n%s", err, out.String())
-	}
-	s := out.String()
-	if !strings.Contains(s, "precision: 100.0%") {
-		t.Errorf("want precision 100%%, got:\n%s", s)
-	}
-	if !strings.Contains(s, "recall:    100.0%") {
-		t.Errorf("want recall 100%%, got:\n%s", s)
-	}
-}
+// TestRunEvalPush asserts 100% push precision AND recall, both corpus-relative, so
+// it needs the live corpus (now twiceshy-corpus, ADR-0021) and lives in
+// eval_push_livecorpus_test.go behind the livecorpus tag.
 
 // doctor staleness runs over a corpus and reports (offline: -endoflife-url ""
 // means only the valid.until signal runs, so a fresh import yields no findings).

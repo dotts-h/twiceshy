@@ -9,8 +9,12 @@
 > moves.
 
 Single Go module `github.com/dotts-h/twiceshy`, one deployable binary. The
-`experience/` markdown corpus is the source of truth; everything else is
-derived or a thin edge over it ([ADR-0001](adr/ADR-0001-architecture.md)).
+markdown experience-record corpus is the source of truth; everything else is
+derived or a thin edge over it ([ADR-0001](adr/ADR-0001-architecture.md)). That
+corpus now lives in its own versioned data product (`twiceshy-corpus`,
+[ADR-0021](adr/ADR-0021-decouple-corpus-as-a-data-product.md)); the engine repo
+keeps only a small frozen fixture (`internal/testcorpus/`) for tests and loads a
+real corpus through the `-corpus <dir>` seam.
 
 ## Module layout
 

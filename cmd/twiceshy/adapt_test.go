@@ -126,7 +126,7 @@ func TestAdaptCorpus_OrphanReportCounted(t *testing.T) {
 
 func TestRunAdapt_RequiresJudgeURL(t *testing.T) {
 	var buf bytes.Buffer
-	err := runAdapt(context.Background(), []string{"-corpus", "../.."}, &buf, func(string) string { return "" })
+	err := runAdapt(context.Background(), []string{"-corpus", corpus}, &buf, func(string) string { return "" })
 	if err == nil || !strings.Contains(err.Error(), "TWICESHY_JUDGE_URL") {
 		t.Fatalf("the counter-evidence gate without a judge must fail safe; got %v", err)
 	}
@@ -204,7 +204,7 @@ func TestAdaptCorpus_JournalAbortsThenResumes(t *testing.T) {
 
 func TestRunAdapt_DryRunWritesNothing(t *testing.T) {
 	var buf bytes.Buffer
-	err := runAdapt(context.Background(), []string{"-corpus", "../..", "-dry-run"}, &buf, func(string) string { return "" })
+	err := runAdapt(context.Background(), []string{"-corpus", corpus, "-dry-run"}, &buf, func(string) string { return "" })
 	if err != nil {
 		t.Fatalf("dry-run must not need a judge: %v", err)
 	}

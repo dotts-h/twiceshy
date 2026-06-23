@@ -6,6 +6,7 @@ package eval_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -20,6 +21,9 @@ import (
 // found — the discriminative gate leaking common dev vocabulary as the corpus grew.
 func TestPushPrecisionOnLiveCorpus(t *testing.T) {
 	ctx := context.Background()
+	if _, err := os.Stat("../../experience"); err != nil {
+		t.Skip("live corpus not present at ../.. (decoupled to twiceshy-corpus, ADR-0021)")
+	}
 	recs, err := record.LoadCorpus("../..")
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)

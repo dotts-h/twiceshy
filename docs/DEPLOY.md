@@ -22,8 +22,9 @@ docker build -t twiceshy:<tag> .
 
 The container is read-only except a mounted `/data`:
 
-- `/data/corpus/` — the experience-record repo (the `experience/` tree + the
-  importer's output). The **source of truth**; back this up, not the index.
+- `/data/corpus/` — a replica of the `twiceshy-corpus` experience-record repo (the
+  `experience/` tree + the importer's output; [ADR-0021](adr/ADR-0021-decouple-corpus-as-a-data-product.md)).
+  The **source of truth** the engine serves; back this up, not the index.
 - `/data/twiceshy.db` — the derived SQLite index. Rebuilt from the corpus on
   every `serve` start, so it is disposable.
 

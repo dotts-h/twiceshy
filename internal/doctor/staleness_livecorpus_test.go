@@ -6,6 +6,7 @@ package doctor_test
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/dotts-h/twiceshy/internal/doctor"
@@ -13,6 +14,9 @@ import (
 )
 
 func TestStaleness_RealCorpusNotFalseFlagged(t *testing.T) {
+	if _, err := os.Stat("../../experience"); err != nil {
+		t.Skip("live corpus not present at ../.. (decoupled to twiceshy-corpus, ADR-0021)")
+	}
 	recs, err := record.LoadCorpus("../..")
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)

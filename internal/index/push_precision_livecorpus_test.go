@@ -6,6 +6,7 @@ package index
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -62,6 +63,9 @@ make buy gift mother birthday weather dinner movie book music travel weekend
 // and its validated df — add it to commonWords and re-run.
 func TestPushGateExcludesCommonVocabulary(t *testing.T) {
 	ctx := context.Background()
+	if _, err := os.Stat("../../experience"); err != nil {
+		t.Skip("live corpus not present at ../.. (decoupled to twiceshy-corpus, ADR-0021)")
+	}
 	recs, err := record.LoadCorpus("../..")
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)

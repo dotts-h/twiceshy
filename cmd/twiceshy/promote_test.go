@@ -104,7 +104,7 @@ func TestPromoteCorpus_AbortsOnPromoterError(t *testing.T) {
 
 func TestRunPromote_RequiresJudgeURL(t *testing.T) {
 	var buf bytes.Buffer
-	err := runPromote(context.Background(), []string{"-corpus", "../.."}, &buf,
+	err := runPromote(context.Background(), []string{"-corpus", corpus}, &buf,
 		func(string) string { return "" }) // no TWICESHY_JUDGE_URL
 	if err == nil || !strings.Contains(err.Error(), "TWICESHY_JUDGE_URL") {
 		t.Fatalf("auto-promotion without a judge must fail safe; got %v", err)
@@ -113,7 +113,7 @@ func TestRunPromote_RequiresJudgeURL(t *testing.T) {
 
 func TestRunPromote_RejectsLocalJudgeModel(t *testing.T) {
 	var buf bytes.Buffer
-	err := runPromote(context.Background(), []string{"-corpus", "../..", "-judge-model", "llama3.2"}, &buf,
+	err := runPromote(context.Background(), []string{"-corpus", corpus, "-judge-model", "llama3.2"}, &buf,
 		func(k string) string {
 			if k == "TWICESHY_JUDGE_URL" {
 				return "http://judge.local"
@@ -206,7 +206,7 @@ func TestPromoteCorpus_NoJournalWhenPathEmpty(t *testing.T) {
 
 func TestRunPromote_DryRunWritesNothing(t *testing.T) {
 	var buf bytes.Buffer
-	err := runPromote(context.Background(), []string{"-corpus", "../..", "-dry-run"}, &buf,
+	err := runPromote(context.Background(), []string{"-corpus", corpus, "-dry-run"}, &buf,
 		func(string) string { return "" })
 	if err != nil {
 		t.Fatalf("dry-run must not need a judge: %v", err)
