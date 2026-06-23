@@ -49,6 +49,7 @@ real corpus through the `-corpus <dir>` seam.
 | `internal/retro/` | Extracts reusable records from coding-agent session transcripts. `Analyzer` seam (the only model in the loop, drafts only); feeds candidates into the quarantine → PR ladder via `ingest.Prepare`. | [18](adr/ADR-0018-session-retro-capture.md) |
 | `internal/selfaudit/` | Dogfoods twiceshy on its own `go.mod`: matches dependencies against ingested advisories and reports affected versions. | #0014 |
 | `internal/eval/` | Retrieval-effectiveness eval (recall@k / near-miss rate over the real `search_experience` pull path) — the evidence gate for the store. Cheap, deterministic, no LLM. | §8, [11](adr/ADR-0011-corpus-growth-and-validation-engine.md) §6 |
+| `internal/similarity/` | Word-shingle (n-gram) overlap — `Shingles`/`Assess`. The optional ADR-0011 §5 net that flags authored prose running near-verbatim to a supplied reference. A lead for review, never an auto-reject. Pure core; stdlib only. | [11](adr/ADR-0011-corpus-growth-and-validation-engine.md) §5 |
 
 ## Entry points — `cmd/twiceshy <subcommand>`
 
@@ -75,6 +76,7 @@ Dispatch is the `switch args[0]` in `cmd/twiceshy/main.go` (~L197).
 | `gold-add` | Turn an audit-miss record into one `gold.yaml` judge-eval case (#0058, `runGoldAdd`). |
 | `judge-eval` | Drive the diverse-model judge against the labelled gold set (#0028, `runJudgeEval`). |
 | `self-audit` | Dogfood twiceshy on its own dependencies (#0014, `runSelfAudit`). |
+| `similarity` | Flag an authored record's prose as near-verbatim to a supplied reference — the ADR-0011 §5 net (#0090, `runSimilarity`). Advisory lead, exits 0. |
 
 ## Primary data-flow paths
 
