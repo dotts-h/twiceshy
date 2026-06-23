@@ -1,7 +1,11 @@
 # ADR-0011: Corpus growth as a live feed, with execution-validation as the moat
 
-- **Status:** Proposed (deciders: **horia** — this sets product direction and a
-  licensing call that are his to ratify, not self-accepted)
+- **Status:** Proposed overall; **§5 (the licensing reframe) is Accepted for
+  INTERNAL / single-tenant use only** (2026-06-23, decider: **horia**) — see the §5
+  DECISION note below and the [decision memo](ADR-0011-section-5-decision-memo.md).
+  This unblocks #0024 (authoring) at internal scope; the **COMMERCIAL pack stays gated**
+  on a real legal review. Phases 1–3 proceed; phase 4 + any commercial pack remain
+  gated. (Deciders: **horia** — product direction + the licensing call, his to ratify.)
 - **Grounding:** [CORPUS_GROWTH_RESEARCH.md](../research/CORPUS_GROWTH_RESEARCH.md)
   (off-pool research synthesis, 2026-06-18), building on
   [PLATFORM_RESEARCH.md](../research/PLATFORM_RESEARCH.md) and
@@ -83,7 +87,14 @@ execution-validation engine that makes "validated" *mean* "we ran it and it hold
      care) and an optional similarity check. This ADR is **not legal advice**; because the
      commercial-pack cleanliness (ADR-0002) is irreversible, sign-off should be staged:
      **OK for the internal/single-tenant corpus now; a real legal review gates any COMMERCIAL
-     pack shipping SO-derived records.** **Do not act on this clause until horia accepts it.**
+     pack shipping SO-derived records.**
+   - **DECISION (2026-06-23, horia): §5 is ACCEPTED for INTERNAL / single-tenant use only.**
+     #0024 (authoring) is unblocked at internal scope: author the topic, never the content;
+     re-derive each fact from first principles + official docs + execution; records stay
+     `source = authored+validated`, and no SO / issue-tracker / blog text is ever ingested,
+     stored, quoted, or closely paraphrased. The **COMMERCIAL pack remains gated** on a real
+     legal review (the ADR-0002 irreversibility is unchanged). Rationale, the legal theory,
+     and the residual-risk mitigations are in the [decision memo](ADR-0011-section-5-decision-memo.md).
 
 6. **Prove the value with the eval (#0005).** Build a GitChameleon-style execution
    harness measuring agent task success **with vs without** twiceshy retrieval. This both

@@ -46,11 +46,13 @@ Two content sources, both currently choked:
   (fixed by #0087), and `record_experience` had a body-drop bug.
 - **Authoring (#0024)** — re-derive a known problem class from first principles + official
   docs + an executed test (the test is the licensing firewall), author *original* traps.
-  This is the engine that fills a domain in days not months — and it is **⛔ GATED on
-  horia's ADR-0011 §5 sign-off.** Unblocking it (even scoped internal-only) is the single
-  highest-leverage move for this issue.
+  This is the engine that fills a domain in days not months — and it is **✅ UNBLOCKED for
+  internal scope** (ADR-0011 §5 accepted internal/single-tenant, 2026-06-23). Its remaining
+  dependency is the harness (#0020). The commercial pack stays gated on a real legal review.
 
-Plan: (1) unblock #0024 (decision); (2) fix the capture flywheel (#0087, #0089, the
-pii FP, record_experience robustness); (3) run a per-domain seeding campaign using the
-multi-agent + execution-validation machinery; (4) extend the #0005 eval into a
-coverage map per stack cell. Under #0015 (corpus growth as a live feed).
+Plan: (1) ~~unblock #0024 (decision)~~ **done — §5 accepted internal-only (2026-06-23);**
+(2) fix the capture flywheel — #0089 (done), the pii:email FP (done), #0087 error-scoped
+trigger (prototype live), record_experience robustness (remaining); (3) build the authoring
+harness (#0020) and run a per-domain seeding campaign using the multi-agent +
+execution-validation machinery; (4) extend the #0005 eval into a coverage map per stack
+cell. Under #0015 (corpus growth as a live feed).
