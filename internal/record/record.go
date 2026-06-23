@@ -135,8 +135,9 @@ type Provenance struct {
 	Valid       Validity `yaml:"valid"`
 	// SourceLicense and SourceURL are additive, optional importer-provenance
 	// fields (ADR-0003 §4): they let the pack builder mechanically keep
-	// commercial packs license-clean. SourceLicense is an SPDX id or the
-	// SourceLicenseFactsOnly sentinel; both are omitted when empty.
+	// commercial packs license-clean. SourceLicense is an SPDX id, the
+	// SourceLicenseFactsOnly sentinel, or the SourceLicenseAuthoredInternal
+	// sentinel (ADR-0011 §5, internal-only); all are omitted when empty.
 	SourceLicense string  `yaml:"source_license,omitempty"`
 	SourceURL     string  `yaml:"source_url,omitempty"`
 	SupersededBy  *string `yaml:"superseded_by"`
@@ -166,6 +167,17 @@ type Provenance struct {
 // distills only non-copyrightable facts (no third-party expression), so it
 // carries no license obligation. (ADR-0003 §4)
 const SourceLicenseFactsOnly = "none (facts only)"
+
+// SourceLicenseAuthoredInternal is the source_license sentinel for a record
+// authored under ADR-0011 §5: the *topic* came from public awareness (Stack
+// Overflow / issue trackers / blogs / model training) but the fact was
+// independently re-derived from first principles + official docs + execution and
+// written in our own words with original tests — no third-party text or snippet
+// is ever ingested or distilled, so such a record carries no source_url. §5 is
+// accepted for the INTERNAL / single-tenant corpus only; the commercial pack
+// stays gated on a real legal review, so the pack builder keeps these out of
+// commercial packs (pack.Classify, fail-closed). (ADR-0011 §5, extends ADR-0003 §4)
+const SourceLicenseAuthoredInternal = "none (authored, internal-only)"
 
 type Source struct {
 	Author  string  `yaml:"author"`
@@ -750,8 +762,8 @@ func (r *Record) validateProvenance(fail func(string, ...any)) {
 			checkDate(fail, "provenance.usage.last_hit", *u.LastHit)
 		}
 	}
-	if lic := p.SourceLicense; lic != "" && lic != SourceLicenseFactsOnly && !reSPDX.MatchString(lic) {
-		fail("provenance.source_license %q is not an SPDX id or %q", lic, SourceLicenseFactsOnly)
+	if lic := p.SourceLicense; lic != "" && lic != SourceLicenseFactsOnly && lic != SourceLicenseAuthoredInternal && !reSPDX.MatchString(lic) {
+		fail("provenance.source_license %q is not an SPDX id, %q, or %q", lic, SourceLicenseFactsOnly, SourceLicenseAuthoredInternal)
 	}
 	if u := p.SourceURL; u != "" && !reHTTPURL.MatchString(u) {
 		fail("provenance.source_url %q is not an http(s) URL", u)

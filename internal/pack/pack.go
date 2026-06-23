@@ -59,6 +59,11 @@ func Classify(sourceLicense string) Eligibility {
 		return Eligibility{Commercial: true, Reason: "twiceshy-authored (no external source)"}
 	case record.SourceLicenseFactsOnly:
 		return Eligibility{Commercial: true, Reason: "distilled facts only — no license obligation"}
+	case record.SourceLicenseAuthoredInternal:
+		// ADR-0011 §5: the fact was re-derived from a public-awareness topic for the
+		// INTERNAL corpus only; the commercial pack stays gated on a real legal
+		// review. Fail-closed — these never ship in a commercial pack until then.
+		return Eligibility{Reason: "§5-authored, internal-only — pending commercial legal review (ADR-0011 §5)"}
 	}
 
 	low := strings.ToLower(s)
