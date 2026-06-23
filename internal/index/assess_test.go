@@ -4,6 +4,7 @@ package index_test
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/dotts-h/twiceshy/internal/index"
@@ -64,6 +65,12 @@ func TestAssessSimilarOnLexicalNearMatch(t *testing.T) {
 	}
 	if len(a.Candidates) == 0 || a.Candidates[0].ID != "exp-0010" {
 		t.Fatalf("want exp-0010 as the top lead, got %+v", a.Candidates)
+	}
+	// Exactly the single relevant lead: the unrelated cargo record (exp-0011)
+	// must NOT be injected as a second lead by a floor/ranking regression. This
+	// subsumes both the "exp-0011 absent" and the <=MaxK cap checks.
+	if len(a.Candidates) != 1 {
+		t.Fatalf("only exp-0010 should clear the floor; unrelated exp-0011 must be absent, got %+v", a.Candidates)
 	}
 	for _, c := range a.Candidates {
 		if c.Matched != index.MatchedLexical {
@@ -240,7 +247,17 @@ func TestAssessDeterministic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Assess: %v", err)
 	}
-	if a.Novelty != b.Novelty || len(a.Candidates) != len(b.Candidates) {
+	// Pin the reproducible-verdict property: same Novelty AND the same ordered
+	// candidate identities (ID + Matched kind), not merely the same count — two
+	// different candidate sets of equal length must NOT pass as deterministic.
+	ids := func(hs []index.Hit) []string {
+		out := make([]string, len(hs))
+		for i, h := range hs {
+			out[i] = h.ID + "|" + h.Matched
+		}
+		return out
+	}
+	if a.Novelty != b.Novelty || !reflect.DeepEqual(ids(a.Candidates), ids(b.Candidates)) {
 		t.Errorf("non-deterministic: %+v vs %+v", a, b)
 	}
 }

@@ -349,7 +349,9 @@ func TestRun_RunnerErrorIsNotGreen(t *testing.T) {
 func TestRun_TimeoutForcesKillAndFlags(t *testing.T) {
 	s := &stubRunner{responder: func(rc recordedCall) (execResult, error) {
 		if rc.isRunPhase("-execute") {
-			return execResult{timedOut: true, exitCode: -1}, context.DeadlineExceeded
+			// Return a NON-(-1) exit code so the watchdog override (broker.go:373)
+			// is observable: if the override were skipped, ExitCode would stay 137.
+			return execResult{timedOut: true, exitCode: 137}, context.DeadlineExceeded
 		}
 		// Any label sweep finds the wedged execute container.
 		if len(rc.args) >= 2 && rc.args[0] == "ps" {
@@ -358,12 +360,25 @@ func TestRun_TimeoutForcesKillAndFlags(t *testing.T) {
 		return execResult{}, nil
 	}}
 	b := newTestBroker(s)
+	// Run must SWALLOW the runner's DeadlineExceeded: the override normalizes the
+	// killed CLI into a clean PhaseResult, it does not propagate the error (the
+	// t.Fatalf below is that assertion).
 	res, err := b.Run(context.Background(), goodJob())
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if !res.Execute.TimedOut {
 		t.Error("expected TimedOut on execute")
+	}
+	// The override (broker.go:373) forces ExitCode=-1 — overwriting the stub's 137
+	// — so the revalidator reads the killed phase as broken, not as the stub's code.
+	if res.Execute.ExitCode != -1 {
+		t.Errorf("execute exit=%d, want forced -1 on timeout", res.Execute.ExitCode)
+	}
+	// The deadline error is copied into Stderr (broker.go:374-376) because the stub
+	// returned empty stderr alongside a non-nil err.
+	if res.Execute.Stderr != context.DeadlineExceeded.Error() {
+		t.Errorf("execute stderr=%q, want the deadline error copied in", res.Execute.Stderr)
 	}
 	// Watchdog must sweep this run's containers by label and force-remove them,
 	// not wait for the next reaper pass.
@@ -378,6 +393,71 @@ func TestRun_TimeoutForcesKillAndFlags(t *testing.T) {
 	}) {
 		t.Error("expected force-kill (rm -f) of the swept timed-out container")
 	}
+}
+
+// phaseTimeout (broker.go:484-489) returns Job.Timeout when set, else the broker
+// default (limits.Timeout). Both branches feed the per-phase wall-clock cap that
+// is part of the sandbox safety story, so both must be pinned. The assertion is
+// scoped to the phase calls that route through phaseTimeout — populate, prepare,
+// execute — never the volume-create/info/rm calls (those legitimately use
+// limits.Timeout/healthTimeout/30s and would false-fail).
+func TestRun_PhaseTimeoutHonorsJobOverrideElseLimit(t *testing.T) {
+	isPhase := func(c recordedCall) bool {
+		return c.isRunPhase("-populate") || c.isRunPhase("-prepare") || c.isRunPhase("-execute")
+	}
+
+	t.Run("job override wins", func(t *testing.T) {
+		s := &stubRunner{}
+		b := newTestBroker(s)
+		j := goodJob()
+		j.Timeout = 5 * time.Second
+		if _, err := b.Run(context.Background(), j); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		var seen int
+		for _, c := range s.calls {
+			if !isPhase(c) {
+				continue
+			}
+			seen++
+			if c.timeout != 5*time.Second {
+				t.Errorf("phase %q timeout=%v, want job override 5s", c.phaseName(), c.timeout)
+			}
+		}
+		if seen != 3 {
+			t.Fatalf("expected 3 phase calls through phaseTimeout, saw %d", seen)
+		}
+	})
+
+	t.Run("falls back to limits.Timeout when unset", func(t *testing.T) {
+		// A distinct, non-default value (7s, vs DefaultLimits' 3m) proves the default
+		// branch reads limits.Timeout rather than a hardcoded constant.
+		s := &stubRunner{}
+		b := newTestBroker(s, WithLimits(Limits{
+			Memory:    DefaultLimits.Memory,
+			CPUs:      DefaultLimits.CPUs,
+			PidsLimit: DefaultLimits.PidsLimit,
+			TmpfsSize: DefaultLimits.TmpfsSize,
+			Timeout:   7 * time.Second,
+		}))
+		j := goodJob() // Timeout unset (0) → default branch
+		if _, err := b.Run(context.Background(), j); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		var seen int
+		for _, c := range s.calls {
+			if !isPhase(c) {
+				continue
+			}
+			seen++
+			if c.timeout != 7*time.Second {
+				t.Errorf("phase %q timeout=%v, want limits.Timeout 7s", c.phaseName(), c.timeout)
+			}
+		}
+		if seen != 3 {
+			t.Fatalf("expected 3 phase calls through phaseTimeout, saw %d", seen)
+		}
+	})
 }
 
 func TestRun_CleanupAlwaysRemovesVolume(t *testing.T) {

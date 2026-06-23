@@ -3,9 +3,12 @@
 package notify_test
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -62,4 +65,32 @@ func TestHeartbeat_FailureIsNonFatal(t *testing.T) {
 	srv.Close()
 
 	notify.Heartbeat(context.Background(), srv.URL, nil)
+}
+
+// A reachable monitor returning a non-2xx status must be swallowed (never
+// propagated) AND logged at Warn. This exercises Heartbeat's live non-2xx branch
+// (notify.go), distinct from the connection-refused transport-error branch above,
+// by wiring a real logger to a buffer. The non-2xx log line emits only "status"
+// (no "event" key — notify.go), so we assert on the message and status only.
+func TestHeartbeat_Non2xxIsLoggedNotFatal(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close() // NOT closed — the server is live and answers 500.
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	notify.Heartbeat(context.Background(), srv.URL, logger)
+
+	got := buf.String()
+	for _, want := range []string{
+		"level=WARN",
+		"heartbeat returned non-2xx",
+		"status=500",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("non-2xx heartbeat must log %q at Warn, got log: %q", want, got)
+		}
+	}
 }

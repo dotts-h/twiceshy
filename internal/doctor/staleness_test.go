@@ -43,6 +43,19 @@ func ids(r doctor.Report) []string {
 	return out
 }
 
+// findOne returns the (single) Finding for id, or fails. It lets a test assert on
+// the human-actionable Issue/Proposal payload, not just which record was flagged.
+func findOne(t *testing.T, r doctor.Report, id string) doctor.Finding {
+	t.Helper()
+	for _, f := range r.Findings {
+		if f.RecordID == id {
+			return f
+		}
+	}
+	t.Fatalf("no finding for %s in %v", id, r.Findings)
+	return doctor.Finding{}
+}
+
 func TestStaleness_FlagsPastValidUntil(t *testing.T) {
 	d := doctor.NewStaleness(nil, fixedNow)
 	recs := []*record.Record{
@@ -56,6 +69,16 @@ func TestStaleness_FlagsPastValidUntil(t *testing.T) {
 	}
 	if got := ids(rep); len(got) != 1 || got[0] != "0001" {
 		t.Fatalf("valid.until flags = %v, want [0001]", got)
+	}
+	// The Issue must carry the offending date and the signal-1 wording; the
+	// Proposal must propose the stale transition. A bug that emitted the wrong
+	// signal's text or dropped the date would pass an ids()-only check.
+	f := findOne(t, rep, "0001")
+	if !strings.Contains(f.Issue, "2020-01-01") || !strings.Contains(f.Issue, "in the past") {
+		t.Fatalf("signal-1 Issue = %q, want the date + \"in the past\"", f.Issue)
+	}
+	if !strings.Contains(f.Proposal, "set status: stale") {
+		t.Fatalf("signal-1 Proposal = %q, want it to propose the stale transition", f.Proposal)
 	}
 }
 
@@ -73,6 +96,54 @@ func TestStaleness_FlagsEOLFixedCycle(t *testing.T) {
 	rep, _ := d.Run(context.Background(), recs)
 	if got := ids(rep); len(got) != 1 || got[0] != "0001" {
 		t.Fatalf("EOL flags = %v, want [0001]", got)
+	}
+	// Signal-2's Issue names the EOL cycle; its Proposal carries the
+	// signal-2-distinct "out of use" wording (both signals' proposals contain
+	// "stale", so keying only on "stale" would be a weak assertion). A swap of the
+	// two signals' messages would pass an ids()-only check.
+	f := findOne(t, rep, "0001")
+	if !strings.Contains(f.Issue, "end-of-life") || !strings.Contains(f.Issue, "1.16") {
+		t.Fatalf("signal-2 Issue = %q, want \"end-of-life\" + the cycle", f.Issue)
+	}
+	if !strings.Contains(f.Proposal, "out of use") {
+		t.Fatalf("signal-2 Proposal = %q, want the \"out of use\" wording", f.Proposal)
+	}
+}
+
+// When BOTH signals fire (a past valid.until AND an EOL Fixed cycle), signal 1
+// wins — wouldFlag returns on the valid.until match before staleByEOL runs
+// (staleness.go early-return order). Pins that the reported finding is signal 1's.
+func TestStaleness_PastValidUntilWinsOverEOL(t *testing.T) {
+	eol := stubEOL{"go": {{Cycle: "1.16", EOL: "2022-08-01"}}}
+	d := doctor.NewStaleness(eol, fixedNow)
+	// Empty Package → runtime, so signal 2 (EOL 1.16) would also fire on its own.
+	r := recWith("0001", []record.AppliesTo{{Ecosystem: "Go", Versions: &record.VersionRange{Fixed: ptr("1.16.0")}}}, ptr("2020-01-01"))
+	rep, _ := d.Run(context.Background(), []*record.Record{r})
+	if got := ids(rep); len(got) != 1 || got[0] != "0001" {
+		t.Fatalf("both-signals flags = %v, want [0001]", got)
+	}
+	f := findOne(t, rep, "0001")
+	if !strings.Contains(f.Issue, "valid.until") {
+		t.Fatalf("both signals present: want the valid.until message (signal 1 wins), got %q", f.Issue)
+	}
+}
+
+// The eol:true sentinel end-to-end: endoflife normalizes `eol:true` (already EOL,
+// no date) to the literal "0001-01-01" (endoflife.go normalized()). Pin that
+// staleByEOL actually FLAGS a Cycle carrying that sentinel — the exact "definitely
+// past, no date" case the sentinel exists for. The record uses a runtime package
+// (io/ioutil) so isRuntimePackage returns true; a domain path would be skipped.
+func TestStaleness_FlagsEOLTrueSentinel(t *testing.T) {
+	eol := stubEOL{"go": {{Cycle: "1.16", EOL: "0001-01-01"}}} // == endoflife.go's eol:true sentinel
+	d := doctor.NewStaleness(eol, fixedNow)
+	rec := recWith("0001", []record.AppliesTo{{Ecosystem: "Go", Package: "io/ioutil", Versions: &record.VersionRange{Fixed: ptr("1.16.0")}}}, nil)
+	rep, _ := d.Run(context.Background(), []*record.Record{rec})
+	if got := ids(rep); len(got) != 1 || got[0] != "0001" {
+		t.Fatalf("eol:true-sentinel flags = %v, want [0001]", got)
+	}
+	f := findOne(t, rep, "0001")
+	if !strings.Contains(f.Issue, "end-of-life") {
+		t.Fatalf("sentinel finding Issue = %q, want the signal-2 end-of-life message", f.Issue)
 	}
 }
 

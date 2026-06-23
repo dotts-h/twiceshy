@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewModelAnalyzer_RequiresEndpointAndModel(t *testing.T) {
@@ -73,6 +74,39 @@ func TestModelAnalyzer_ErrorsAreNotSilentlyEmpty(t *testing.T) {
 				t.Error("want error, got nil (a bad response must never read as 'no traps')")
 			}
 		})
+	}
+}
+
+// A context cancelled mid-request must surface as an error, never as empty
+// candidates — the caller leaves the transcript queued for retry (analyzer.go:
+// "never treats the error as 'no traps'"). Exercises the transport-error branch
+// (model.go: a.client.Do error), the same invariant as an unreachable endpoint.
+func TestModelAnalyzer_CancelledContextErrors(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Block until the client's context is cancelled (or the test releases us),
+		// so the cancellation — not a fast response — decides the outcome.
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	a, _ := NewModelAnalyzer(ModelConfig{Endpoint: srv.URL, Model: "gpt-oss:20b", Client: srv.Client()})
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		// Cancel shortly after Analyze starts the request, while the handler blocks.
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+	got, err := a.Analyze(ctx, "x")
+	if err == nil {
+		t.Fatalf("cancelled request returned nil error and %d candidates; a cancelled/unreachable endpoint must never read as 'no traps'", len(got))
+	}
+	if got != nil {
+		t.Errorf("cancelled request returned candidates %+v, want nil", got)
 	}
 }
 

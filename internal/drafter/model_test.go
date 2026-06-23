@@ -76,6 +76,55 @@ func TestModelDrafter_DraftsFromModelOutput(t *testing.T) {
 	}
 }
 
+// TestModelDrafter_RequestContract pins the Ollama request the drafter builds:
+// POST to /api/chat with Content-Type application/json, the configured model,
+// stream:false, format:"json", and — the load-bearing reproducibility guarantee —
+// options.temperature == 0. The other model tests use a stub that ignores the
+// request, so without this a regression (wrong path/method, or a dropped
+// temperature:0 yielding non-deterministic drafts) would go uncaught.
+func TestModelDrafter_RequestContract(t *testing.T) {
+	root := t.TempDir()
+	var gotMethod, gotPath, gotCT string
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotCT = r.Method, r.URL.Path, r.Header.Get("Content-Type")
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"message": map[string]string{"role": "assistant", "content": `{"check":"SA1019","trap":"package main\nfunc main(){}\n","fix":"package main\nfunc main(){}\n"}`},
+			"done":    true,
+		})
+	}))
+	t.Cleanup(srv.Close)
+	d := drafter.NewModelDrafter(srv.URL, "qwen2.5-coder:14b")
+	rec := goDeprecationRecord("exp-7099", "os", "SA1019: os.SEEK_SET deprecated")
+	if _, err := d.Draft(context.Background(), root, rec); err != nil {
+		t.Fatalf("Draft: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/api/chat" {
+		t.Errorf("path = %q, want /api/chat", gotPath)
+	}
+	if gotCT != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", gotCT)
+	}
+	if body["model"] != "qwen2.5-coder:14b" {
+		t.Errorf("model = %v", body["model"])
+	}
+	if body["stream"] != false {
+		t.Errorf("stream = %v, want false", body["stream"])
+	}
+	if body["format"] != "json" {
+		t.Errorf("format = %v, want json", body["format"])
+	}
+	// reproducibility contract: temperature MUST be 0 (JSON number decodes as float64).
+	opts, _ := body["options"].(map[string]any)
+	if temp, ok := opts["temperature"].(float64); !ok || temp != 0 {
+		t.Errorf("options.temperature = %v, want 0", opts["temperature"])
+	}
+}
+
 func TestModelDrafter_ThirdPartyRequireWarmed(t *testing.T) {
 	root := t.TempDir()
 	draftJSON := `{"check":"SA1019",` +
@@ -98,6 +147,48 @@ func TestModelDrafter_ThirdPartyRequireWarmed(t *testing.T) {
 	}
 	if !strings.Contains(string(prep), "go mod") {
 		t.Errorf("prepare.sh should warm the 3rd-party module:\n%s", prep)
+	}
+}
+
+// A fix_require for a bare stdlib name (no dot in the path) must be rejected as a
+// skip: emitting `require io vX` would make `go mod tidy` fail in prepare and burn a
+// broker run. An incomplete require (missing version) is likewise rejected. Both are
+// memory-poisoning-adjacent — the model output is untrusted.
+func TestModelDrafter_StdlibFixRequireRejected(t *testing.T) {
+	cases := []struct {
+		name    string
+		require string // the fix_requires JSON array element
+	}{
+		{
+			// path "io" has no dot → not a module path.
+			name:    "stdlib path without a dot",
+			require: `{"path":"io","version":"v1.0.0"}`,
+		},
+		{
+			// version "" → incomplete require (model.go:177-179).
+			name:    "incomplete require missing version",
+			require: `{"path":"golang.org/x/text","version":""}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			draftJSON := `{"check":"SA1019",` +
+				`"trap":"package main\nfunc main(){}\n",` +
+				`"fix":"package main\nfunc main(){}\n",` +
+				`"fix_requires":[` + tc.require + `]}`
+			srv := ollamaStub(t, draftJSON, 200)
+			d := drafter.NewModelDrafter(srv.URL, "m")
+			rec := goDeprecationRecord("exp-7012", "strings", "SA1019: deprecated")
+
+			if _, err := d.Draft(context.Background(), root, rec); !errors.Is(err, drafter.ErrUnsupported) {
+				t.Fatalf("a poisoned fix_require must be ErrUnsupported, got %v", err)
+			}
+			// The validation short-circuits before any write.
+			if entries, _ := os.ReadDir(filepath.Join(root, "experience", "repro")); len(entries) != 0 {
+				t.Errorf("nothing should be written for a rejected fix_require; got %d entries", len(entries))
+			}
+		})
 	}
 }
 

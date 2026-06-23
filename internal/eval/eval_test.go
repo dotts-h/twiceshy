@@ -49,6 +49,39 @@ func TestCases_DerivesFromSignaturesAndSummary(t *testing.T) {
 	}
 }
 
+// Cases must exclude non-validated records entirely (quarantined/disputed are
+// unretrievable by design — letting them into the eval would inflate recall
+// against records an agent can never pull, masking a real gap) and must skip
+// empty/whitespace-only signatures. Exercises eval.go's status filter and
+// blank-signature skip, both untested by TestCases_DerivesFromSignaturesAndSummary.
+func TestCases_FiltersStatusAndBlankSignatures(t *testing.T) {
+	recs := []*record.Record{
+		// quarantined record with a real symptom+signatures: must yield ZERO cases
+		{ID: "exp-q", Kind: "trap", Status: "quarantined",
+			Symptom: &record.Symptom{Summary: "pool dries", ErrorSignatures: []string{"boom"}}},
+		// disputed too, for good measure
+		{ID: "exp-d", Kind: "trap", Status: "disputed",
+			Symptom: &record.Symptom{Summary: "x", ErrorSignatures: []string{"y"}}},
+		// validated record whose signatures include blank/whitespace-only entries: those drop
+		{ID: "exp-v", Kind: "trap", Status: "validated",
+			Symptom: &record.Symptom{Summary: "real summary",
+				ErrorSignatures: []string{"", "  ", "real sig"}}},
+	}
+	cases := eval.Cases(recs)
+	// only exp-v contributes: 1 non-blank signature + 1 summary = 2 cases.
+	if len(cases) != 2 {
+		t.Fatalf("want 2 cases, got %d: %+v", len(cases), cases)
+	}
+	for _, c := range cases {
+		if c.RecordID != "exp-v" {
+			t.Errorf("non-validated record leaked into eval: %q", c.RecordID)
+		}
+		if strings.TrimSpace(c.Query) == "" {
+			t.Errorf("blank signature became a case: %q", c.Query)
+		}
+	}
+}
+
 // stubSearcher returns a programmed hit list per query.
 type stubSearcher struct{ byQuery map[string][]string }
 

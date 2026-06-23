@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -260,23 +261,55 @@ func TestPushRejectsEmptyQuery(t *testing.T) {
 	}
 }
 
+// TestPushCapsAtThreeCards exercises the k≤3 hard cap (ADR-0001 §3, index.MaxK)
+// through the path that CAN serve more than 3 candidates: the fingerprint-exact
+// bypass. Five validated records share the SAME error signature; querying that
+// exact signature makes fingerprint.Generic hash identically for all five, so the
+// gate is bypassed and all five are fingerprint-exact candidates — yet Retrieve
+// must clamp the served set to exactly MaxK. Asserting == 3 (not just "> 3 false")
+// proves the cap actually clamped 5 down to 3 rather than passing vacuously on an
+// all-floored, zero-hit corpus.
 func TestPushCapsAtThreeCards(t *testing.T) {
+	const sharedSig = "panic: widget calibration drift exploded near offset 7"
 	var recs []*record.Record
 	for i := range 5 {
 		n := 20 + i
-		recs = append(recs, mkServerRecord(t, n,
+		rec := mkServerRecord(t, n,
 			"Shared lexical topic about widget calibration drift",
-			"widget calibration drifts when the shared lexical topic appears"))
+			"widget calibration drifts when the shared lexical topic appears")
+		rec.Symptom.ErrorSignatures = []string{sharedSig}
+		recs = append(recs, rec)
 	}
 	ts := newTestServerWith(t, recs...)
+	// The query text must equal the indexed signature so fingerprint.Generic
+	// hashes identically and the bypass fires for all five candidates.
 	resp, out := postPush(t, ts.URL, token, map[string]string{
-		"query": "widget calibration drifts shared lexical topic",
+		"query": sharedSig,
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	if out.Count > 3 {
-		t.Errorf("count = %d, want hard cap k≤3", out.Count)
+	if out.Count != 3 {
+		t.Errorf("count = %d, want exactly 3 (k≤3 cap clamping 5 fingerprint-exact candidates, ADR-0001 §3)", out.Count)
+	}
+	if len(out.IDs) != 3 {
+		t.Errorf("len(IDs) = %d, want 3 distinct served ids under the cap; got %v", len(out.IDs), out.IDs)
+	}
+	// The served ids must be a subset of the seeded five, with no duplicates —
+	// the cap drops candidates, it does not invent or repeat them.
+	seeded := map[string]bool{}
+	for i := range 5 {
+		seeded[fmt.Sprintf("exp-%04d", 20+i)] = true
+	}
+	seen := map[string]bool{}
+	for _, id := range out.IDs {
+		if !seeded[id] {
+			t.Errorf("served id %q is not one of the seeded fingerprint-exact records", id)
+		}
+		if seen[id] {
+			t.Errorf("served id %q appears more than once under the cap", id)
+		}
+		seen[id] = true
 	}
 }
 

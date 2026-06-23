@@ -187,6 +187,10 @@ func TestBearerAuthRejectsBadCredentials(t *testing.T) {
 		"wrong token":  "Bearer wrong",
 		"not bearer":   "Basic " + token,
 		"empty bearer": "Bearer ",
+		// Same byte-length as the real 17-byte token but differing in the last
+		// byte: this drives subtle.ConstantTimeCompare past its length check so
+		// the constant-time CONTENT comparison is the deciding factor → 401.
+		"same-length wrong token": "Bearer s3cret-test-tokeX",
 	} {
 		t.Run(name, func(t *testing.T) {
 			req, err := http.NewRequest(http.MethodPost, ts.URL, strings.NewReader("{}"))
@@ -205,6 +209,27 @@ func TestBearerAuthRejectsBadCredentials(t *testing.T) {
 				t.Errorf("status = %d, want 401", resp.StatusCode)
 			}
 		})
+	}
+}
+
+// The bearer scheme is matched case-insensitively (strings.EqualFold), so a
+// lowercase "bearer " with the correct token must NOT be rejected as auth.
+// Assert only that it is not a 401 — a bare `{}` against the MCP handler does
+// not return a clean 200, so asserting == 200 would wrongly fail.
+func TestBearerAuthAcceptsCaseFoldedScheme(t *testing.T) {
+	ts := newTestServer(t)
+	req, err := http.NewRequest(http.MethodPost, ts.URL, strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "bearer "+token) // lowercase scheme
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusUnauthorized {
+		t.Errorf("case-folded scheme must authenticate (strings.EqualFold), got 401")
 	}
 }
 

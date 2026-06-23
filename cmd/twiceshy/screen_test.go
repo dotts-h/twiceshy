@@ -16,8 +16,32 @@ func TestRunScreen_FlagsSecretAndExitsNonZero(t *testing.T) {
 	if err := runScreen(nil, strings.NewReader("agent printed "+secret), &buf); err == nil {
 		t.Fatal("want a non-nil error (non-zero exit) when a secret is present")
 	}
-	if !strings.Contains(buf.String(), "secret:") {
-		t.Errorf("want a secret flag printed; got %q", buf.String())
+	// Pin the EXACT detector, not just the "secret:" prefix: an AKIA key must flag
+	// under aws-access-key (screen rule, screen.go:37). Asserting the full
+	// "category:rule" line means a regex that stops matching AKIA keys — or relabels
+	// them under another secret rule (e.g. assigned-high-entropy) — fails here
+	// instead of silently passing on any-secret-found.
+	if !strings.Contains(buf.String(), "secret:aws-access-key") {
+		t.Errorf("want the AWS key flagged as secret:aws-access-key; got %q", buf.String())
+	}
+}
+
+// runScreen blocks ONLY on a secret. harmful-code is documented (screen.go doc,
+// internal/screen.HasSecret) as "flag but MUST NOT block" — a shell snippet like a
+// pipe-to-installer is legitimately present in a coding transcript, so the
+// SessionEnd hook must not reject it. A regression that made harmful-code blocking
+// would break that hook and ship green without this guard.
+func TestRunScreen_HarmfulCodeFlagsButDoesNotBlock(t *testing.T) {
+	// Assembled at run time so no harmful literal lands in a commit. The URL has no
+	// '@' and no RFC-1918 IP, so harmful-code:pipe-to-shell is the ONLY finding —
+	// the nil-return assertion is unambiguous (no incidental secret to block on).
+	snippet := "to bootstrap, the agent ran curl " + "https://example.com/install | sh"
+	var buf bytes.Buffer
+	if err := runScreen(nil, strings.NewReader(snippet), &buf); err != nil {
+		t.Errorf("harmful-code must flag but not block (exit zero); got %v", err)
+	}
+	if !strings.Contains(buf.String(), "harmful-code:") {
+		t.Errorf("want the harmful-code snippet flagged; got %q", buf.String())
 	}
 }
 

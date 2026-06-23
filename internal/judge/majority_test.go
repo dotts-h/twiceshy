@@ -30,6 +30,12 @@ func (s *sequenceJudge) Judge(context.Context, judge.Request) (judge.Verdict, er
 func approve() judge.Verdict { return judge.ApproveVerdict("gemini-2.5-pro") }
 func reject() judge.Verdict  { return judge.Verdict{Decision: judge.Reject} }
 
+// rejectFrom is a rejecting verdict that names its model, so a test can prove which
+// rejecting member the representative-reject selection returned.
+func rejectFrom(model string) judge.Verdict {
+	return judge.Verdict{Decision: judge.Reject, Model: model}
+}
+
 func TestMajority_StrictMajorityApproves(t *testing.T) {
 	// approve, approve, reject → 2/3 → majority approve.
 	sj := &sequenceJudge{verdicts: []judge.Verdict{approve(), approve(), reject()}}
@@ -42,6 +48,31 @@ func TestMajority_StrictMajorityApproves(t *testing.T) {
 	}
 	if !v.Approved() {
 		t.Fatalf("a 2/3 majority must return an approving verdict: %+v", v)
+	}
+	// The returned verdict must be a REAL member's approving verdict, not a synthesized
+	// one — the promotion audit records its Model (promote.go) and Checks. A regression
+	// that returned a bare Approve while staying Approved() would lose the audit detail.
+	if v.Model != "gemini-2.5-pro" {
+		t.Fatalf("representative approving verdict must preserve the member's Model, got %q", v.Model)
+	}
+	if len(v.Checks) != len(judge.Checks) {
+		t.Fatalf("representative verdict must carry the member's Checks, got %d want %d", len(v.Checks), len(judge.Checks))
+	}
+}
+
+// All votes reject (approvals==0): the representative-reject selection must return the
+// LAST-seen rejecting verdict (carrying its Model for the audit), not the zero Verdict.
+func TestMajority_AllRejectReturnsRepresentativeReject(t *testing.T) {
+	sj := &sequenceJudge{verdicts: []judge.Verdict{rejectFrom("m1"), rejectFrom("m2"), rejectFrom("m3")}}
+	v, err := judge.NewMajority(sj, 3).Judge(context.Background(), judge.Request{})
+	if err != nil {
+		t.Fatalf("judge: %v", err)
+	}
+	if v.Approved() {
+		t.Fatalf("an all-reject vote must NOT approve: %+v", v)
+	}
+	if v.Model != "m3" {
+		t.Fatalf("representative-reject must be the last-seen rejecting verdict (m3), not the zero Verdict; got Model=%q", v.Model)
 	}
 }
 

@@ -35,6 +35,44 @@ func TestPrintEffectPreview(t *testing.T) {
 	}
 }
 
+// printEffectPreview footer boundaries (main.go:963-972): the "1 of 2" case above
+// leaves both extremes untested. (a) ALL records change exercises the path where the
+// omit-unchanged branch never fires; (b) an EMPTY actions slice exercises the
+// "0 of 0 … nothing written" footer a fully-ineligible/empty run produces. An
+// off-by-one in the changed counter would slip past the single mixed-case test.
+func TestPrintEffectPreview_AllChanged(t *testing.T) {
+	actions := []promote.RecordAction{
+		{ID: "exp-0100", Outcome: "promoted", FromStatus: "quarantined", ToStatus: "validated"},
+		{ID: "exp-0101", Outcome: "promoted", FromStatus: "quarantined", ToStatus: "validated"},
+	}
+	var buf bytes.Buffer
+	printEffectPreview(&buf, "promote", actions)
+	out := buf.String()
+	if !strings.Contains(out, "exp-0100: quarantined→validated") {
+		t.Fatalf("missing exp-0100 transition; got %q", out)
+	}
+	if !strings.Contains(out, "exp-0101: quarantined→validated") {
+		t.Fatalf("missing exp-0101 transition; got %q", out)
+	}
+	if !strings.Contains(out, "promote -effect: 2 of 2") {
+		t.Fatalf("all-changed footer must read 2 of 2; got %q", out)
+	}
+}
+
+func TestPrintEffectPreview_EmptyActions(t *testing.T) {
+	var buf bytes.Buffer
+	printEffectPreview(&buf, "promote", []promote.RecordAction{})
+	out := buf.String()
+	// Exact footer, em-dash included (main.go:971): a fully-ineligible/empty run.
+	const wantFooter = "promote -effect: 0 of 0 record(s) would change status — nothing written"
+	if !strings.Contains(out, wantFooter) {
+		t.Fatalf("empty-run footer = %q, want it to contain %q", out, wantFooter)
+	}
+	if strings.Contains(out, "→") {
+		t.Fatalf("empty actions must emit no transition line; got %q", out)
+	}
+}
+
 func TestPromoteCorpus_NoOpPersist_ProducesTransitionActions(t *testing.T) {
 	recs := []*record.Record{
 		eligibleRec("exp-0100"), // promoted

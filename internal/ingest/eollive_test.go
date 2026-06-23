@@ -95,6 +95,31 @@ func TestEOLLive_EmitsPastEOLCyclesAsDeprecationDrafts(t *testing.T) {
 		t.Fatalf("signatures = %v, want [EOL:python:2.7 EOL:python:3.8] (sorted)", got)
 	}
 
+	// EOL:python:2.7 came from eol:true (boolean, no date) → the generated prose must
+	// render the "date unspecified" note, NOT leak the raw bool token ("true") or an
+	// empty "()" placeholder into any user-facing field. This is the verbatim-fact vs
+	// generated-prose boundary the importer exists to guard for the no-date branch.
+	d2 := drafts[0] // EOL:python:2.7
+	for field, text := range map[string]string{
+		"summary":    d2.Symptom.Summary,
+		"root_cause": d2.Resolution.RootCause,
+		"body":       d2.Body,
+	} {
+		if !strings.Contains(text, "date unspecified") {
+			t.Errorf("%s %q must carry the no-date note %q", field, text, "date unspecified")
+		}
+		if strings.Contains(text, "true") {
+			t.Errorf("%s %q leaked the raw eol bool token \"true\"", field, text)
+		}
+		if strings.Contains(text, "()") {
+			t.Errorf("%s %q leaked an empty \"()\" date placeholder", field, text)
+		}
+	}
+	// The fix prose for a date-unknown EOL cycle must still advise a supported release.
+	if d2.Resolution == nil || !strings.Contains(d2.Resolution.Fix, "supported") {
+		t.Errorf("boolean-EOL fix should advise upgrading to a supported release: %+v", d2.Resolution)
+	}
+
 	d := drafts[1] // EOL:python:3.8
 	if d.Kind != "fix" {
 		t.Errorf("kind = %q, want fix", d.Kind)

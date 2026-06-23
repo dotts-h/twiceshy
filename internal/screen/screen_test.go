@@ -121,6 +121,47 @@ func TestScan_DetectsPII(t *testing.T) {
 	}
 }
 
+func TestExecutionHazards_KeepsSecretAndHarmfulCodeDropsPII(t *testing.T) {
+	// The calibrated execute-gate (screen.go): a repro is unsafe to EXECUTE if it
+	// embeds a secret or a harmful-code sequence, but PII (an email / private IP a
+	// fixture may legitimately carry) is an ingestion concern, not an execution one
+	// and must be DROPPED here. Exercised directly so a regression that let pii
+	// through (refusing benign repros) or dropped harmful-code (executing a reverse
+	// shell) is caught at this unit's level, not only transitively via the broker.
+	in := []screen.Finding{
+		{Category: "secret", Rule: "aws-access-key"},
+		{Category: "harmful-code", Rule: "reverse-shell-devtcp"},
+		{Category: "pii", Rule: "email"},
+	}
+	out := screen.ExecutionHazards(in)
+	if len(out) != 2 {
+		t.Fatalf("ExecutionHazards kept %d findings, want 2 (secret+harmful-code): %+v", len(out), out)
+	}
+	if !hasRule(out, "secret", "aws-access-key") {
+		t.Errorf("ExecutionHazards dropped the secret finding: %+v", out)
+	}
+	if !hasRule(out, "harmful-code", "reverse-shell-devtcp") {
+		t.Errorf("ExecutionHazards dropped the harmful-code finding: %+v", out)
+	}
+	if hasRule(out, "pii", "email") {
+		t.Errorf("ExecutionHazards kept a pii finding, want it dropped: %+v", out)
+	}
+}
+
+func TestExecutionHazards_EmptyAndNil(t *testing.T) {
+	if out := screen.ExecutionHazards(nil); len(out) != 0 {
+		t.Errorf("ExecutionHazards(nil) = %+v, want empty", out)
+	}
+	// A slice of only-pii findings yields nothing executable.
+	piiOnly := []screen.Finding{
+		{Category: "pii", Rule: "email"},
+		{Category: "pii", Rule: "private-ip"},
+	}
+	if out := screen.ExecutionHazards(piiOnly); len(out) != 0 {
+		t.Errorf("ExecutionHazards(pii-only) = %+v, want empty", out)
+	}
+}
+
 func TestScan_RedactionNeverLeaksSecret(t *testing.T) {
 	secret := "AKIAIOSFODNN7EXAMPLE"
 	fs := screen.Scan("key=" + secret)

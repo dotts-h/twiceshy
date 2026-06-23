@@ -231,7 +231,7 @@ func TestParseRejections(t *testing.T) {
 		wantErr string
 	}{
 		{"unknown schema version", set(2, "schema_version"), fmPath, "schema_version"},
-		{"malformed id", set("expp-42", "id"), fmPath, "id"},
+		{"malformed id", set("expp-42", "id"), fmPath, "does not match ^exp-[0-9]{4,}$"},
 		{"unknown kind", set("oops", "kind"), fmPath, "kind"},
 		{"unknown status", set("trusted", "status"), fmPath, "status"},
 		{"missing title", del("title"), fmPath, "title"},
@@ -315,10 +315,18 @@ func TestLoadCorpusForServeSkipsBadAndToleratesUnknown(t *testing.T) {
 	withUnknown := fm()
 	withUnknown["id"] = "exp-0043"
 	withUnknown["future_schema_field"] = "additive field an older server rejects"
+	// A record that PARSES leniently but fails validate(): a validated record
+	// carrying provenance.security_flags is the security-relevant poison class
+	// (validateProvenance rejects it — a flagged record cannot be promoted). The
+	// serve path must skip+report it, not abort the whole load on it.
+	flagged := fm()
+	flagged["id"] = "exp-0045"
+	flagged["provenance"].(map[string]any)["security_flags"] = []any{"prompt-injection"}
 	root := writeCorpus(t, map[string][]byte{
-		"experience/2026/0042-good-record.md":   render(t, good),
-		"experience/2026/0043-unknown-field.md": render(t, withUnknown),
-		"experience/2026/0044-broken-record.md": []byte("---\n\tnot: [valid yaml\n---\nbody text\n"),
+		"experience/2026/0042-good-record.md":    render(t, good),
+		"experience/2026/0043-unknown-field.md":  render(t, withUnknown),
+		"experience/2026/0044-broken-record.md":  []byte("---\n\tnot: [valid yaml\n---\nbody text\n"),
+		"experience/2026/0045-flagged-record.md": render(t, flagged),
 	})
 	recs, skipped, err := record.LoadCorpusForServe(root)
 	if err != nil {
@@ -331,8 +339,21 @@ func TestLoadCorpusForServeSkipsBadAndToleratesUnknown(t *testing.T) {
 	if !ids["exp-0042"] || !ids["exp-0043"] {
 		t.Fatalf("both the good and the unknown-field record must be served, got %v", ids)
 	}
-	if len(skipped) != 1 || !strings.Contains(skipped[0], "0044-broken") {
-		t.Fatalf("want exactly the malformed file skipped+reported, got %d: %v", len(skipped), skipped)
+	if ids["exp-0045"] {
+		t.Errorf("a validated record with security_flags must be skipped, not served")
+	}
+	// Two bad files: the malformed YAML (parse failure) and the semantically
+	// invalid validated+security_flags record (validate() failure). Both must be
+	// reported, neither fatal.
+	if len(skipped) != 2 {
+		t.Fatalf("want exactly 2 files skipped+reported, got %d: %v", len(skipped), skipped)
+	}
+	joined := strings.Join(skipped, "\n")
+	if !strings.Contains(joined, "0044-broken") {
+		t.Errorf("malformed file must be reported skipped, got: %v", skipped)
+	}
+	if !strings.Contains(joined, "0045-flagged") {
+		t.Errorf("validated+security_flags file must be reported skipped, got: %v", skipped)
 	}
 }
 
