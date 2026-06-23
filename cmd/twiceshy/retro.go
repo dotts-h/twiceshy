@@ -139,7 +139,7 @@ func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, r
 				dup++
 				continue
 			}
-			meta := ingest.Meta{ID: fmt.Sprintf("exp-%04d", next+1), Author: author, Now: opts.now, IncludeQuarantined: true}
+			meta := ingest.Meta{ID: record.FormatID(next + 1), Author: author, Now: opts.now, IncludeQuarantined: true}
 			if tr.SessionID != "" {
 				s := tr.SessionID
 				meta.Session = &s

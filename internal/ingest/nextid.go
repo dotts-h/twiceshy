@@ -5,8 +5,6 @@ package ingest
 import (
 	"context"
 	"fmt"
-	"strconv"
-	"strings"
 
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/record"
@@ -28,9 +26,9 @@ func NextID(ctx context.Context, ix *index.Index, corpusRoot string) (string, er
 	if err != nil {
 		return "", err
 	}
-	n, err := strconv.Atoi(strings.TrimPrefix(idxNext, "exp-"))
-	if err != nil {
-		return "", fmt.Errorf("parsing index next id %q: %w", idxNext, err)
+	n, ok := record.Num(idxNext)
+	if !ok {
+		return "", fmt.Errorf("index returned malformed next id %q", idxNext)
 	}
 	if corpusRoot != "" {
 		diskMax, err := record.MaxID(corpusRoot)
@@ -41,5 +39,5 @@ func NextID(ctx context.Context, ix *index.Index, corpusRoot string) (string, er
 			n = diskMax + 1
 		}
 	}
-	return fmt.Sprintf("exp-%04d", n), nil
+	return record.FormatID(n), nil
 }

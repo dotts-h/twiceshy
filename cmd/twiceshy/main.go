@@ -35,7 +35,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -639,8 +638,8 @@ func batchKey(d ingest.Draft) string {
 // bumpID returns the next sequential exp-NNNN id. The index is not rebuilt
 // mid-batch, so ids are advanced locally as records are created.
 func bumpID(id string) string {
-	n, _ := strconv.Atoi(strings.TrimPrefix(id, "exp-"))
-	return fmt.Sprintf("exp-%04d", n+1)
+	n, _ := record.Num(id)
+	return record.FormatID(n + 1)
 }
 
 // safeJoin joins rel under base and verifies the result stays within base —
@@ -1872,7 +1871,7 @@ func reportEvidence(report *record.Record) string {
 func maxRecordNum(recs []*record.Record) int {
 	max := 0
 	for _, r := range recs {
-		if n, err := strconv.Atoi(strings.TrimPrefix(r.ID, "exp-")); err == nil && n > max {
+		if n, ok := record.Num(r.ID); ok && n > max {
 			max = n
 		}
 	}
@@ -1917,7 +1916,7 @@ func runIntakeReports(args []string, out io.Writer) error {
 			skipped++
 			continue
 		}
-		meta := ingest.Meta{ID: fmt.Sprintf("exp-%04d", next+1), Author: rep.Author, Now: today}
+		meta := ingest.Meta{ID: record.FormatID(next + 1), Author: rep.Author, Now: today}
 		if rep.Session != "" {
 			s := rep.Session
 			meta.Session = &s
