@@ -430,6 +430,12 @@ func TestRunServeReloadsCorpusOnSIGHUP(t *testing.T) {
 // poison record is tolerated, not fatal). /readyz staying 200 (unauthenticated, as
 // in the happy-path test) is the proxy for "still serving the prior good index".
 func TestRunServeKeepsServingWhenSIGHUPReloadFails(t *testing.T) {
+	// The reload failure is injected by chmod 0 on the corpus dir, which root
+	// bypasses — so this case is a no-op under root (the CI gVisor sandbox runs as
+	// uid 0). Skip there rather than hang waiting for an alert that can't fire.
+	if os.Geteuid() == 0 {
+		t.Skip("chmod-based reload-failure injection is a no-op as root")
+	}
 	dir := tempCorpus(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
