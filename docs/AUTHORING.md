@@ -146,9 +146,13 @@ depth:
 - [ ] `twiceshy doctor revalidate` attests `holds: true`.
 - [ ] Born `quarantined`; promotion only via execution proof + human/judge gate.
 
-## Not yet built (follow-ups)
+## Tooling
 
-- **Authoring-scaffold CLI** (`twiceshy author …`) to pre-stage a record + repro
-  skeleton —
-  [#0091](issues/0091-authoring-scaffold-cli-twiceshy-author-pre-stages-a-record-repro-skeleton.md);
-  convenience; the path above works without it.
+- **`twiceshy author -id exp-NNNN -slug <slug> -title <title> [-with-negative]`**
+  ([#0091](issues/0091-authoring-scaffold-cli-twiceshy-author-pre-stages-a-record-repro-skeleton.md))
+  pre-stages a §5-clean record + repro skeleton(s) under the corpus, with the
+  authored-internal provenance already filled — the fill-in-the-blanks start of the
+  flow above. The flow works without it too.
+- **`twiceshy similarity -record <rec> -against <ref>…`**
+  ([#0090](issues/0090-authored-record-similarity-check-flag-near-verbatim-reproduction-of-public-snippets-adr-0011-5-mitigation.md))
+  is the §5 near-verbatim net (mitigation 4 above) — run it before promotion.

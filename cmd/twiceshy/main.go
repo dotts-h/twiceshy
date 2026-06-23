@@ -237,8 +237,10 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runSelfAudit(args[1:], out)
 	case "similarity":
 		return runSimilarity(args[1:], out)
+	case "author":
+		return runAuthor(args[1:], out)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, draft, promote, repromote, adapt, intake-reports, intake-issues, retro-intake, screen, report, pack, doctor, eval, usage-flush, gold-add, judge-eval, self-audit, or similarity)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, draft, promote, repromote, adapt, intake-reports, intake-issues, retro-intake, screen, report, pack, doctor, eval, usage-flush, gold-add, judge-eval, self-audit, similarity, or author)", args[0])
 	}
 }
 
