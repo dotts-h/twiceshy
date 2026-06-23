@@ -5,6 +5,8 @@ package retro
 import (
 	"context"
 	"fmt"
+
+	"github.com/dotts-h/twiceshy/internal/record"
 )
 
 // CardVerdict is the usage judgement for one served/pushed card in a session
@@ -58,18 +60,28 @@ type ConfirmHelpfuler interface {
 }
 
 // RecordHelpfulness folds a session's usage verdicts into the reinforcement signal:
-// for each card the judge marked Used (with a non-empty id), it bumps confirmed_helpful
-// via the recorder. Ignored verdicts are recorded nowhere — a served card that did not
-// help is an absent positive, not counter-evidence. It returns how many confirmations
-// were recorded; on the first recorder error it stops and returns that error with the
-// count so far, so the caller can leave the transcript for retry rather than
-// double-counting on a re-run.
+// for each card the judge marked Used, it bumps confirmed_helpful via the recorder.
+// Ignored verdicts are recorded nowhere — a served card that did not help is an absent
+// positive, not counter-evidence. It returns how many confirmations were recorded; on
+// the first recorder error it stops and returns that error with the count so far, so
+// the caller can leave the transcript for retry rather than double-counting on a re-run.
+//
+// Trust boundary: the verdicts come from a prompt-injectable model judging an UNTRUSTED
+// transcript, so an id is never written blindly. record.ValidID is the same format
+// firewall the human confirm_helpful path applies before touching the usage table — a
+// malformed/garbage/injection-shaped id (empty, whitespace, non-exp, path-shaped) is
+// dropped. Within-session dedup keeps one Used card to one confirmation even if the
+// judge repeats it. AUTHORITATIVE attribution — that the id was actually SERVED in this
+// session, not merely well-formed — is the #0067 decision-log served-set cross-check,
+// the deferred acceptance 2 of #0069 (stronger than a bare existence check).
 func RecordHelpfulness(ctx context.Context, rec ConfirmHelpfuler, verdicts []CardVerdict) (int, error) {
+	seen := make(map[string]bool)
 	recorded := 0
 	for _, v := range verdicts {
-		if !v.Used || v.ID == "" {
+		if !v.Used || !record.ValidID(v.ID) || seen[v.ID] {
 			continue
 		}
+		seen[v.ID] = true
 		if err := rec.ConfirmHelpful(ctx, v.ID); err != nil {
 			return recorded, fmt.Errorf("retro: confirm helpful %s: %w", v.ID, err)
 		}

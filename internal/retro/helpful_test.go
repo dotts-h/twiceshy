@@ -46,18 +46,42 @@ func TestRecordHelpfulness_RecordsOnlyUsed(t *testing.T) {
 	}
 }
 
-// A verdict with an empty id is skipped (a hallucinated/blank card never confirms).
-func TestRecordHelpfulness_SkipsEmptyID(t *testing.T) {
+// Trust boundary: verdict ids come from a model over an UNTRUSTED transcript, so a
+// malformed/garbage/injection-shaped id (empty, whitespace, non-exp, path-shaped) must
+// be dropped before it touches the usage table — the same record.ValidID firewall the
+// human confirm_helpful path applies. Only the well-formed exp-NNNN id is confirmed.
+func TestRecordHelpfulness_SkipsInvalidID(t *testing.T) {
 	rec := &fakeRecorder{}
 	n, err := retro.RecordHelpfulness(context.Background(), rec, []retro.CardVerdict{
 		{ID: "", Used: true},
-		{ID: "exp-0009", Used: true},
+		{ID: "   ", Used: true},
+		{ID: "exp-", Used: true},
+		{ID: "not-an-id", Used: true},
+		{ID: "../exp-0001", Used: true},
+		{ID: "exp-0009", Used: true}, // the only valid id
 	})
 	if err != nil {
 		t.Fatalf("RecordHelpfulness: %v", err)
 	}
 	if n != 1 || len(rec.ids) != 1 || rec.ids[0] != "exp-0009" {
-		t.Fatalf("recorded=%d ids=%v, want 1 [exp-0009]", n, rec.ids)
+		t.Fatalf("only the valid id confirms; recorded=%d ids=%v, want 1 [exp-0009]", n, rec.ids)
+	}
+}
+
+// A served card the judge marks Used more than once in a single session confirms
+// exactly once — within-session dedup keeps one session to one reinforcement per card.
+func TestRecordHelpfulness_DedupsWithinSession(t *testing.T) {
+	rec := &fakeRecorder{}
+	n, err := retro.RecordHelpfulness(context.Background(), rec, []retro.CardVerdict{
+		{ID: "exp-0007", Used: true},
+		{ID: "exp-0007", Used: true},
+		{ID: "exp-0007", Used: true},
+	})
+	if err != nil {
+		t.Fatalf("RecordHelpfulness: %v", err)
+	}
+	if n != 1 || len(rec.ids) != 1 || rec.ids[0] != "exp-0007" {
+		t.Fatalf("a repeated Used card confirms once; recorded=%d ids=%v, want 1 [exp-0007]", n, rec.ids)
 	}
 }
 
