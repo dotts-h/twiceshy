@@ -524,8 +524,12 @@ func importSource(name, ecosystem string) (ingest.Source, error) {
 		// endoflife.date → deprecation records for end-of-life runtimes (#0023);
 		// the default product set covers the common runtimes (unknown ones 404→skip).
 		return ingest.NewEOLLiveSource(), nil
+	case "npm-deprecation":
+		// npm registry → deprecation records for deprecated packages (#0073), the
+		// non-OSV web watcher; the default package set is curated (unknown ones 404→skip).
+		return ingest.NewNpmLiveSource(), nil
 	default:
-		return nil, fmt.Errorf("unknown ingest source %q (want: go, osv, osv-live, eol-live, py)", name)
+		return nil, fmt.Errorf("unknown ingest source %q (want: go, osv, osv-live, eol-live, npm-deprecation, py)", name)
 	}
 }
 
@@ -538,7 +542,7 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 	// stops at the first non-flag arg, so pull the source off the front before
 	// parsing (otherwise `ingest go -corpus X` would leave -corpus unparsed).
 	if len(args) < 1 {
-		return errors.New("usage: twiceshy ingest <source> [flags] (sources: go, osv, osv-live, eol-live, py)")
+		return errors.New("usage: twiceshy ingest <source> [flags] (sources: go, osv, osv-live, eol-live, npm-deprecation, py)")
 	}
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	c := addCommonFlags(fs)

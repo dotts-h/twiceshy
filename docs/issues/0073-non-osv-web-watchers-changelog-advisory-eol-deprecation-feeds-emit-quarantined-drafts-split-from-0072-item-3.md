@@ -1,12 +1,13 @@
 ---
 id: 0073
 title: Non-OSV web watchers — changelog/advisory/EOL/deprecation feeds emit quarantined drafts (split from #0072 item 3)
-status: open
+status: closed
 severity: medium
 group: 0015
 depends_on: []
 forgejo:
 links:
+  prs: [375]
   adr:
   prs: []
   issues: [0015, 0072, 0023]
@@ -36,3 +37,25 @@ invariant) is now solid enough to add sources safely.
 Adjacent to #0023 (deps.dev/endoflife importer). Relates to #0022 (scheduled
 importers), #0072 (pipeline hardening this builds on). Source-license/facts-only
 provenance (ADR-0003) applies to every ingested draft.
+
+## Resolution (done 2026-06-23)
+
+Added the first non-OSV web watcher: an **npm-deprecation** importer (deps.dev was
+never implemented; only endoflife shipped from #0023, so npm deprecation is new ground).
+
+- **`internal/ingest/npmlive.go`** (`NpmLiveSource`): checks each seed package's npm
+  `/<pkg>/latest` for a `deprecated` flag and emits a quarantined deprecation draft.
+  Mirrors `EOLLiveSource` — a `fetch` seam (tests stub it), a curated bounded package
+  seed set (unknown packages 404→skip), and the skip-junk rule for a malformed body.
+  **Facts-only (ADR-0003 §4):** only the *fact* that the latest version is deprecated +
+  the version are used; the maintainer's deprecation message is never reproduced (a test
+  enforces this) — the record points at the npm page for the notice + replacement.
+- **`twiceshy ingest npm-deprecation`** registered in `importSource`; runs the same
+  ingest ladder (dedup, born quarantined, propose-only) as the other importers.
+- Verified live: a dry run against the real registry produced 9 quarantined drafts for
+  genuinely-deprecated packages (request, node-sass, tslint, …) and skipped the
+  non-deprecated one — no message text reproduced.
+
+Acceptance met: ≥1 non-OSV watcher feeds quarantined drafts through the ladder; bounded +
+dedup'd like osv-live; never writes validated. Scheduling it on a timer (adding
+`npm-deprecation` to the scheduled-import cadence) is an ops step, like the other live importers.
