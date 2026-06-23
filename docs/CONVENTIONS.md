@@ -63,7 +63,8 @@ dep assumption from plan to implementation unchecked. (Retro 0001.)
 Every fact has exactly **one canonical home**; everywhere else **links** to it,
 never copies it. A rule lives in CONVENTIONS, a decision in an ADR, the
 vocabulary in CONTEXT, a fixed bug in REGRESSIONS, a promise in CONTRACTS, the
-roadmap in NEXT_FEATURES. Duplicating a fact across docs guarantees they drift —
+roadmap in NEXT_FEATURES, the record-authoring discipline in
+[AUTHORING](AUTHORING.md). Duplicating a fact across docs guarantees they drift —
 when something moves, update its one home and re-point the links. `CLAUDE.md` /
 `AGENTS.md` stay thin pointers into this corpus, not second copies of it.
 
