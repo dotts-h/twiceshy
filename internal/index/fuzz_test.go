@@ -17,8 +17,10 @@ import (
 // may make the retrieval path error or panic. Untrusted text must always be
 // escaped into a well-formed FTS5 query (ftsQuery). An empty result is a fine
 // answer; an error or panic is a security/robustness bug. Search, Retrieve and
-// Assess all funnel through the same ftsQuery, so the property covers the whole
-// lexical surface.
+// Assess funnel through ftsQuery; RetrievePush adds the push gate's per-token
+// validated-DF path (ftsPhrase), which the error-pull hook (#0087) makes
+// load-bearing — so the property now covers the whole lexical surface, /push
+// included.
 func FuzzSearchNeverErrors(f *testing.F) {
 	for _, s := range []string{
 		"", "   ", "index",
@@ -27,6 +29,9 @@ func FuzzSearchNeverErrors(f *testing.F) {
 		`. - / " ( ) *`, `'); DROP TABLE records; --`,
 		`a OR (b AND "c`, `***`, "\x00\x01\x02", "café   ☃ \t\n", `NEAR/5 foo`,
 	} {
+		f.Add(s)
+	}
+	for _, s := range fieldReportErrorLines { // verbatim error lines the hook sends (#0087)
 		f.Add(s)
 	}
 
@@ -53,6 +58,9 @@ func FuzzSearchNeverErrors(f *testing.F) {
 		}
 		if _, err := ix.Assess(ctx, index.Query{Text: text}); err != nil {
 			t.Fatalf("Assess(%q) errored: %v", text, err)
+		}
+		if _, err := ix.RetrievePush(ctx, index.Query{Text: text}); err != nil {
+			t.Fatalf("RetrievePush(%q) errored: %v", text, err)
 		}
 	})
 }

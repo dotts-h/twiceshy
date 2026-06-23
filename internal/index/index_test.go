@@ -127,6 +127,23 @@ func TestSearchFingerprintExactWinsOverLexical(t *testing.T) {
 
 // Guarding test for exp-0001: raw user input must be escaped before it
 // reaches FTS5 MATCH — punctuation-heavy queries are valid queries here.
+// fieldReportErrorLines are verbatim error lines from the RN/iOS field report
+// behind the error-scoped retrieval trigger (#0087). The hook hands the search
+// path the raw line, dense with FTS5-hostile punctuation (a dotted module path,
+// a scoped npm package, a CocoaPods "[!]" marker, quotes, colons); exp-0001's
+// tokenize-and-quote keeps these from being parsed as FTS5 syntax. Pinned as
+// named cases by TestSearchQuoteEscapesFTS5Input and seeded into
+// FuzzSearchNeverErrors.
+var fieldReportErrorLines = []string{
+	`TypeError: Cannot read property 'lngLat' of null`,
+	`[!] Unable to find a specification for 'RCT-Folly' depended upon by 'RNMapboxMaps'`,
+	`error: package @scope/pkg@1.2.3 failed to resolve`,
+	`panic: runtime error: invalid memory address modernc.org/sqlite`,
+	`SyntaxError: Unexpected token '<' in JSON at position 0`,
+	`Traceback (most recent call last): File "app.py", line 1, in <module>`,
+	`fatal: node.js ENOENT: no such file or directory, open './x'`,
+}
+
 func TestSearchQuoteEscapesFTS5Input(t *testing.T) {
 	ix := openIndex(t, corpus(t))
 	hostile := []string{
@@ -138,9 +155,16 @@ func TestSearchQuoteEscapesFTS5Input(t *testing.T) {
 		`. - / " ( ) *`,
 		`'); DROP TABLE records; --`,
 	}
+	// The error-pull hook (#0087) drives both Search and the /push channel with a
+	// verbatim error line, so both must survive these too. RetrievePush adds the
+	// gate's per-token validated-DF path (ftsPhrase) on top of Search.
+	hostile = append(hostile, fieldReportErrorLines...)
 	for _, q := range hostile {
 		if _, err := ix.Search(context.Background(), index.Query{Text: q}); err != nil {
 			t.Errorf("Search(%q) errored: %v", q, err)
+		}
+		if _, err := ix.RetrievePush(context.Background(), index.Query{Text: q}); err != nil {
+			t.Errorf("RetrievePush(%q) errored: %v", q, err)
 		}
 	}
 	// And escaping must not break retrieval itself.
