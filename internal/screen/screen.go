@@ -52,7 +52,10 @@ var patternRules = []sigRule{
 	// match). Loopback (127.0.0.0/8) is localhost, not PII — and Docker's embedded
 	// DNS at 127.0.0.11 appears legitimately in sandbox/repro scripts (exp-0016),
 	// so it is deliberately excluded.
-	{"pii", "email", regexp.MustCompile(`[\w.+-]+@[\w-]+\.[\w.-]+`)},
+	// Require an alphabetic TLD so an npm/JS `name@version` (e.g. react-native-fs@2.20.0,
+	// node@18.17.0) — whose final segment is numeric — is not mistaken for an email and
+	// does not block promotion of JS/RN records. A real email's TLD is letters.
+	{"pii", "email", regexp.MustCompile(`[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}`)},
 	{"pii", "private-ip", regexp.MustCompile(`\b10(?:\.\d{1,3}){3}\b|\b192\.168(?:\.\d{1,3}){2}\b`)},
 }
 

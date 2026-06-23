@@ -100,6 +100,29 @@ func TestScan_DoesNotFlagAdvisoryProseOrBenignText(t *testing.T) {
 	}
 }
 
+// An npm/JS `name@version` reads like `local@domain.tld` and was wrongly flagged
+// pii:email, blocking promotion of JS/RN records (a real email's TLD is alphabetic;
+// a version's last segment is numeric). Real emails must still flag.
+func TestScan_DoesNotFlagPackageVersionAsEmail(t *testing.T) {
+	for _, t0 := range []string{
+		"react-native-fs@2.20.0 is required",
+		"install @sayem314/react-native-keep-awake@1.0.5",
+		"use node@18.17.0 and pnpm@8.6.0",
+		"moment-timezone@0.5.35 is vulnerable",
+		"react-native@0.76.0-rc.1",
+	} {
+		if fs := screen.Scan(t0); hasRule(fs, "pii", "email") {
+			t.Errorf("npm name@version wrongly flagged pii:email on %q: %+v", t0, fs)
+		}
+	}
+	// Regression guard: real emails must still be detected.
+	for _, t0 := range []string{"reach jane.doe@example.com today", "ops+alerts@sub.domain.io", "git@github.com"} {
+		if fs := screen.Scan(t0); !hasRule(fs, "pii", "email") {
+			t.Errorf("missed a real email in %q: %+v", t0, fs)
+		}
+	}
+}
+
 func TestScan_DetectsPII(t *testing.T) {
 	if fs := screen.Scan("contact jane.doe@example.com for help"); !hasRule(fs, "pii", "email") {
 		t.Errorf("missed email; got %+v", fs)
