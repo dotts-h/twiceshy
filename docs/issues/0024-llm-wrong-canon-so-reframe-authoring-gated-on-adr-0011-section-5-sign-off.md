@@ -62,12 +62,14 @@ discipline over machinery that already shipped.
   records stay out of commercial packs until a real legal review — the same
   build-time check ADR-0003 §4 uses for copyleft. Schema pattern + Go validator +
   SCHEMA.md updated; covered by tests in `internal/pack` and `internal/record`.
-- **Worked example:** [`exp-2753`](../../experience/2026/2753-go-typed-nil-interface-not-nil.md)
+- **Worked example:** `exp-2758` in the corpus data product (`claude/twiceshy-corpus`:
+  `experience/2026/2758-go-typed-nil-interface-not-nil.md`, merged via corpus PR #26)
   — "a nil pointer returned as a Go error is not nil". Topic widely known publicly;
   description + both tests re-derived from the Go spec and written from scratch; §5
   sentinel, no `source_url`. Ships a positive + negative repro and
   **execution-validates green** through the real gVisor broker (`holds: true`,
-  `reproduced_under: [go1.25]`).
+  `reproduced_under: [go1.25]`). Authored records live in the corpus repo, not the
+  engine's frozen `experience/` (ADR-0021).
 
 Follow-ups filed (not blocking): similarity check (near-verbatim flagger) and an
 authoring-scaffold CLI — both referenced from the canon's "Not yet built".

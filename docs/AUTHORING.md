@@ -108,12 +108,14 @@ commercial pack ships these only after a real legal review changes that policy.
 
 ## Worked example
 
-[`exp-2753`](../experience/2026/2753-go-typed-nil-interface-not-nil.md) — "a nil
-pointer returned as a Go error is not nil". Topic widely known publicly; the
-description and both tests re-derived from the Go spec and written from scratch.
-It carries the §5 sentinel and no `source_url`, ships its positive + negative
-repros (`experience/repro/2753-go-typed-nil-*.sh`), and **execution-validates
-green** under the real broker (`holds: true`, `reproduced_under: [go1.25]`).
+**`exp-2758`** — "a nil pointer returned as a Go error is not nil" — lives in the
+corpus data product (`claude/twiceshy-corpus`:
+`experience/2026/2758-go-typed-nil-interface-not-nil.md`), because authored records
+go to the corpus repo, not the engine's frozen `experience/` (ADR-0021). Topic widely
+known publicly; the description and both tests re-derived from the Go spec and written
+from scratch. It carries the §5 sentinel and no `source_url`, ships positive + negative
+repros, and **execution-validates green** under the real broker (`holds: true`,
+`reproduced_under: [go1.25]`).
 
 ## Residual risk + mitigations
 
