@@ -338,6 +338,44 @@ func TestOSVLiveSource_SourceURLCrossCheck(t *testing.T) {
 				{"type": "ADVISORY", "url": "https://github.com/advisories/GHSA-aaaa-bbbb-cccc"},
 			},
 		},
+		// References list an UNRELATED GHSA FIRST, then the record's OWN GHSA — the
+		// importer must skip the unrelated one and pick the own one, not return the
+		// first GHSA it sees. This is the real #0061 Defect 4 shape (a transitive
+		// advisory's link sitting alongside the correct one) and the case a
+		// return-on-first-match regression would slip past.
+		"GO-2020-MIXED.json": map[string]any{
+			"id":      "GO-2020-MIXED",
+			"aliases": []string{"GHSA-aaaa-bbbb-cccc"},
+			"summary": "advisory whose references list an unrelated GHSA before its own",
+			"affected": []map[string]any{{
+				"package": map[string]string{"ecosystem": "Go", "name": "github.com/example/mixed"},
+				"ranges": []map[string]any{{
+					"type":   "SEMVER",
+					"events": []map[string]string{{"introduced": "0"}, {"fixed": "1.0.0"}},
+				}},
+			}},
+			"references": []map[string]string{
+				{"type": "WEB", "url": "https://github.com/advisories/GHSA-zzzz-yyyy-xxxx"},
+				{"type": "ADVISORY", "url": "https://github.com/advisories/GHSA-aaaa-bbbb-cccc"},
+			},
+		},
+		// The record's PRIMARY id is itself a GHSA (the npm/PyPI shape, where OSV's id
+		// IS the GHSA, not an alias). A reference to that same GHSA must be used — this
+		// pins the rec.ID seed of ownIDs, distinct from the alias path above.
+		"GHSA-pppp-qqqq-rrrr.json": map[string]any{
+			"id":      "GHSA-pppp-qqqq-rrrr",
+			"summary": "advisory whose primary id is a GHSA",
+			"affected": []map[string]any{{
+				"package": map[string]string{"ecosystem": "Go", "name": "github.com/example/primary"},
+				"ranges": []map[string]any{{
+					"type":   "SEMVER",
+					"events": []map[string]string{{"introduced": "0"}, {"fixed": "1.0.0"}},
+				}},
+			}},
+			"references": []map[string]string{
+				{"type": "ADVISORY", "url": "https://github.com/advisories/GHSA-pppp-qqqq-rrrr"},
+			},
+		},
 	}
 	src := ingest.NewOSVLiveSource(ingest.WithOSVLiveFetch(func(_ context.Context) (io.ReadCloser, error) {
 		return buildOSVLiveZip(t, files), nil
@@ -366,6 +404,15 @@ func TestOSVLiveSource_SourceURLCrossCheck(t *testing.T) {
 	// A reference citing the record's own GHSA alias is the correct source_url.
 	if got := srcURL("GO-2020-MATCH"); got != "https://github.com/advisories/GHSA-aaaa-bbbb-cccc" {
 		t.Errorf("matching GHSA reference should be the source_url; got %q", got)
+	}
+	// References listing an unrelated GHSA BEFORE the record's own: skip the unrelated,
+	// use the own one (not the first GHSA seen).
+	if got := srcURL("GO-2020-MIXED"); got != "https://github.com/advisories/GHSA-aaaa-bbbb-cccc" {
+		t.Errorf("mixed references must skip the unrelated GHSA and use the record's own; got %q", got)
+	}
+	// A record whose PRIMARY id is a GHSA pins the rec.ID seed of ownIDs (npm/PyPI shape).
+	if got := srcURL("GHSA-pppp-qqqq-rrrr"); got != "https://github.com/advisories/GHSA-pppp-qqqq-rrrr" {
+		t.Errorf("a reference to the record's own primary-GHSA id must be the source_url; got %q", got)
 	}
 }
 

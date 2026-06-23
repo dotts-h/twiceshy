@@ -306,8 +306,10 @@ func osvLiveRangePairs(events []osvLiveEvent) []versionInterval {
 
 // ghsaIDPattern matches a GHSA advisory id (GHSA- + three 4-char groups) anywhere in
 // a string, so the id embedded in a reference URL can be compared to the record's own
-// ids (#0061 Defect 4). GHSA ids are case-insensitive; compare lowercased.
-var ghsaIDPattern = regexp.MustCompile(`(?i)GHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}`)
+// ids (#0061 Defect 4). GHSA ids are case-insensitive; compare lowercased. Word
+// boundaries anchor the exact 4-4-4 form so a longer token (e.g.
+// "GHSA-aaaa-bbbb-ccccDEAD") cannot be truncated to a false match on the record's id.
+var ghsaIDPattern = regexp.MustCompile(`(?i)\bGHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}\b`)
 
 // osvLiveGHSAURL returns a reference URL that cites a GHSA advisory THIS record is
 // about — the GHSA id embedded in the URL must equal the record's own id or one of
