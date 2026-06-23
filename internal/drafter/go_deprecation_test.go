@@ -24,6 +24,82 @@ func goDeprecationRecord(id, pkg, diagnostic string) *record.Record {
 	}
 }
 
+// driftDiagnostic is the staticcheck-bearing signature the cataloged io/ioutil
+// template expects, reused by the applies_to-selection cases below.
+const ioutilDiagnostic = "SA1019: ioutil.ReadAll is deprecated: As of Go 1.16, this function simply calls io.ReadAll."
+
+// TestGoDeprecation_SelectsFirstGoApplesTo pins goPackage's selection rule: it
+// returns the FIRST applies_to entry whose Ecosystem EqualFold "Go" with a
+// non-empty Package — skipping non-Go entries and empty-package Go entries,
+// case-insensitively. goDeprecationRecord forces a single Go entry, so these
+// realistic multi-ecosystem shapes are built by hand.
+func TestGoDeprecation_SelectsFirstGoApplesTo(t *testing.T) {
+	d := drafter.NewGoDeprecationDrafter()
+	cases := []struct {
+		name      string
+		appliesTo []record.AppliesTo
+		wantDraft bool // true: a cataloged Go pkg is selected and drafts; false: ErrUnsupported
+	}{
+		{
+			// A leading non-Go (PyPI) entry must be SKIPPED; the lowercase "go"
+			// entry that follows is matched case-insensitively and wins.
+			name: "skips leading non-Go entry, EqualFold lowercase go",
+			appliesTo: []record.AppliesTo{
+				{Ecosystem: "PyPI", Package: "numpy"},
+				{Ecosystem: "go", Package: "io/ioutil"},
+			},
+			wantDraft: true,
+		},
+		{
+			// A leading Go entry with an EMPTY package is skipped (the a.Package != ""
+			// guard) and the next valid Go entry wins — pins skip-and-continue directly.
+			name: "skips empty-package Go entry, next valid wins",
+			appliesTo: []record.AppliesTo{
+				{Ecosystem: "Go", Package: ""},
+				{Ecosystem: "go", Package: "io/ioutil"},
+			},
+			wantDraft: true,
+		},
+		{
+			// Only an empty-package Go entry: goPackage returns "" which is not in the
+			// catalog → ErrUnsupported.
+			name: "only empty-package Go entry is unsupported",
+			appliesTo: []record.AppliesTo{
+				{Ecosystem: "Go", Package: ""},
+			},
+			wantDraft: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			rec := &record.Record{
+				ID:        "exp-0050",
+				Status:    "quarantined",
+				Path:      "experience/2026/exp-0050.md",
+				Symptom:   &record.Symptom{ErrorSignatures: []string{ioutilDiagnostic}},
+				AppliesTo: tc.appliesTo,
+			}
+			dir, err := d.Draft(context.Background(), root, rec)
+			if tc.wantDraft {
+				if err != nil {
+					t.Fatalf("Draft: %v", err)
+				}
+				if !strings.HasPrefix(dir, "experience/repro/") {
+					t.Errorf("expected a staged repro dir, got %q", dir)
+				}
+			} else {
+				if !errors.Is(err, drafter.ErrUnsupported) {
+					t.Fatalf("want ErrUnsupported, got %v", err)
+				}
+				if entries, _ := os.ReadDir(filepath.Join(root, "experience", "repro")); len(entries) != 0 {
+					t.Errorf("unsupported draft must write nothing; found %d entries", len(entries))
+				}
+			}
+		})
+	}
+}
+
 func TestGoDeprecation_DraftsCatalogedPackage(t *testing.T) {
 	root := t.TempDir()
 	d := drafter.NewGoDeprecationDrafter()
@@ -175,7 +251,23 @@ func TestGoDeprecation_DiagnosticDriftIsRejected(t *testing.T) {
 	// template's staticcheck code — the fact drifted; refuse to draft a stale repro.
 	rec := goDeprecationRecord("exp-0043", "io/ioutil", "some unrelated diagnostic with no SA code")
 
-	if _, err := d.Draft(context.Background(), root, rec); err == nil {
+	_, err := d.Draft(context.Background(), root, rec)
+	if err == nil {
 		t.Fatal("want an error when the record diagnostic doesn't match the template check")
+	}
+	// Drift is a HARD error, not a skip: it MUST NOT be ErrUnsupported, or the
+	// pipeline would silently skip a drifted record instead of propagating the
+	// fault (TestPipeline_DraftErrorPropagates depends on this distinction).
+	if errors.Is(err, drafter.ErrUnsupported) {
+		t.Errorf("diagnostic drift must be a hard error, not ErrUnsupported; got %v", err)
+	}
+	// The rendered message should name the drifted staticcheck code so the
+	// fault is diagnosable (secondary to the ErrUnsupported guard above).
+	if !strings.Contains(err.Error(), "SA1019") {
+		t.Errorf("drift error should name the template check SA1019; got %v", err)
+	}
+	// Nothing must be written when drift is detected.
+	if entries, _ := os.ReadDir(filepath.Join(root, "experience", "repro")); len(entries) != 0 {
+		t.Errorf("drifted draft must write nothing; found %d entries", len(entries))
 	}
 }

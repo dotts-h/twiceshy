@@ -61,6 +61,72 @@ replace example.com/old => example.com/new v1.0.0
 	}
 }
 
+// ParseGoMod hand-parses and claims to skip module/go/replace/exclude/retract/
+// toolchain directives. TestParseGoMod only proves module+replace are skipped;
+// this pins the rest — a parseRequire that accepted 2-field non-require lines
+// would wrongly ingest `exclude foo v1.0.0` or `replace`. Also exercises the
+// len(f)<2 drop branch and require-block edges (empty block, inline comment).
+func TestParseGoMod_SkipsNonRequireDirectives(t *testing.T) {
+	tests := map[string]struct {
+		gomod string
+		want  map[string]string
+	}{
+		"top-level non-require directives are skipped": {
+			gomod: "module github.com/dotts-h/twiceshy\n" +
+				"go 1.25.0\n" +
+				"toolchain go1.25.0\n" +
+				"retract v1.2.3\n" +
+				"exclude foo v1.0.0\n" +
+				"require foo v1.0.0\n",
+			// Only the genuine require survives: toolchain/retract/exclude/go all dropped.
+			want: map[string]string{"foo": "v1.0.0"},
+		},
+		"single-field require line is dropped (parseRequire len<2)": {
+			gomod: "require (\n" +
+				"\tbarewordnoversion\n" +
+				"\tfoo v1.0.0\n" +
+				")\n",
+			want: map[string]string{"foo": "v1.0.0"},
+		},
+		"empty require block yields no deps": {
+			gomod: "require (\n)\n",
+			want:  map[string]string{},
+		},
+		"inline comment on the require opener still opens the block": {
+			gomod: "require ( // a comment after the opener\n" +
+				"\tfoo v1.0.0\n" +
+				")\n",
+			want: map[string]string{"foo": "v1.0.0"},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			deps, err := selfaudit.ParseGoMod(strings.NewReader(tc.gomod))
+			if err != nil {
+				t.Fatalf("ParseGoMod: %v", err)
+			}
+			got := map[string]string{}
+			for _, d := range deps {
+				got[d.Path] = d.Version
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %d deps %v, want %d %v", len(got), got, len(tc.want), tc.want)
+			}
+			for p, v := range tc.want {
+				if got[p] != v {
+					t.Errorf("%s: got %q, want %q", p, got[p], v)
+				}
+			}
+			// None of the skipped directives' tokens may leak in as a dep path.
+			for _, leaked := range []string{"toolchain", "go1.25.0", "retract", "exclude", "barewordnoversion", "go"} {
+				if _, ok := got[leaked]; ok {
+					t.Errorf("non-require token %q leaked in as a dep: %v", leaked, got)
+				}
+			}
+		})
+	}
+}
+
 func TestAudit(t *testing.T) {
 	deps := []selfaudit.Dep{
 		{Path: "github.com/google/jsonschema-go", Version: "v0.4.3"},
@@ -112,6 +178,37 @@ func TestAudit(t *testing.T) {
 		recs := []*record.Record{adv(t, "exp-9003", "GHSA-gggg-hhhh-iiii", "Go", "modernc.org/sqlite", "1.0.0", nil)}
 		if hits := selfaudit.Audit(deps, recs); len(hits) != 1 {
 			t.Fatalf("v1.52.0 >= introduced 1.0.0 with no fix must be flagged; got %+v", hits)
+		}
+	})
+
+	t.Run("exactly the introduced version is flagged (inclusive lower bound)", func(t *testing.T) {
+		// The affected range is introduced <= v < fixed, so v == introduced is IN it.
+		// affected() hinges on cmpVer(v, introduced) < 0 returning false here; an
+		// off-by-one flipping `<` to `<=` would MISS a vuln at exactly introduced —
+		// the fail-unsafe direction a security monitor must never take.
+		local := []selfaudit.Dep{{Path: "modernc.org/sqlite", Version: "v1.10.0"}}
+		recs := []*record.Record{adv(t, "exp-9008", "GHSA-intr-oduc-edxx", "Go", "modernc.org/sqlite", "1.10.0", nil)}
+		if hits := selfaudit.Audit(local, recs); len(hits) != 1 {
+			t.Fatalf("v1.10.0 == introduced 1.10.0 must be flagged (inclusive lower bound); got %+v", hits)
+		}
+	})
+
+	t.Run("one patch below introduced is not flagged (below the affected range)", func(t *testing.T) {
+		local := []selfaudit.Dep{{Path: "modernc.org/sqlite", Version: "v1.9.9"}}
+		recs := []*record.Record{adv(t, "exp-9009", "GHSA-belo-wint-rodx", "Go", "modernc.org/sqlite", "1.10.0", nil)}
+		if hits := selfaudit.Audit(local, recs); len(hits) != 0 {
+			t.Fatalf("v1.9.9 < introduced 1.10.0 must NOT be flagged; got %+v", hits)
+		}
+	})
+
+	t.Run("exactly the fixed version is not flagged (exclusive upper bound)", func(t *testing.T) {
+		// introduced "0" so the lower bound never excludes; only the fixed boundary
+		// decides. v == fixed is OUT of the range (introduced <= v < fixed), so
+		// cmpVer(v, fixed) >= 0 must hold — a fail-safe (false-positive) boundary.
+		local := []selfaudit.Dep{{Path: "modernc.org/sqlite", Version: "v1.52.0"}}
+		recs := []*record.Record{adv(t, "exp-9010", "GHSA-fixe-dexa-ctxx", "Go", "modernc.org/sqlite", "0", strptr("1.52.0"))}
+		if hits := selfaudit.Audit(local, recs); len(hits) != 0 {
+			t.Fatalf("v1.52.0 == fixed 1.52.0 must NOT be flagged (exclusive upper bound); got %+v", hits)
 		}
 	})
 

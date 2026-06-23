@@ -3,6 +3,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -267,10 +268,82 @@ func TestUsageRecorderAsyncAndDate(t *testing.T) {
 }
 
 func TestUsageRecorderSwallowsErrors(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	f := &fakeUsageStore{err: errors.New("db is closed")}
-	r := newUsageRecorder(f, quietLogger(), fixedClock)
+	r := newUsageRecorder(f, logger, fixedClock)
 	r.record([]string{"exp-1"}) // a failing usage write must not block or crash
 	r.flush()
+
+	// The error path must actually have been REACHED (the write attempted), not
+	// silently skipped: assert the store was called with the served id.
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.calls) != 1 {
+		t.Fatalf("store was not called: got %d hit writes, want 1 (the failing write must still be attempted)", len(f.calls))
+	}
+	if got := f.calls[0]; len(got) != 1 || got[0] != "exp-1" {
+		t.Fatalf("recorded ids = %v, want [exp-1]", got)
+	}
+	// The failure must be logged at Warn, never returned — the package contract.
+	if !strings.Contains(buf.String(), "usage record failed") {
+		t.Fatalf("a failed usage write must be logged at Warn; logs:\n%s", buf.String())
+	}
+}
+
+func TestUsageRecorderRecordPushSwallowsErrors(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	f := &fakeUsageStore{err: errors.New("db is closed")}
+	r := newUsageRecorder(f, logger, fixedClock)
+	r.recordPush([]string{"exp-1"}) // a failing push-impression write must not block or crash
+	r.flush()
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.pushCalls) != 1 {
+		t.Fatalf("store was not called: got %d push writes, want 1 (the failing write must still be attempted)", len(f.pushCalls))
+	}
+	if got := f.pushCalls[0]; len(got) != 1 || got[0] != "exp-1" {
+		t.Fatalf("recorded push ids = %v, want [exp-1]", got)
+	}
+	if !strings.Contains(buf.String(), "usage recordPush failed") {
+		t.Fatalf("a failed push-impression write must be logged at Warn; logs:\n%s", buf.String())
+	}
+}
+
+// panicUsageStore panics on every write, to exercise the recover() guards that
+// keep a panicking usage write from ever crashing a retrieval (usage.go).
+type panicUsageStore struct{}
+
+func (panicUsageStore) RecordHits(context.Context, []string, string) error { panic("boom") }
+func (panicUsageStore) RecordPushes(context.Context, []string) error       { panic("boom") }
+
+// TestUsageRecorderRecoversFromPanic locks the documented "a panicking usage
+// write never crashes a retrieval" contract for BOTH async write paths. If a
+// recover() guard were removed, the goroutine would never call wg.Done() and
+// flush() would deadlock (the -race / test timeout fails the test), and the
+// expected marker would be absent.
+func TestUsageRecorderRecoversFromPanic(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		call   func(r *usageRecorder)
+		marker string
+	}{
+		{"record", func(r *usageRecorder) { r.record([]string{"exp-1"}) }, "usage record panicked"},
+		{"recordPush", func(r *usageRecorder) { r.recordPush([]string{"exp-1"}) }, "usage recordPush panicked"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			logger := slog.New(slog.NewTextHandler(&buf, nil))
+			r := newUsageRecorder(panicUsageStore{}, logger, fixedClock)
+			tc.call(r)
+			r.flush() // returns only if the goroutine recovered and called wg.Done()
+			if !strings.Contains(buf.String(), tc.marker) {
+				t.Fatalf("expected %q in logs after a panicking write; logs:\n%s", tc.marker, buf.String())
+			}
+		})
+	}
 }
 
 func TestUsageRecorderNilSafe(t *testing.T) {

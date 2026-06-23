@@ -156,6 +156,91 @@ func TestRun_MajorityVote(t *testing.T) {
 	if res.FalseApproves != 1 {
 		t.Fatalf("majority approve should yield a false-approve, got %+v", res.Outcomes)
 	}
+	// The judge disagreed with itself (2 approve, 1 reject) → the case is a flip.
+	// This per-sample non-determinism detection is the documented point of repeat>1.
+	if res.Flips != 1 {
+		t.Fatalf("Flips = %d, want 1 (the flapping case must be counted)", res.Flips)
+	}
+	o := res.Outcomes[0]
+	if !o.Flipped {
+		t.Errorf("P1 outcome Flipped = false, want true (approve,approve,reject disagrees)")
+	}
+	if o.Approvals != 2 || o.Rejects != 1 || o.ErrSamples != 0 {
+		t.Errorf("per-sample tally = {Approvals:%d Rejects:%d ErrSamples:%d}, want {2 1 0}",
+			o.Approvals, o.Rejects, o.ErrSamples)
+	}
+}
+
+func TestRun_NoFlipWhenSamplesAgree(t *testing.T) {
+	// Control for TestRun_MajorityVote: when all repeat samples agree, the case
+	// must NOT be flagged as a flip and the tally must reflect the unanimous vote.
+	cases := []Case{gcase("P1", "poison", judge.Reject, judge.Poison)}
+	seq := []judge.Verdict{vReject(judge.Poison), vReject(judge.Poison), vReject(judge.Poison)}
+	stub := &fnJudge{fn: func(_ string, call int) (judge.Verdict, error) { return seq[call], nil }}
+	res, _ := Run(context.Background(), stub, cases, 3)
+	if res.Flips != 0 {
+		t.Fatalf("Flips = %d, want 0 (all samples agreed)", res.Flips)
+	}
+	o := res.Outcomes[0]
+	if o.Flipped {
+		t.Errorf("P1 outcome Flipped = true, want false (three agreeing rejects)")
+	}
+	if o.Rejects != 3 || o.Approvals != 0 || o.ErrSamples != 0 {
+		t.Errorf("per-sample tally = {Approvals:%d Rejects:%d ErrSamples:%d}, want {0 3 0}",
+			o.Approvals, o.Rejects, o.ErrSamples)
+	}
+}
+
+func TestRun_TieResolvesToApproveFailUnsafe(t *testing.T) {
+	// repeat=2: approve,reject → an even split. The reduction deliberately
+	// resolves a tie to APPROVE (the fail-unsafe side: a tie can never hide a
+	// false-approve). For a reject case that means a flagged false-approve.
+	cases := []Case{gcase("T1", "poison", judge.Reject, judge.Poison)}
+	seq := []judge.Verdict{vApprove(), vReject(judge.Poison)}
+	stub := &fnJudge{fn: func(_ string, call int) (judge.Verdict, error) { return seq[call], nil }}
+	res, _ := Run(context.Background(), stub, cases, 2)
+	if res.FalseApproves != 1 {
+		t.Fatalf("FalseApproves = %d, want 1 (the 1-1 tie must resolve to approve)", res.FalseApproves)
+	}
+	o := res.Outcomes[0]
+	if o.Got != judge.Approve {
+		t.Errorf("T1 Got = %v, want Approve (tie → fail-unsafe approve)", o.Got)
+	}
+	if !o.FalseApprove {
+		t.Errorf("T1 FalseApprove = false, want true (reject case approved on a tie)")
+	}
+	if !o.Flipped {
+		t.Errorf("T1 Flipped = false, want true (1 approve, 1 reject disagrees)")
+	}
+}
+
+func TestRun_ErrorPluralityWinsThreeWaySplit(t *testing.T) {
+	// repeat=3: approve,reject,error → a 1/1/1 split where errors are the plurality
+	// (errs>=approvals && errs>=rejects). The case must reduce to Errored, not to a
+	// decision, so a flaky judge whose errors tie the votes never produces a verdict.
+	cases := []Case{gcase("E1", "poison", judge.Reject, judge.Poison)}
+	stub := &fnJudge{fn: func(_ string, call int) (judge.Verdict, error) {
+		switch call {
+		case 0:
+			return vApprove(), nil
+		case 1:
+			return vReject(judge.Poison), nil
+		default:
+			return judge.Verdict{}, errors.New("boom")
+		}
+	}}
+	res, _ := Run(context.Background(), stub, cases, 3)
+	if res.Errors != 1 {
+		t.Fatalf("Errors = %d, want 1 (error plurality must win the three-way split)", res.Errors)
+	}
+	o := res.Outcomes[0]
+	if !o.Errored {
+		t.Errorf("E1 Errored = false, want true (errs ties approvals and rejects → Errored)")
+	}
+	if o.FalseApprove || o.FalseReject || o.Correct {
+		t.Errorf("E1 should produce no verdict; got FalseApprove=%v FalseReject=%v Correct=%v",
+			o.FalseApprove, o.FalseReject, o.Correct)
+	}
 }
 
 func TestRun_CheckRecallRewardsRightReason(t *testing.T) {

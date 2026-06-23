@@ -191,6 +191,56 @@ func TestOSVLiveSource_DisjointRangeIntervalsExpand(t *testing.T) {
 	}
 }
 
+// One affected package with TWO SEMVER ranges yields two applies_to, which forces
+// osvLiveBody through its multi-fragment join: each package fragment is separated by
+// exactly one "; " (the i>0 branch), and an introduced-only second range renders
+// "(introduced X)" with no ", fixed" suffix. The body is rendered prose, so a wrong
+// join or a stray ", fixed" is exactly the transcription-defect class this importer
+// guards — yet every other fixture has a single range, leaving the join uncovered.
+func TestOSVLiveSource_BodyJoinsMultipleRanges(t *testing.T) {
+	files := map[string]any{
+		"GO-2020-TWORANGE.json": map[string]any{
+			"id":      "GO-2020-TWORANGE",
+			"summary": "two-range advisory",
+			"affected": []map[string]any{{
+				"package": map[string]string{"ecosystem": "Go", "name": "github.com/example/pkg"},
+				"ranges": []map[string]any{
+					{"type": "SEMVER", "events": []map[string]string{{"introduced": "0"}, {"fixed": "1.0.0"}}},
+					{"type": "SEMVER", "events": []map[string]string{{"introduced": "2.0.0"}}}, // introduced-only → fixed:null
+				},
+			}},
+		},
+	}
+	src := ingest.NewOSVLiveSource(ingest.WithOSVLiveFetch(func(_ context.Context) (io.ReadCloser, error) {
+		return buildOSVLiveZip(t, files), nil
+	}))
+	drafts, err := src.Drafts(context.Background())
+	if err != nil {
+		t.Fatalf("Drafts: %v", err)
+	}
+	if len(drafts) != 1 {
+		t.Fatalf("want 1 draft, got %d", len(drafts))
+	}
+	d := drafts[0]
+	if len(d.AppliesTo) != 2 {
+		t.Fatalf("applies_to len = %d, want 2 (one per range)", len(d.AppliesTo))
+	}
+	// Exactly one "; " separator joins the two package fragments (the i>0 branch).
+	if n := strings.Count(d.Body, "; "); n != 1 {
+		t.Errorf("body must join two fragments with exactly one \"; \"; got %d in %q", n, d.Body)
+	}
+	// First fragment carries introduced+fixed; second is introduced-only with no fixed.
+	if !strings.Contains(d.Body, "(introduced 0, fixed 1.0.0)") {
+		t.Errorf("body %q missing the introduced+fixed fragment", d.Body)
+	}
+	if !strings.Contains(d.Body, "(introduced 2.0.0)") {
+		t.Errorf("body %q missing the introduced-only fragment", d.Body)
+	}
+	if strings.Contains(d.Body, "(introduced 2.0.0, fixed") {
+		t.Errorf("introduced-only range must not render a \", fixed\" suffix: %q", d.Body)
+	}
+}
+
 func TestOSVLiveSource_NoFixedVersionFixText(t *testing.T) {
 	files := map[string]any{
 		"GO-2020-NOFIX.json": map[string]any{

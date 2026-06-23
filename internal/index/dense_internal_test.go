@@ -4,6 +4,7 @@ package index
 
 import (
 	"math"
+	"reflect"
 	"testing"
 )
 
@@ -45,11 +46,38 @@ func TestRRFFusePrefersHitsRankedHighInBothLists(t *testing.T) {
 	if len(out) != 4 {
 		t.Fatalf("want 4 fused, got %d", len(out))
 	}
-	// a (ranks 1,2) and b (ranks 2,1) appear in both → outrank c/d (one list each).
-	if out[0].ID != "a" && out[0].ID != "b" {
-		t.Errorf("top = %q, want a or b (in both lists)", out[0].ID)
+	// a (ranks 1,2) and b (ranks 2,1) tie EXACTLY (both 1/(60+1)+1/(60+2)), so
+	// the result order falls entirely to the id tie-break (ascending). Pin it:
+	// a must precede b, not "a or b in either order" — a reversed or unstable
+	// tie-break must fail here.
+	if out[0].ID != "a" || out[1].ID != "b" {
+		t.Errorf("tie-break must order by id ascending: out[0]=%q out[1]=%q, want a,b", out[0].ID, out[1].ID)
 	}
+	// And the single-list hits (c, d) stay below the doubly-ranked a/b.
 	if out[2].ID == "a" || out[2].ID == "b" {
 		t.Errorf("single-list hit ranked above a/b: %+v", out)
+	}
+	// Pin a's exact fused score: rank 1 in lex + rank 2 in den → 1/(rrfK+1)+1/(rrfK+2).
+	wantTop := 1.0/(rrfK+1) + 1.0/(rrfK+2)
+	if got := out[0].Score; math.Abs(got-wantTop) > 1e-12 {
+		t.Errorf("top fused score = %v, want %v (1/(rrfK+1)+1/(rrfK+2))", got, wantTop)
+	}
+}
+
+// Asymmetric lists give every id a DISTINCT fused score, so the full result
+// order is fully determined by score (no tie-break) — pin it exactly.
+func TestRRFFuseOrdersByDistinctFusedScore(t *testing.T) {
+	lex := []Hit{{ID: "a"}, {ID: "b"}, {ID: "c"}}
+	den := []Hit{{ID: "a"}, {ID: "c"}, {ID: "d"}}
+	out := rrfFuse(lex, den)
+	// a: ranks 1,1 → 1/61+1/61. c: ranks 3,2 → 1/63+1/62. b: rank 1 (lex only,
+	// rank 2) → 1/62. d: rank 3 (den only) → 1/63. Ordering: a > c > b > d.
+	gotIDs := make([]string, len(out))
+	for i, h := range out {
+		gotIDs[i] = h.ID
+	}
+	want := []string{"a", "c", "b", "d"}
+	if !reflect.DeepEqual(gotIDs, want) {
+		t.Errorf("fused order = %v, want %v", gotIDs, want)
 	}
 }

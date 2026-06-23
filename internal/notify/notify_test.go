@@ -3,8 +3,10 @@
 package notify_test
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -68,4 +70,35 @@ func TestHTTPNotifier_FailureIsNonFatal(t *testing.T) {
 	a := notify.New(srv.URL, nil)
 	// Must return without panicking despite the dead endpoint.
 	a.Alert(context.Background(), "emergency_stop", "paused")
+}
+
+// A reachable channel returning a non-2xx status must be swallowed (never
+// propagated) AND logged at Warn — the package contract is "a failed post is
+// logged, never returned". This exercises the live non-2xx branch (notify.go),
+// distinct from the connection-refused transport-error branch above, by wiring a
+// real logger to a buffer and asserting the Warn is observable.
+func TestHTTPNotifier_Non2xxIsLoggedNotFatal(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close() // NOT closed — the server is live and answers 500.
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	a := notify.New(srv.URL, logger)
+	// Must return without panicking despite the 500.
+	a.Alert(context.Background(), "anomaly", "promote halted")
+
+	got := buf.String()
+	for _, want := range []string{
+		"level=WARN",
+		"alert post returned non-2xx",
+		"event=anomaly",
+		"status=500",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("non-2xx alert must log %q at Warn, got log: %q", want, got)
+		}
+	}
 }

@@ -45,6 +45,27 @@ func readLines(t *testing.T, path string) []telemetry.Decision {
 	return out
 }
 
+// readLinesIfExists is like readLines but treats a missing file as zero lines,
+// so callers can recover decisions across both rotation generations (the active
+// <path> and the rotated <path>.1) without caring whether a rotation occurred.
+func readLinesIfExists(t *testing.T, path string) []telemetry.Decision {
+	t.Helper()
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	}
+	return readLines(t, path)
+}
+
+// readAllGenerations recovers every decision still on disk across both retained
+// generations. The reader's json.Unmarshal rejects any malformed or interleaved
+// line, so a torn write under concurrency would fail the test here.
+func readAllGenerations(t *testing.T, path string) []telemetry.Decision {
+	t.Helper()
+	out := readLinesIfExists(t, path)
+	out = append(out, readLinesIfExists(t, path+".1")...)
+	return out
+}
+
 func TestRecorder_WritesJSONL(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "decisions.jsonl")
 	r := newRec(t, path, 1<<20)
@@ -166,5 +187,109 @@ func TestRecorder_NilAndConcurrent(t *testing.T) {
 	_ = r.Close()
 	if got := readLines(t, path); len(got) != 100 {
 		t.Fatalf("concurrent records corrupted the log: want 100 clean lines, got %d", len(got))
+	}
+}
+
+// TestRecorder_RotatesUnderConcurrency crosses a rotation boundary while many
+// goroutines record at once: the single writer goroutine must keep each JSONL
+// line intact (no interleaving/torn writes — the reader's json.Unmarshal would
+// reject a corrupt line) and the on-disk decisions plus the drop counter must
+// account for no more than the sent total. Strict equality is intentionally NOT
+// asserted: rotate() keeps only one prior generation (os.Rename overwrites .1),
+// so multiple rotations legitimately discard older data — see decision.go.
+func TestRecorder_RotatesUnderConcurrency(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "d.jsonl")
+	// Tiny cap + a roomy buffer: every record is padded so a handful of bytes
+	// triggers many rotations, but the buffer is large enough that writes land on
+	// disk (recovered > 0) rather than all dropping.
+	r, err := telemetry.NewRecorder(telemetry.Config{
+		Path: path, MaxBytes: 256, Buffer: 4096, Salt: []byte("pepper"), Now: fixedNow,
+	})
+	if err != nil {
+		t.Fatalf("NewRecorder: %v", err)
+	}
+
+	const n = 400
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(c int) {
+			defer wg.Done()
+			// Padding forces several rotations across the run.
+			r.Record(telemetry.Decision{
+				Channel:   "push",
+				QueryHash: "h",
+				Tokens:    []string{"tok", "tok", "tok", "tok", "tok"},
+				Count:     c,
+			})
+		}(i)
+	}
+	wg.Wait()
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// A rotation must actually have happened, or the test isn't exercising the
+	// boundary it claims to.
+	if _, err := os.Stat(path + ".1"); err != nil {
+		t.Fatalf("expected a rotated generation %s.1 (no boundary crossed): %v", path, err)
+	}
+
+	recovered := readAllGenerations(t, path) // json.Unmarshal here rejects torn lines
+	dropped := r.Dropped()
+	if len(recovered) == 0 {
+		t.Fatal("no decisions recovered from disk: writer never made progress")
+	}
+	// Conservation bound: nothing is conjured. recovered + dropped <= n, because
+	// rotation may discard an older generation but never invents records.
+	if int64(len(recovered))+dropped > int64(n) {
+		t.Fatalf("conservation violated: recovered=%d + dropped=%d > sent=%d", len(recovered), dropped, n)
+	}
+	// Every recovered line is a well-formed decision with the expected shape (the
+	// padding tokens survived intact — proof the line wasn't torn mid-write).
+	for _, d := range recovered {
+		if d.Channel != "push" || len(d.Tokens) != 5 {
+			t.Fatalf("recovered a malformed/interleaved decision: %+v", d)
+		}
+	}
+}
+
+// TestRecorder_DropsUnderOverloadWithoutBlocking proves the two load-bearing
+// properties of the best-effort drop path (decision.go default branch): Record
+// never blocks the caller even when the queue cannot keep pace, and overload
+// advances Dropped() instead of stalling. A single writer cannot drain a 100k
+// tight-loop burst into a Buffer:1 queue, so the default branch fires.
+func TestRecorder_DropsUnderOverloadWithoutBlocking(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "d.jsonl")
+	r, err := telemetry.NewRecorder(telemetry.Config{
+		Path: path, MaxBytes: 1 << 20, Buffer: 1, Salt: []byte("pepper"), Now: fixedNow,
+	})
+	if err != nil {
+		t.Fatalf("NewRecorder: %v", err)
+	}
+	t.Cleanup(func() { _ = r.Close() })
+
+	const burst = 100_000
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < burst; i++ {
+			r.Record(telemetry.Decision{Channel: "push", QueryHash: "h", Count: i})
+		}
+	}()
+
+	// If Record ever blocks, the burst never completes and this times out — that is
+	// the non-blocking contract under test.
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Record blocked under overload: a 100k burst did not complete (queue backpressured the caller)")
+	}
+
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if got := r.Dropped(); got == 0 {
+		t.Fatalf("expected drops under a 100k tight-loop burst into a depth-1 queue, got Dropped()=%d", got)
 	}
 }

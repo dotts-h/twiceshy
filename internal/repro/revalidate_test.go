@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,12 +84,29 @@ func TestRevalidate_HoldingPositiveProposesPromotion(t *testing.T) {
 func TestRevalidate_BrokenReproProposesStale(t *testing.T) {
 	root := t.TempDir()
 	p := writeRepro(t, root, "0002.sh", "#!/bin/sh\nexit 1\n")
-	b := &fakeBroker{run: func(Job) (Result, error) { return exit(1), nil }}
+	// Non-empty stderr so the per-repro Detail is meaningful: runRepro's exit-code
+	// switch (revalidate.go:226-235) maps exit!=0/75 → "broken" with the firstLine
+	// of stderr as Detail. firstLine trims to the first line.
+	b := &fakeBroker{run: func(Job) (Result, error) {
+		return Result{Execute: PhaseResult{ExitCode: 1, Stderr: "boom: assertion failed\nmore"}}, nil
+	}}
 	rv := newReval(b, root)
 	rep, atts, _ := rv.RunWithAttestations(context.Background(),
 		[]*record.Record{recWithRepro("exp-0002", "validated", p, "positive")})
 	if atts[0].Holds {
 		t.Error("a broken repro must not hold")
+	}
+	// The structured per-repro outcome is the load-bearing artifact a reviewer
+	// reads — assert the status/exit/detail, not just the coarse Holds=false.
+	out := atts[0].Matrix[0].Repros[0]
+	if out.Status != "broken" {
+		t.Errorf("repro status=%q, want \"broken\"", out.Status)
+	}
+	if out.ExitCode != 1 {
+		t.Errorf("repro exit=%d, want 1", out.ExitCode)
+	}
+	if out.Detail != "boom: assertion failed" {
+		t.Errorf("repro detail=%q, want the trimmed first line of stderr", out.Detail)
 	}
 	if !contains2(rep.Findings[0].Proposal, "stale") {
 		t.Errorf("proposal=%q, want a stale proposal", rep.Findings[0].Proposal)
@@ -104,6 +122,15 @@ func TestRevalidate_SkippedIsInconclusive(t *testing.T) {
 		[]*record.Record{recWithRepro("exp-0003", "quarantined", p, "positive")})
 	if !atts[0].Inconclusive || atts[0].Holds {
 		t.Errorf("skip-only run must be inconclusive: %+v", atts[0])
+	}
+	// exit 75 (EX_TEMPFAIL) maps to a "skipped" status with the canonical detail
+	// (revalidate.go:229-231): a regression mapping it to "broken"/"holds" must fail.
+	out := atts[0].Matrix[0].Repros[0]
+	if out.Status != "skipped" {
+		t.Errorf("repro status=%q, want \"skipped\"", out.Status)
+	}
+	if out.Detail != "environment cannot run repro (EX_TEMPFAIL)" {
+		t.Errorf("repro detail=%q, want the EX_TEMPFAIL skip detail", out.Detail)
 	}
 	if !contains2(rep.Findings[0].Issue, "inconclusive") {
 		t.Errorf("issue=%q", rep.Findings[0].Issue)
@@ -142,12 +169,25 @@ func TestRevalidate_PathTraversalIsError(t *testing.T) {
 	b := &fakeBroker{run: func(Job) (Result, error) { return exit(0), nil }}
 	rv := newReval(b, t.TempDir())
 	rec := recWithRepro("exp-0010", "quarantined", "../../etc/passwd", "positive")
-	_, atts, _ := rv.RunWithAttestations(context.Background(), []*record.Record{rec})
+	rep, atts, _ := rv.RunWithAttestations(context.Background(), []*record.Record{rec})
 	if atts[0].Holds {
 		t.Error("a traversing path must not validate")
 	}
 	if len(b.jobs) != 0 {
 		t.Error("a traversing path must never reach the broker")
+	}
+	// A resolve failure is an "error", NOT a benign "skipped"/Inconclusive: the
+	// security-relevant mapping is resolve-failure → error → propose-stale (no
+	// promotion). If a refactor surfaced traversal as "skipped" it would become a
+	// no-op finding (Inconclusive + "no change"), silently dropping the signal.
+	if atts[0].Inconclusive {
+		t.Error("a resolve failure must be an error, not inconclusive/skipped")
+	}
+	if got := atts[0].Matrix[0].Repros[0].Status; got != "error" {
+		t.Errorf("traversal repro status=%q, want \"error\"", got)
+	}
+	if !contains2(rep.Findings[0].Proposal, "stale") {
+		t.Errorf("proposal=%q, want a non-promotion stale proposal", rep.Findings[0].Proposal)
 	}
 }
 
@@ -270,14 +310,27 @@ func TestRevalidate_PrepareFailureIsBrokenNotHolds(t *testing.T) {
 		}
 	}
 	// Prepare fails; execute would be meaningless — must report broken, not holds.
+	// Non-empty Prepare.Stderr so the "prepare failed: ..." Detail is meaningful.
 	b := &fakeBroker{run: func(Job) (Result, error) {
-		return Result{Prepare: PhaseResult{ExitCode: 1}, Execute: PhaseResult{ExitCode: 0}}, nil
+		return Result{
+			Prepare: PhaseResult{ExitCode: 1, Stderr: "go: download failed\nnetwork down"},
+			Execute: PhaseResult{ExitCode: 0},
+		}, nil
 	}}
 	rv := newReval(b, root)
 	rec := recWithRepro("exp-0009", "quarantined", filepath.ToSlash(dir), "positive")
 	_, atts, _ := rv.RunWithAttestations(context.Background(), []*record.Record{rec})
 	if atts[0].Holds {
 		t.Error("a failed prepare must not produce holds")
+	}
+	// The prepare-failed branch (revalidate.go:219-223) sets status "broken" and a
+	// "prepare failed: ..." detail — a passing execute exit 0 must NOT mask it.
+	out := atts[0].Matrix[0].Repros[0]
+	if out.Status != "broken" {
+		t.Errorf("repro status=%q, want \"broken\" on prepare failure", out.Status)
+	}
+	if !strings.HasPrefix(out.Detail, "prepare failed:") {
+		t.Errorf("repro detail=%q, want a \"prepare failed:\" prefix", out.Detail)
 	}
 }
 

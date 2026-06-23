@@ -80,6 +80,49 @@ func TestPanel_UnanimousApprove(t *testing.T) {
 	}
 }
 
+// The combined verdict's Approved() depends on the unioned Checks being rebuilt in
+// canonical order (panel.go:95-98). This pins that contract: after unanimous approval
+// the combined Checks are exactly the four canonical names, in order, all passing —
+// and a non-canonical EXTRA check carried by one member is discarded by the rebuild.
+func TestPanel_UnanimousApprove_CombinedChecksCanonical(t *testing.T) {
+	a := &judge.StubJudge{Verdict: judge.ApproveVerdict("gpt-oss:20b")}
+	// b approves, but carries an extra passing check beyond the canonical four.
+	bv := judge.ApproveVerdict("gemini-2.5-pro")
+	bv.Checks = append(bv.Checks, judge.Check{Name: "extra", Pass: true, Reason: "non-canonical"})
+	b := &judge.StubJudge{Verdict: bv}
+	panel, err := judge.NewPanel(
+		judge.PanelMember{Model: "gpt-oss:20b", Judge: a},
+		judge.PanelMember{Model: "gemini-2.5-pro", Judge: b},
+	)
+	if err != nil {
+		t.Fatalf("NewPanel: %v", err)
+	}
+	v, err := panel.Judge(context.Background(), judge.Request{})
+	if err != nil {
+		t.Fatalf("Judge: %v", err)
+	}
+	if !v.Approved() {
+		t.Fatalf("unanimous panel must approve even with a member's extra passing check: %+v", v)
+	}
+	if len(v.Checks) != len(judge.Checks) {
+		t.Fatalf("combined Checks must hold exactly the %d canonical checks (extras dropped), got %d: %+v",
+			len(judge.Checks), len(v.Checks), v.Checks)
+	}
+	for i, name := range judge.Checks {
+		if v.Checks[i].Name != name {
+			t.Fatalf("combined Checks[%d].Name = %q, want canonical %q (order must match judge.Checks)", i, v.Checks[i].Name, name)
+		}
+		if !v.Checks[i].Pass {
+			t.Fatalf("combined Checks[%d] (%q) must pass after unanimous approval: %+v", i, name, v.Checks[i])
+		}
+	}
+	for _, c := range v.Checks {
+		if c.Name == "extra" {
+			t.Fatalf("non-canonical extra check must be discarded by the canonical-order rebuild, found: %+v", v.Checks)
+		}
+	}
+}
+
 // When a seat's judge answers with a DIFFERENT model than its construction label
 // (e.g. a Sonnet fallback behind a gemini-labelled frontier seat, #0086), the panel
 // must record the model that actually answered — not silently relabel it.

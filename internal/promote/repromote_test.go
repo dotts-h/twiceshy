@@ -5,6 +5,7 @@ package promote_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/dotts-h/twiceshy/internal/judge"
@@ -131,18 +132,35 @@ func TestRepromote_JudgeReject_StaysDemoted(t *testing.T) {
 }
 
 func TestRepromoteEligible_NotDemoted_Skipped(t *testing.T) {
-	cases := map[string]func() *record.Record{
-		"validated":   func() *record.Record { r := provableRecord(); r.Status = "validated"; return r },
-		"quarantined": provableRecord,
+	// The security-flagged and no-repro bases use demotedRecord() (status "stale",
+	// Guard populated, no flags) so they hit their OWN reject branch, not the
+	// already-tested not-demoted branch. The security-flagged case guards the core
+	// invariant that a flagged record can NEVER be restored to validated.
+	cases := map[string]struct {
+		mk     func() *record.Record
+		reason string
+	}{
+		"validated":   {func() *record.Record { r := provableRecord(); r.Status = "validated"; return r }, "not a demoted record"},
+		"quarantined": {provableRecord, "not a demoted record"},
+		"security-flagged": {func() *record.Record {
+			r := demotedRecord()
+			r.Provenance.SecurityFlags = []string{"secret:aws-access-key"}
+			return r
+		}, "security-flagged record cannot be validated"},
+		"no-repro": {func() *record.Record {
+			r := demotedRecord()
+			r.Guard = nil
+			return r
+		}, "no executable proof — left for a human (ADR-0013 §5)"},
 	}
-	for name, mk := range cases {
+	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			ok, reason := promote.RepromoteEligible(mk())
+			ok, reason := promote.RepromoteEligible(c.mk())
 			if ok {
 				t.Fatalf("%s must not be re-promotable", name)
 			}
-			if reason != "not a demoted record" {
-				t.Fatalf("reason = %q, want not a demoted record", reason)
+			if reason != c.reason {
+				t.Fatalf("reason = %q, want %q", reason, c.reason)
 			}
 		})
 	}
@@ -166,6 +184,49 @@ func TestRepromote_NonHoldingOrInconclusive_StaysDemoted(t *testing.T) {
 				t.Fatal("the judge must not even be consulted without a holding attestation (cost guard)")
 			}
 		})
+	}
+}
+
+// Repromote mutates the demoted record to validated, then validates; if the
+// re-promoted record is invalid it MUST revert every mutated field (status,
+// valid.until, validated_at, demotion, promotion) and return a hard error so the
+// caller never persists a half-promoted record (promote.go:415-422). badClock()
+// forces record.Validate to red on provenance.validated_at without any product
+// change.
+func TestRepromote_InvalidPromotedRecord_HardErrorAndReverts(t *testing.T) {
+	j := &captureJudge{verdict: judge.ApproveVerdict("gemini-2.5-pro")}
+	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, j, badClock())
+	rec := demotedRecord()
+	origStatus := rec.Status
+	origUntil := rec.Provenance.Valid.Until
+	origValidatedAt := rec.Provenance.ValidatedAt
+	origDemotion := rec.Provenance.Demotion
+	origPromotion := rec.Provenance.Promotion
+
+	out, err := p.Repromote(context.Background(), rec)
+	if err == nil {
+		t.Fatal("an invalid re-promoted record must be a hard error, not a silent skip")
+	}
+	if !strings.Contains(err.Error(), "re-promoted record is invalid") {
+		t.Fatalf("error must explain the not-persisted revert, got %q", err.Error())
+	}
+	if out.Promoted {
+		t.Fatal("an invalid re-promoted record must not report Promoted")
+	}
+	if rec.Status != origStatus {
+		t.Fatalf("status not reverted: %q, want %q", rec.Status, origStatus)
+	}
+	if rec.Provenance.Valid.Until != origUntil {
+		t.Fatalf("valid.until not reverted: %v, want %v", rec.Provenance.Valid.Until, origUntil)
+	}
+	if rec.Provenance.ValidatedAt != origValidatedAt {
+		t.Fatalf("validated_at not reverted: %v, want %v", rec.Provenance.ValidatedAt, origValidatedAt)
+	}
+	if rec.Provenance.Demotion != origDemotion {
+		t.Fatalf("demotion block not reverted: %+v, want %+v", rec.Provenance.Demotion, origDemotion)
+	}
+	if rec.Provenance.Promotion != origPromotion {
+		t.Fatalf("promotion block not reverted: %+v, want %+v", rec.Provenance.Promotion, origPromotion)
 	}
 }
 

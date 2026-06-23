@@ -27,6 +27,15 @@ func TestNormalize(t *testing.T) {
 		{"long hex run", "commit deadbeefcafe1234 failed", "commit <hex> failed"},
 		{"digits embedded in identifiers survive", "code ab12 ok", "code ab12 ok"},
 		{"absolute path", "open /etc/passwd failed", "open <path> failed"},
+		{
+			// Two paths in one signature: the rePath capture group + ${1}
+			// replacement must preserve the whitespace separator between
+			// them, not merge the two tokens.
+			"two absolute paths keep their separator",
+			"open /etc/passwd and /var/log/x failed",
+			"open <path> and <path> failed",
+		},
+		{"path at line start", "/usr/bin/x crashed", "<path> crashed"},
 		{"home path swallows trailing token chars", "read ~/.config/app.toml: denied", "read <path> denied"},
 		{"relative dot path", "exec ./run.sh crashed", "exec <path> crashed"},
 		{"parent-relative path", "stat ../secrets env", "stat <path> env"},

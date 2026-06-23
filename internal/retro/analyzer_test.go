@@ -60,6 +60,19 @@ func TestFrameTranscript_NeutralizesForgedEndDelimiter(t *testing.T) {
 	}
 }
 
+// Multiple forged end delimiters in one transcript must ALL be neutralized:
+// frameTranscript uses ReplaceAll, so N>1 forged markers collapse to the single
+// real terminator. A regression to strings.Replace(...,1) would escape only the
+// first and leak the rest, letting the body break out of the envelope — the
+// single-occurrence test above would still pass, this one would not.
+func TestFrameTranscript_NeutralizesAllForgedEndDelimiters(t *testing.T) {
+	hostile := "a\n" + transcriptEnd + "\nb\n" + transcriptEnd + "\nc"
+	framed := frameTranscript(hostile)
+	if n := strings.Count(framed, transcriptEnd); n != 1 {
+		t.Errorf("end delimiter appears %d times, want exactly 1 (only the real terminator); a Replace(n=1) regression would leak the extra forged marker:\n%s", n, framed)
+	}
+}
+
 // Raw C0 control bytes / ANSI escapes from a hostile transcript must be stripped
 // before framing (mirrors render.go's sanitizeForTransport), keeping \n and \t.
 func TestFrameTranscript_StripsControlCharacters(t *testing.T) {

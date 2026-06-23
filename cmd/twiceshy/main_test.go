@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -402,6 +403,142 @@ func TestRunServeReloadsCorpusOnSIGHUP(t *testing.T) {
 			t.Fatalf("/readyz never became ready after SIGHUP; output: %q", out.String())
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("serve returned %v after cancel", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not shut down after cancel")
+	}
+}
+
+// A SIGHUP whose reload FAILS must never blip the service: serve keeps the prior
+// good index (loadAndRebuild's walk errors, ix.Rebuild is not run / rolls back),
+// fires the "serve-reload-failed" alert, and stays ready (main.go:433-438). This is
+// the operationally critical sibling of the happy-reload test above — a corpus-sync
+// that ships a broken corpus must not drop the listener or serve an empty index.
+//
+// The alert is observed through the real notify seam: runServe builds its alerter
+// from getenv("TWICESHY_ALERT_URL") and POSTs there (notify.HTTPNotifier), so an
+// httptest sink that captures the POST is the recordingAlerter — no product seam
+// needed. The failure is forced by making experience/ unreadable (chmod 0) so
+// walkCorpusSkipping returns a directory-walk error rather than a skipped record (a
+// poison record is tolerated, not fatal). /readyz staying 200 (unauthenticated, as
+// in the happy-path test) is the proxy for "still serving the prior good index".
+func TestRunServeKeepsServingWhenSIGHUPReloadFails(t *testing.T) {
+	dir := tempCorpus(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// recordingAlerter: capture which alert events were POSTed.
+	var (
+		alertMu sync.Mutex
+		alerts  []string
+	)
+	alertSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		alertMu.Lock()
+		alerts = append(alerts, r.Header.Get("Title")) // "twiceshy: <event>"
+		alertMu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer alertSrv.Close()
+	sawAlert := func(event string) bool {
+		alertMu.Lock()
+		defer alertMu.Unlock()
+		for _, a := range alerts {
+			if a == "twiceshy: "+event {
+				return true
+			}
+		}
+		return false
+	}
+
+	var out lockedBuffer
+	done := make(chan error, 1)
+	go func() {
+		done <- run(ctx, []string{
+			"serve", "-corpus", dir,
+			"-db", filepath.Join(t.TempDir(), "ix.db"),
+			"-addr", "127.0.0.1:0",
+		}, &out, func(k string) string {
+			switch k {
+			case "TWICESHY_TOKEN":
+				return "test-token"
+			case "TWICESHY_ALERT_URL":
+				return alertSrv.URL
+			}
+			return ""
+		})
+	}()
+
+	addrRe := regexp.MustCompile(`listening on (\S+)`)
+	var addr string
+	deadline := time.Now().Add(10 * time.Second)
+	for addr == "" {
+		if time.Now().After(deadline) {
+			t.Fatalf("server never reported its address; output: %q", out.String())
+		}
+		if m := addrRe.FindStringSubmatch(out.String()); m != nil {
+			addr = m[1]
+		} else {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	readyz := func() int {
+		resp, err := http.Get("http://" + addr + "/readyz")
+		if err != nil {
+			t.Fatalf("GET /readyz: %v", err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// Load a good corpus first so there is a prior good index to keep serving.
+	writeFixture(t, dir, packFixture("0301", "validated", "MIT", ""))
+	if err := syscall.Kill(syscall.Getpid(), syscall.SIGHUP); err != nil {
+		t.Fatalf("send SIGHUP: %v", err)
+	}
+	deadline = time.Now().Add(10 * time.Second)
+	for readyz() != http.StatusOK {
+		if time.Now().After(deadline) {
+			t.Fatalf("/readyz never became ready after the good reload; output: %q", out.String())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Now make the corpus walk fail: an unreadable experience/ dir makes
+	// filepath.WalkDir surface a permission error, so loadAndRebuild errors (vs a
+	// poison FILE, which is skipped, not fatal). Restore perms so TempDir teardown
+	// works regardless of test outcome.
+	expDir := filepath.Join(dir, "experience")
+	if err := os.Chmod(expDir, 0); err != nil {
+		t.Fatalf("chmod experience/ unreadable: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(expDir, 0o755) })
+
+	if err := syscall.Kill(syscall.Getpid(), syscall.SIGHUP); err != nil {
+		t.Fatalf("send SIGHUP (failing reload): %v", err)
+	}
+
+	// A failed reload is invisible on the HTTP surface (readyz stays 200 either
+	// way), so synchronize on the alert POST before asserting — that is the only
+	// signal the failure branch actually ran.
+	deadline = time.Now().Add(10 * time.Second)
+	for !sawAlert("serve-reload-failed") {
+		if time.Now().After(deadline) {
+			t.Fatalf("serve-reload-failed alert never fired; output: %q", out.String())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// The failure branch ran; the service must still be serving the prior index.
+	if code := readyz(); code != http.StatusOK {
+		t.Fatalf("/readyz after a FAILED reload = %d, want 200 (still serving prior corpus)", code)
 	}
 
 	cancel()
