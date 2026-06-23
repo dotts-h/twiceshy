@@ -5,6 +5,7 @@ package telemetry
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 )
@@ -22,8 +23,13 @@ const servedScanBuf = 1 << 20
 //
 // An empty sessionHash matches nothing — a decision recorded without a session
 // correlation key is never attributable. A missing log is not an error (no decisions
-// were logged → empty set). A torn/garbled line is skipped, not fatal: a best-effort
-// measurement read must not crash the join on a corrupt byte.
+// were logged → empty set). The read is best-effort: a torn/garbled line is skipped,
+// and a line beyond the buffer cap (corruption only — honest decision lines are tiny)
+// stops that file's scan without failing the join.
+//
+// It assumes a QUIESCED log (the retro join runs offline). It is not safe to read
+// concurrently with a live Recorder mid-rotation, which could under-count a session
+// that spans the rotation — close/flush the Recorder first, as the tests do.
 func ServedInSession(path, sessionHash string) (map[string]bool, error) {
 	served := map[string]bool{}
 	if sessionHash == "" {
@@ -65,5 +71,10 @@ func scanServed(path, sessionHash string, served map[string]bool) error {
 			served[s.ID] = true
 		}
 	}
-	return sc.Err()
+	// A line beyond servedScanBuf (corruption — honest lines are tiny) stops this
+	// file's scan; treat it as best-effort, not fatal, so the join still runs.
+	if err := sc.Err(); err != nil && !errors.Is(err, bufio.ErrTooLong) {
+		return err
+	}
+	return nil
 }

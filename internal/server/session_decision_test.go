@@ -8,7 +8,27 @@ import (
 
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/telemetry"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// sessionIDFromRequest must survive the typed-nil gotcha: GetSession returns the
+// *ServerSession boxed in a Session interface, so a nil pointer is a NON-nil interface.
+// Dropping the concrete-pointer nil-check would panic on ss.ID(); a wrong type assertion
+// would silently never extract.
+func TestSessionIDFromRequest(t *testing.T) {
+	if got := sessionIDFromRequest(nil); got != "" {
+		t.Errorf("nil request → %q, want empty", got)
+	}
+	var nilSession *mcp.ServerSession
+	if got := sessionIDFromRequest(&mcp.CallToolRequest{Session: nilSession}); got != "" {
+		t.Errorf("typed-nil session → %q, want empty (must not panic)", got)
+	}
+	// A real (zero-value) *ServerSession is non-nil, so the id is actually read off it
+	// (here "" — no transport session is wired) without panicking: the happy branch runs.
+	if got := sessionIDFromRequest(&mcp.CallToolRequest{Session: &mcp.ServerSession{}}); got != "" {
+		t.Errorf("zero-value session → %q, want empty", got)
+	}
+}
 
 // recordSearchDecision attributes a search to its MCP session by a SALTED hash (never
 // the raw id), so the retro helpfulness join can confirm only cards served in that

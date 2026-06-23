@@ -312,18 +312,9 @@ func (h *handlers) search(ctx context.Context, req *mcp.CallToolRequest, args Se
 	}
 	h.usage.record(ids)
 	// The MCP session id correlates this retrieval with the session's captured
-	// transcript so the retro helpfulness join can attribute served cards (#0069). It
-	// is hashed (never stored raw) in recordSearchDecision; nil req / no session → "".
-	// GetSession returns the *ServerSession as a Session interface, so a nil pointer
-	// is a non-nil interface (the typed-nil gotcha) — assert to the concrete type and
-	// nil-check that, the SDK's own idiom, before reading the id.
-	sessionID := ""
-	if req != nil {
-		if ss, ok := req.GetSession().(*mcp.ServerSession); ok && ss != nil {
-			sessionID = ss.ID()
-		}
-	}
-	h.recordSearchDecision(args.Query, hits, sessionID)
+	// transcript so the retro helpfulness join can attribute served cards (#0069); it
+	// is hashed (never stored raw) in recordSearchDecision.
+	h.recordSearchDecision(args.Query, hits, sessionIDFromRequest(req))
 	h.logger.Info("tool call",
 		slog.String("tool", tool),
 		slog.String("outcome", "ok"),
@@ -333,6 +324,21 @@ func (h *handlers) search(ctx context.Context, req *mcp.CallToolRequest, args Se
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: enveloped}},
 	}, out, nil
+}
+
+// sessionIDFromRequest extracts the MCP session id from a tool request, or "" if there
+// is none. GetSession returns the *ServerSession boxed in a Session interface, so a nil
+// pointer is a non-nil interface (the typed-nil gotcha) — assert to the concrete type
+// and nil-check THAT (the SDK's own idiom) before reading the id, or ss.ID() panics on
+// the nil receiver.
+func sessionIDFromRequest(req *mcp.CallToolRequest) string {
+	if req == nil {
+		return ""
+	}
+	if ss, ok := req.GetSession().(*mcp.ServerSession); ok && ss != nil {
+		return ss.ID()
+	}
+	return ""
 }
 
 // recordSearchDecision logs this query's search decision (#0067): the served
