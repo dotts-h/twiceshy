@@ -186,7 +186,12 @@ func (r *Recorder) rotate() {
 		return
 	}
 	if err := os.Rename(r.path, r.path+".1"); err != nil {
-		r.log.Warn("telemetry rotate rename failed", slog.String("error", err.Error()))
+		// The active file is already closed; nulling r.f stops telemetry rather than
+		// reopening and appending to the un-rotated file (which would blow the
+		// ~2*MaxBytes on-disk bound). run() keeps draining; serving is untouched.
+		r.log.Warn("telemetry rotate rename failed — telemetry stops", slog.String("error", err.Error()))
+		r.f = nil
+		return
 	}
 	f, err := os.OpenFile(r.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {

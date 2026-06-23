@@ -115,6 +115,82 @@ func newOSVLiveTestSource(t *testing.T) ingest.Source {
 // fixed version (fixed:null) must NOT claim "upgrade past the fixed version" — that
 // fix-text references a version that does not exist, a self-contradiction. Pairs
 // with #0062 (the advisory judge now SEES the contradiction in the prompt).
+// Disjoint affected intervals in one range must expand to one applies_to each,
+// not collapse to first-introduced/last-fixed (which would falsely claim the gap
+// between them is affected). A trailing open `introduced` closes as fixed:null.
+func TestOSVLiveSource_DisjointRangeIntervalsExpand(t *testing.T) {
+	files := map[string]any{
+		"GO-2020-MULTI.json": map[string]any{
+			"id":      "GO-2020-MULTI",
+			"summary": "multi-interval advisory",
+			"affected": []map[string]any{{
+				"package": map[string]string{"ecosystem": "Go", "name": "github.com/example/multi"},
+				"ranges": []map[string]any{{
+					"type": "SEMVER",
+					"events": []map[string]string{
+						{"introduced": "1.0.0"}, {"fixed": "1.2.0"},
+						{"introduced": "2.0.0"}, {"fixed": "2.3.0"},
+					},
+				}},
+			}},
+		},
+		"GO-2020-TRAILOPEN.json": map[string]any{
+			"id":      "GO-2020-TRAILOPEN",
+			"summary": "trailing-open advisory",
+			"affected": []map[string]any{{
+				"package": map[string]string{"ecosystem": "Go", "name": "github.com/example/trail"},
+				"ranges": []map[string]any{{
+					"type": "SEMVER",
+					"events": []map[string]string{
+						{"introduced": "1.0.0"}, {"fixed": "1.2.0"}, {"introduced": "2.0.0"},
+					},
+				}},
+			}},
+		},
+	}
+	src := ingest.NewOSVLiveSource(ingest.WithOSVLiveFetch(func(_ context.Context) (io.ReadCloser, error) {
+		return buildOSVLiveZip(t, files), nil
+	}))
+	drafts, err := src.Drafts(context.Background())
+	if err != nil {
+		t.Fatalf("Drafts: %v", err)
+	}
+
+	intervals := func(title string) map[string]string {
+		t.Helper()
+		for i := range drafts {
+			if !strings.Contains(drafts[i].Title, title) {
+				continue
+			}
+			got := map[string]string{}
+			for _, a := range drafts[i].AppliesTo {
+				intro, fixed := "", ""
+				if a.Versions != nil {
+					if a.Versions.Introduced != nil {
+						intro = *a.Versions.Introduced
+					}
+					if a.Versions.Fixed != nil {
+						fixed = *a.Versions.Fixed
+					}
+				}
+				got[intro] = fixed
+			}
+			return got
+		}
+		t.Fatalf("no draft %q", title)
+		return nil
+	}
+
+	multi := intervals("GO-2020-MULTI")
+	if len(multi) != 2 || multi["1.0.0"] != "1.2.0" || multi["2.0.0"] != "2.3.0" {
+		t.Errorf("disjoint intervals = %v, want 1.0.0->1.2.0 and 2.0.0->2.3.0 (not collapsed to 1.0.0->2.3.0)", multi)
+	}
+	trail := intervals("GO-2020-TRAILOPEN")
+	if len(trail) != 2 || trail["1.0.0"] != "1.2.0" || trail["2.0.0"] != "" {
+		t.Errorf("trailing-open intervals = %v, want 1.0.0->1.2.0 and 2.0.0->open", trail)
+	}
+}
+
 func TestOSVLiveSource_NoFixedVersionFixText(t *testing.T) {
 	files := map[string]any{
 		"GO-2020-NOFIX.json": map[string]any{

@@ -17,6 +17,10 @@ import (
 
 const defaultEOLBase = "https://endoflife.date"
 
+// maxEOLRespBytes caps an endoflife.date response body we will decode — the base
+// URL is operator-configurable, so bound what a misbehaving source can stream.
+const maxEOLRespBytes = 1 << 20
+
 // defaultEOLProducts is the seed set of endoflife.date products the live importer
 // scans (the common runtimes agent code targets). Kept small and curated; widen as the
 // corpus needs coverage. An unknown product 404s and is skipped, so an over-broad list
@@ -118,9 +122,14 @@ func (s *EOLLiveSource) Drafts(ctx context.Context) ([]Draft, error) {
 			continue // unknown product (404)
 		}
 		var cycles []eolCycle
-		decErr := json.NewDecoder(rc).Decode(&cycles)
+		decErr := json.NewDecoder(io.LimitReader(rc, maxEOLRespBytes)).Decode(&cycles)
 		_ = rc.Close()
 		if decErr != nil {
+			// A cancelled/deadline-exceeded run mid-decode is systemic — fail loud
+			// rather than bury it as a per-product malformed-body skip.
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			// A malformed 200 body for ONE product must not zero out the others — skip it
 			// and continue (the bulk-importer "skip junk" principle; a later scheduled run
 			// retries). A fetch/HTTP error above is systemic, so it still fails loud.
