@@ -1,5 +1,11 @@
 # Decision memo — ADR-0011 §5 sign-off (the authoring licensing reframe)
 
+> **DECIDED 2026-06-23 (horia): ACCEPTED for INTERNAL / single-tenant use only.**
+> #0024 authoring is unblocked at internal scope; the commercial pack stays gated on a
+> real legal review. Recorded in [ADR-0011](ADR-0011-corpus-growth-and-validation-engine.md)
+> §5 + its status line, and in [#0024](../issues/0024-llm-wrong-canon-so-reframe-authoring-gated-on-adr-0011-section-5-sign-off.md).
+> This memo is retained as the rationale of record.
+
 - **For:** horia (the only party who can ratify this — it is a licensing/product call)
 - **From:** claude
 - **Date:** 2026-06-23
@@ -109,8 +115,8 @@ pre-commit the commercial decision.
 
 ## The call
 
-- [ ] **Accept §5, internal/single-tenant only** (recommended) — unblocks #0024, keeps the
-      commercial gate.
+- [x] **Accept §5, internal/single-tenant only** (recommended) — unblocks #0024, keeps the
+      commercial gate. **← DECIDED 2026-06-23 (horia).**
 - [ ] **Defer** — keep authoring blocked; corpus coverage stays organic-only (months, and
       patchy). Choose this only if even the internal-only legal posture isn't yet comfortable.
 - [ ] **Reject** — abandon authored traps entirely; rely solely on imports + organic
