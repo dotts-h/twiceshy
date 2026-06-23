@@ -45,9 +45,16 @@ run_hook() {
 ERRJSON='{"session_id":"s1","tool_response":{"stderr":"TypeError: Cannot read property '\''lngLat'\'' of null\n"}}'
 CARD='{"count":1,"context":"=== twiceshy ===\nexp-9999"}'
 
-# 1) No token -> fail-open, nothing emitted, exit 0.
-out="$(TWICESHY_TOKEN='' run_hook "$ERRJSON")"; rc=$?
+# 1) No token -> fail-open before anything else. Arm the signature first (with a
+#    token) and set STUB_RESPONSE=$CARD, so a tokenless run that did NOT fail open
+#    would reach curl and emit the card on this 2nd occurrence — turning the
+#    empty assertion red. That makes the case prove the token gate, not just arming.
+TMPDIR_PIN="$(mktemp -d "$STUBDIR/seq0.XXXXXX")"
+STUB_RESPONSE="$CARD"
+run_hook "$ERRJSON" >/dev/null                       # arm (a 2nd run would query)
+out="$(TWICESHY_TOKEN='' run_hook "$ERRJSON")"; rc=$? # tokenless: the gate must stop it
 if [ "$rc" = 0 ] && [ -z "$out" ]; then ok "no token: fail-open silent"; else bad "no token (rc=$rc out=[$out])"; fi
+unset TMPDIR_PIN STUB_RESPONSE
 
 # 2) First occurrence (default mode) -> arm the tripwire, do NOT query, emit nothing.
 TMPDIR_PIN="$(mktemp -d "$STUBDIR/seq.XXXXXX")"
@@ -66,10 +73,15 @@ fi
 empty_ok "dedup: same signature queried once" "$(run_hook "$ERRJSON")"
 unset TMPDIR_PIN
 
-# 5) Benign prose ("no errors found") -> no error signature -> nothing, ever.
-benign='{"session_id":"s2","tool_response":{"stdout":"no errors found, all good\n"}}'
+# 5) Benign prose ("no errors found") -> no error signature, so even a pinned 2nd
+#    pass never arms or queries. STUB_RESPONSE=$CARD means a grep that WRONGLY
+#    matched benign prose would arm then emit the card on the 2nd call, failing this.
+TMPDIR_PIN="$(mktemp -d "$STUBDIR/seq5.XXXXXX")"
 STUB_RESPONSE="$CARD"
-empty_ok "benign prose: no false trigger" "$(run_hook "$benign")"
+benign='{"session_id":"s2","tool_response":{"stdout":"no errors found, all good\n"}}'
+run_hook "$benign" >/dev/null                                     # would arm IF it matched
+empty_ok "benign prose: no false trigger" "$(run_hook "$benign")" # would emit IF it matched
+unset TMPDIR_PIN
 
 # 6) ON_FIRST=1 -> query on the very first occurrence (aggressive mode).
 TMPDIR_PIN="$(mktemp -d "$STUBDIR/seq2.XXXXXX")"
