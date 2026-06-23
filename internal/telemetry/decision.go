@@ -38,6 +38,7 @@ type Decision struct {
 	Time              string      `json:"ts"`                  // RFC3339; stamped by the recorder
 	Channel           string      `json:"channel"`             // "push" | "search"
 	QueryHash         string      `json:"query_hash"`          // salted hash, for correlation without the text
+	Session           string      `json:"session,omitempty"`   // salted hash of the MCP session id (#0069), for attributing served cards to a session; "" when no session
 	Tokens            []string    `json:"tokens,omitempty"`    // retrieval tokens used (push: discriminative; search: fts)
 	FingerprintBypass bool        `json:"fp_bypass,omitempty"` // push: a deterministic stack match bypassed the gate
 	Served            []ServedHit `json:"served,omitempty"`
