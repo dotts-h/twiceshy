@@ -47,6 +47,28 @@ applied — closing the loop with no new instrumentation.
       existing usage seam (no new ranking influence).
 - [ ] Precision/recall reported on a real-traffic sample (feeds #0005).
 
+## Progress
+
+- [x] **Verdict→reinforcement core (the deterministic half of acceptance 1/2).**
+      `internal/retro` ships the seam + record path: `CardVerdict`, the `UsageJudge`
+      interface (+ a network-free `StubUsageJudge`) that emits a per-served-card
+      used/ignored verdict from a transcript, and `RecordHelpfulness`, which folds the
+      *Used* verdicts into the existing usage seam through the narrow `ConfirmHelpfuler`
+      (satisfied by `*index.Index.ConfirmHelpful`) — off the hot path, never influencing
+      ranking (ADR-0013 §4). An *ignored* served card is an absent positive, never
+      counter-evidence. Guards: `internal/retro/helpful_test.go`.
+- [ ] **Remaining (tracked follow-up).** (a) the off-pool `ModelUsageJudge` prompt/edge
+      that produces real verdicts (mirrors `ModelAnalyzer`) + wiring into the
+      `retro-intake` drain so a captured session is actually judged; (b) acceptance 2's
+      **authoritative attribution via the #0067 decision log** — needs a session-correlation
+      key (a salted session hash) added to `telemetry.Decision` and threaded from the MCP
+      transport, so a verdict is cross-checked against the served set rather than trusting
+      the transcript alone; (c) acceptance 3's precision/recall reporter on a real-traffic
+      sample (feeds #0005).
+
+Issue stays **open**: this slice lands the deterministic verdict→confirm core; the model
+edge, the decision-log attribution (#2), and the reporter (#3) remain.
+
 ## Notes
 Split out of #0065 (whose Notes bless shipping the extraction half independently).
 Soft-depends on #0067 (decision log, merged PR#269) — already in place; no hard
