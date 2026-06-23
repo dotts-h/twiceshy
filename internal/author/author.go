@@ -52,8 +52,12 @@ func Scaffold(p Params, now time.Time) ([]File, error) {
 	if !reSlug.MatchString(p.Slug) {
 		return nil, fmt.Errorf("author: slug %q must be kebab-case [a-z0-9-]", p.Slug)
 	}
-	// Match the record's title rule (record.go) so the skeleton always parses.
-	if n := len([]rune(strings.TrimSpace(p.Title))); n < 8 || n > 120 {
+	// Trim before checking AND before interpolating, so this check matches the
+	// record's own title rule (record.go) on the exact bytes that land on disk —
+	// %q preserves surrounding whitespace, so an untrimmed title could pass here
+	// yet fail record.Parse.
+	title := strings.TrimSpace(p.Title)
+	if n := len([]rune(title)); n < 8 || n > 120 {
 		return nil, fmt.Errorf("author: title length %d is outside 8..120", n)
 	}
 	if strings.TrimSpace(p.Author) == "" {
@@ -86,11 +90,20 @@ func Scaffold(p Params, now time.Time) ([]File, error) {
 		files = append(files, File{Path: negativePath, Content: negativeRepro(p.ID)})
 	}
 
-	files = append([]File{{Path: recordPath, Content: recordSkeleton(p, kind, date, repros)}}, files...)
+	files = append([]File{{Path: recordPath, Content: recordSkeleton(p.ID, title, kind, p.Author, date, repros)}}, files...)
 	return files, nil
 }
 
-func recordSkeleton(p Params, kind, date, repros string) string {
+func recordSkeleton(id, title, kind, author, date, repros string) string {
+	resolution := "resolution:\n" +
+		"  root_cause: \"TODO: why it happens — re-derived from first principles + official docs\"\n" +
+		"  fix: \"TODO: the escape, in your own words\"\n"
+	if kind == "dead-end" {
+		// A dead-end record requires a non-empty resolution.dead_ends (record.go); seed one.
+		resolution += "  dead_ends:\n" +
+			"    - tried: \"TODO: the approach that does not work\"\n" +
+			"      why_it_failed: \"TODO: why it fails — so no one retries it\"\n"
+	}
 	return fmt.Sprintf(`---
 schema_version: 1
 id: %s
@@ -102,10 +115,7 @@ symptom:
 applies_to:
   - ecosystem: "TODO: e.g. Go, Python, JavaScript, React Native"
     package: "TODO: the package, module, or runtime"
-resolution:
-  root_cause: "TODO: why it happens — re-derived from first principles + official docs"
-  fix: "TODO: the escape, in your own words"
-guard:
+%sguard:
   repro: null
   repros:
 %s  guarding_test: null
@@ -122,7 +132,7 @@ test; write symptom / resolution / dead-ends in your OWN words — never paste o
 paraphrase a third-party snippet (docs/AUTHORING.md). source_url is intentionally
 absent (authored, internal-only). Once the repro is real, run `+"`twiceshy doctor revalidate`"+`
 and check the prose with `+"`twiceshy similarity`"+` before promotion.
-`, p.ID, kind, p.Title, repros, p.Author, date, date, record.SourceLicenseAuthoredInternal)
+`, id, kind, title, resolution, repros, author, date, date, record.SourceLicenseAuthoredInternal)
 }
 
 func positiveRepro(id string) string {

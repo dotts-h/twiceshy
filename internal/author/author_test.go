@@ -107,6 +107,32 @@ func TestScaffoldWithNegativeEmitsNegativeRepro(t *testing.T) {
 	}
 }
 
+// Every advertised -kind must produce a parseable quarantined record. dead-end
+// needs a resolution.dead_ends entry (record.go), so the skeleton seeds one.
+func TestScaffoldAllKindsParse(t *testing.T) {
+	for _, kind := range record.Kinds {
+		files := scaffold(t, author.Params{ID: "exp-0091", Slug: "k", Title: "a sufficiently long title", Kind: kind, Author: "claude"})
+		const recPath = "experience/2026/0091-k.md"
+		if _, err := record.Parse(recPath, []byte(files[recPath])); err != nil {
+			t.Errorf("kind %q must produce a parseable record: %v", kind, err)
+		}
+	}
+}
+
+// A title with surrounding whitespace is trimmed before it lands on disk, so the
+// scaffold's length check and the record's validate on the same bytes.
+func TestScaffoldTrimsTitle(t *testing.T) {
+	files := scaffold(t, author.Params{ID: "exp-0091", Slug: "k", Title: "   padded title here   ", Kind: "trap", Author: "claude"})
+	const recPath = "experience/2026/0091-k.md"
+	rec, err := record.Parse(recPath, []byte(files[recPath]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Title != "padded title here" {
+		t.Errorf("title = %q, want trimmed %q", rec.Title, "padded title here")
+	}
+}
+
 func TestScaffoldRejectsBadParams(t *testing.T) {
 	const ok = "a valid title here"
 	cases := map[string]author.Params{
