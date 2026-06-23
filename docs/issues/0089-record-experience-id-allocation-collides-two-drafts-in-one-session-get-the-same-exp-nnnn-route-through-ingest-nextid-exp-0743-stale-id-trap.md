@@ -1,7 +1,7 @@
 ---
 id: 0089
 title: record_experience id allocation collides — two drafts in one session get the same exp-NNNN; route through ingest.NextID (exp-0743 stale-id trap)
-status: open
+status: closed
 severity: medium
 group: 
 depends_on: []
@@ -45,3 +45,24 @@ the run. Add `record.Num` / `record.FormatID` helpers and consolidate the diverg
 them, per the audit's `Q-cmd-3 / A-purecore-3`. Guard with a test that two novel drafts
 in one session get distinct ids. Promote from "defer" to "do" — it blocks dogfood
 capture (#0088).
+
+## Resolution (done 2026-06-23)
+
+Two parts, both now done:
+
+- **The collision (the reported bug)** was fixed in the flywheel-kickoff PR (#362,
+  `8f9b76b`): `record_experience`'s `allocateNextID` keeps a locked in-process
+  high-water mark (`h.lastID`) so two calls in one server session can't both get the
+  committed-max id, and the retro-intake / intake-reports drainers increment per
+  allocation within a run. Guarded by `internal/server/server_test.go` ("two
+  record_experience calls in one session must allocate distinct ids (#0089)").
+- **The consolidation** (this PR — the audit's `Q-cmd-3 / A-purecore-3`): the divergent
+  `exp-`↔int reinventions are routed onto the canonical `record.Num` / `record.FormatID`
+  — `bumpID` and `maxRecordNum` (cmd/twiceshy), `ingest.NextID`, and the two drainer id
+  formats. This removes the inconsistent error handling (e.g. `strconv.Atoi(_)` discarding
+  the parse error, and `ingest.NextID`'s bespoke parse/format) so the `record` package owns
+  the exp-NNNN grammar in one place. Behavior-preserving; the existing collision / nextid /
+  drainer tests stay green.
+
+Unblocks dogfood capture (#0088). The dogfood experience record for the original field-report
+trap lives in the corpus data product (twiceshy-corpus, post-ADR-0021), not the engine repo.
