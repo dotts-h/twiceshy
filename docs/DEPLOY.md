@@ -141,6 +141,64 @@ sudo cp scripts/twiceshy-validate.service scripts/twiceshy-validate.timer /etc/s
 sudo systemctl daemon-reload && sudo systemctl enable --now twiceshy-validate.timer
 ```
 
+**Decoupled deployment — prebuilt binary + data-only corpus (ADR-0021, #0081).**
+After the corpus cutover the driver runs against a **data-only** clone of the corpus
+store (`claude/twiceshy-corpus`, no Go source), so it cannot build from `$REPO`. A
+systemd drop-in supplies the prebuilt engine binary and the corpus repo:
+
+```ini
+# /etc/systemd/system/twiceshy-validate.service.d/decouple.conf
+[Service]
+Environment=TWICESHY_FORGEJO_REPO=claude/twiceshy-corpus
+Environment=TWICESHY_BIN=/home/ori/.local/bin/twiceshy
+```
+
+Rebuild + install the binary from the engine repo's `main` whenever the engine
+changes (a stale binary that predates a flag the *script* passes makes `promote`
+exit 2 / `INVALIDARGUMENT` and silently stalls the loop):
+
+```sh
+CGO_ENABLED=0 go build -trimpath -o /home/ori/.local/bin/.twiceshy.new ./cmd/twiceshy
+mv -f /home/ori/.local/bin/.twiceshy.new /home/ori/.local/bin/twiceshy   # atomic install
+twiceshy promote -h | grep -- -hold-cooldown                            # sanity: flag present
+```
+
+**Throughput cap + hold cooldown (#0084, [ADR-0022](adr/ADR-0022-promote-throughput-and-hold-cooldown.md)).**
+Set the cooldown **first or together with** the cap — never the cap alone, or each
+capped run re-judges the whole held backlog:
+
+```sh
+TWICESHY_HOLD_COOLDOWN=168h   # a panel-declined record is not re-judged for 7 days
+TWICESHY_MAX_PROMOTIONS=100   # clean per-run ceiling (exit 0, mergeable batch); 0 = off
+```
+
+**Hybrid advisory frontier judge (#0086, [ADR-0016](adr/ADR-0016-advisory-class-panel-promotion.md)).**
+The advisory panel's second (frontier) seat is Gemini, with a Sonnet fallback used
+**only on a primary failure** (e.g. a free-tier 429) — a Gemini *reject* is a real
+verdict and does not fall back. `verdict.Model` in each manifest records whichever
+model actually answered.
+
+```sh
+TWICESHY_PANEL_JUDGE_URL=http://localhost:8724          # Gemini shim (primary)
+TWICESHY_PANEL_JUDGE_MODEL=gemini-2.5-flash
+TWICESHY_PANEL_JUDGE_FALLBACK_URL=http://localhost:8725 # Sonnet shim (pooled fallback)
+TWICESHY_PANEL_JUDGE_FALLBACK_MODEL=claude-sonnet-4-6
+```
+
+The shims are `twiceshy-judge-gemini.service` (:8724) and `twiceshy-judge-sonnet.service`
+(:8725); the first panel seat is the local `gpt-oss:20b` on `TWICESHY_JUDGE_URL`.
+
+**Bulk-drain accelerator (ADR-0021 catch-up).** `twiceshy-drain-merge.timer` merges
+every green `import/*` / `validate/*` PR on the corpus repo, overriding the soak veto
+window + anomaly hold (it keeps the per-record judge gate and CI). Enable it **only**
+to clear a backlog; **disable it to restore** the soak + anomaly human-veto once the
+queue is drained:
+
+```sh
+sudo systemctl enable --now  twiceshy-drain-merge.timer   # catch-up only
+sudo systemctl disable --now twiceshy-drain-merge.timer   # back to soak + anomaly veto
+```
+
 **Sandbox-orphan reaping (#0052).** Each `promote` / `adapt` run now sweeps any
 containers/volumes a crashed prior run leaked (label `twiceshy.repro`) **before**
 it walks the corpus — so the nightly timer self-cleans. `-effect` dry-runs skip
