@@ -130,9 +130,11 @@ depth:
 2. **The executed-test requirement** — prose alone cannot pass the validation
    engine; an original test is structurally ours.
 3. **The PR + judge + human-veto gates** already in place.
-4. *Not yet built:* an optional **similarity check** that flags a draft whose
-   text is suspiciously close to a known public snippet — tracked as a follow-up,
-   an extra net, never the primary control.
+4. The **similarity check** (`twiceshy similarity -record <rec> -against <ref>…`,
+   #0090) — flags a draft whose prose runs near-verbatim to a supplied reference
+   (the suspected public snippet) before promotion, surfacing the matching phrases
+   as a lead. An extra net for human review, never the primary control or an
+   auto-reject; only the authored prose is compared (not the original repro code).
 
 ## Checklist (per authored record)
 
@@ -146,9 +148,6 @@ depth:
 
 ## Not yet built (follow-ups)
 
-- **Similarity check** (near-verbatim flagger) —
-  [#0090](issues/0090-authored-record-similarity-check-flag-near-verbatim-reproduction-of-public-snippets-adr-0011-5-mitigation.md);
-  the §5 residual-risk mitigation, an extra net.
 - **Authoring-scaffold CLI** (`twiceshy author …`) to pre-stage a record + repro
   skeleton —
   [#0091](issues/0091-authoring-scaffold-cli-twiceshy-author-pre-stages-a-record-repro-skeleton.md);
