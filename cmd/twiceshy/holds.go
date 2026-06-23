@@ -79,9 +79,10 @@ func (l *holdLedger) note(id string, held bool, now time.Time) {
 }
 
 // save prunes entries whose cooldown has lapsed (they are eligible again, so they
-// need no record) and writes the ledger atomically-ish to <corpus>/runs/. A write
-// error is returned for the caller to log; the only consequence is less cooldown
-// next run.
+// need no record) and writes the ledger to <corpus>/runs/ via a temp-file + rename
+// so a crash mid-write can never leave a half-written (corrupt) ledger — the reader
+// fails open on a corrupt file, but atomicity avoids needing to. A write error is
+// returned for the caller to log; the only consequence is less cooldown next run.
 func (l *holdLedger) save(now time.Time) error {
 	if l == nil {
 		return nil
@@ -91,14 +92,28 @@ func (l *holdLedger) save(now time.Time) error {
 			delete(l.entries, id)
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(l.path), 0o755); err != nil {
+	dir := filepath.Dir(l.path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(l.entries, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(l.path, b, 0o644)
+	tmp, err := os.CreateTemp(dir, ".promote.holds.*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }() // no-op once renamed; cleans up on any error path
+	if _, err := tmp.Write(b); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, l.path)
 }
 
 // noteOutcomes folds a promote run's actions into the ledger: held records start
