@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +28,23 @@ const SchemaVersion = 1
 // ValidID reports whether id is a well-formed record id (exp-NNNN, ≥4 digits) —
 // the shared predicate behind `id`, `superseded_by`, and `disputes`.
 func ValidID(id string) bool { return reID.MatchString(id) }
+
+// Num parses a record id's numeric part; ok is false for a malformed id. Pair it
+// with FormatID so the package owns the exp-NNNN grammar in one place rather than
+// re-implementing the `exp-` ↔ int transform at each call site.
+func Num(id string) (n int, ok bool) {
+	if !ValidID(id) {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimPrefix(id, "exp-"))
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// FormatID renders the canonical exp-NNNN id for a record number.
+func FormatID(n int) string { return fmt.Sprintf("exp-%04d", n) }
 
 // Kinds and statuses, per docs/SCHEMA.md.
 var (

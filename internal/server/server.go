@@ -16,12 +16,15 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/dotts-h/twiceshy/internal/index"
+	"github.com/dotts-h/twiceshy/internal/ingest"
+	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/telemetry"
 )
 
@@ -200,6 +203,31 @@ type handlers struct {
 	issueQueue  string              // optional; report_issue enqueues here for intake-issues (#0066)
 	corpus      string              // corpus root for robust id allocation against the source of truth (#0059)
 	telemetry   *telemetry.Recorder // optional; per-query gate-decision log (#0067)
+
+	idMu   sync.Mutex // serializes record-id allocation (#0089)
+	lastID int        // high-water mark of ids handed out this process; 0 = none yet
+}
+
+// allocateNextID hands out a fresh exp-NNNN id. ingest.NextID is corpus/index-derived
+// and stateless, so two record_experience calls in one session would both get the same
+// id (TECH_DEBT M3 / #0089 — the field-report collision). The in-process high-water mark
+// closes that for a single server; the draft is still propose-only and PR-reviewed.
+func (h *handlers) allocateNextID(ctx context.Context) (string, error) {
+	next, err := ingest.NextID(ctx, h.ix, h.corpus)
+	if err != nil {
+		return "", err
+	}
+	n, ok := record.Num(next)
+	if !ok {
+		return "", fmt.Errorf("allocateNextID: NextID returned malformed id %q", next)
+	}
+	h.idMu.Lock()
+	defer h.idMu.Unlock()
+	if n <= h.lastID {
+		n = h.lastID + 1
+	}
+	h.lastID = n
+	return record.FormatID(n), nil
 }
 
 // SearchArgs is the search_experience input.

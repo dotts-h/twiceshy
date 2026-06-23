@@ -481,3 +481,34 @@ func TestSchemaVersionContractRejected(t *testing.T) {
 		t.Errorf("LoadCorpus: want schema_version error, got %v", err)
 	}
 }
+
+func TestNumAndFormatID(t *testing.T) {
+	for _, tc := range []struct {
+		id string
+		n  int
+		ok bool
+	}{
+		{"exp-0001", 1, true},
+		{"exp-2758", 2758, true},
+		{"exp-12345", 12345, true},
+		{"exp-12", 0, false},   // <4 digits is not a valid id
+		{"exp-abcd", 0, false}, // non-numeric
+		{"2758", 0, false},     // missing prefix
+		{"", 0, false},
+	} {
+		n, ok := record.Num(tc.id)
+		if ok != tc.ok || (ok && n != tc.n) {
+			t.Errorf("Num(%q) = (%d, %v), want (%d, %v)", tc.id, n, ok, tc.n, tc.ok)
+		}
+	}
+	// FormatID round-trips with Num and zero-pads to 4.
+	for _, n := range []int{1, 42, 2758, 12345} {
+		id := record.FormatID(n)
+		if got, ok := record.Num(id); !ok || got != n {
+			t.Errorf("FormatID/Num round-trip failed for %d: id=%q -> (%d,%v)", n, id, got, ok)
+		}
+	}
+	if id := record.FormatID(1); id != "exp-0001" {
+		t.Errorf("FormatID(1) = %q, want exp-0001", id)
+	}
+}
