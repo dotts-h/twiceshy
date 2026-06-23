@@ -68,6 +68,39 @@ func TestProvenance_SourceLicenseRejectsMalformed(t *testing.T) {
 	}
 }
 
+// ADR-0011 §5: an authored-internal record carries the SourceLicenseAuthoredInternal
+// sentinel and — by the authoring discipline — NO source_url (the fact was
+// independently re-derived, not distilled from a URL). It must validate against
+// both the Go validator and the normative JSON Schema.
+func TestProvenance_AuthoredInternalSentinelValidates(t *testing.T) {
+	r := importerDraft()
+	r.Provenance.Source.Author = "claude"
+	r.Provenance.SourceLicense = record.SourceLicenseAuthoredInternal // no source_url
+	if err := record.Validate(r); err != nil {
+		t.Fatalf("authored-internal record must validate: %v", err)
+	}
+	out, err := record.Marshal(r)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	schema := loadRecordSchema(t)
+	if err := schema.Validate(frontmatterValue(t, out)); err != nil {
+		t.Errorf("authored-internal record must satisfy the schema: %v\n--- marshaled ---\n%s", err, out)
+	}
+}
+
+// ADR-0011 §5: an authored-internal record is re-derived, not distilled from a
+// URL, so a source_url on it is a discipline violation the validator must reject.
+func TestProvenance_AuthoredInternalForbidsSourceURL(t *testing.T) {
+	r := importerDraft()
+	r.Provenance.Source.Author = "claude"
+	r.Provenance.SourceLicense = record.SourceLicenseAuthoredInternal
+	r.Provenance.SourceURL = "https://stackoverflow.com/q/123"
+	if err := record.Validate(r); err == nil {
+		t.Error("an authored-internal record with a source_url must be rejected (§5: re-derived, not distilled from a URL)")
+	}
+}
+
 func TestProvenance_SourceURLRejectsNonHTTP(t *testing.T) {
 	for _, u := range []string{"ftp://example.com/x", "notaurl", "javascript:alert(1)", "http://"} {
 		r := importerDraft()

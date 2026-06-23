@@ -16,31 +16,32 @@ func TestClassify(t *testing.T) {
 		attribution bool
 	}{
 		{"", true, false}, // twiceshy-authored
-		{record.SourceLicenseFactsOnly, true, false}, // distilled facts
-		{"MIT", true, false},                         // permissive
-		{"Apache-2.0", true, false},                  //
-		{"apache-2.0", true, false},                  // case-insensitive
-		{"BSD-3-Clause", true, false},                //
-		{"BSD-2-Clause", true, false},                //
-		{"ISC", true, false},                         //
-		{"0BSD", true, false},                        //
-		{"CC0-1.0", true, false},                     //
-		{"Unlicense", true, false},                   //
-		{"CC-BY-4.0", true, true},                    // includable WITH attribution
-		{"CC-BY-3.0", true, true},                    //
-		{"cc-by-4.0", true, true},                    // case-insensitive
-		{"CC-BY-SA-4.0", false, false},               // share-alike — excluded
-		{"cc-by-sa-3.0", false, false},               //
-		{"CC-BY-NC-4.0", false, false},               // noncommercial — excluded (has cc-by- prefix)
-		{"CC-BY-ND-4.0", false, false},               // no-derivatives — excluded
-		{"CC-BY-NC-SA-4.0", false, false},            // noncommercial + share-alike — excluded
-		{"GPL-3.0-only", false, false},               // copyleft
-		{"AGPL-3.0-only", false, false},              //
-		{"LGPL-2.1-only", false, false},              //
-		{"MPL-2.0", false, false},                    //
-		{"EPL-2.0", false, false},                    //
-		{"Foo-1.0", false, false},                    // unknown — fail closed
-		{"proprietary", false, false},                //
+		{record.SourceLicenseFactsOnly, true, false},         // distilled facts
+		{record.SourceLicenseAuthoredInternal, false, false}, // §5-authored — internal-only, commercial-gated
+		{"MIT", true, false},                                 // permissive
+		{"Apache-2.0", true, false},                          //
+		{"apache-2.0", true, false},                          // case-insensitive
+		{"BSD-3-Clause", true, false},                        //
+		{"BSD-2-Clause", true, false},                        //
+		{"ISC", true, false},                                 //
+		{"0BSD", true, false},                                //
+		{"CC0-1.0", true, false},                             //
+		{"Unlicense", true, false},                           //
+		{"CC-BY-4.0", true, true},                            // includable WITH attribution
+		{"CC-BY-3.0", true, true},                            //
+		{"cc-by-4.0", true, true},                            // case-insensitive
+		{"CC-BY-SA-4.0", false, false},                       // share-alike — excluded
+		{"cc-by-sa-3.0", false, false},                       //
+		{"CC-BY-NC-4.0", false, false},                       // noncommercial — excluded (has cc-by- prefix)
+		{"CC-BY-ND-4.0", false, false},                       // no-derivatives — excluded
+		{"CC-BY-NC-SA-4.0", false, false},                    // noncommercial + share-alike — excluded
+		{"GPL-3.0-only", false, false},                       // copyleft
+		{"AGPL-3.0-only", false, false},                      //
+		{"LGPL-2.1-only", false, false},                      //
+		{"MPL-2.0", false, false},                            //
+		{"EPL-2.0", false, false},                            //
+		{"Foo-1.0", false, false},                            // unknown — fail closed
+		{"proprietary", false, false},                        //
 	}
 	for _, tt := range tests {
 		e := pack.Classify(tt.license)
@@ -123,5 +124,48 @@ func TestBuildManifest_IncludeQuarantined(t *testing.T) {
 	}
 	if m := pack.BuildManifest(recs, false, true); len(m.Included) != 1 {
 		t.Errorf("-include-quarantined should include it; included=%v", m.Included)
+	}
+}
+
+// ADR-0011 §5: records authored from public-awareness *topics* (re-derived in our
+// own words with original tests) are cleared for the INTERNAL corpus only; the
+// commercial pack stays gated on a real legal review. The pack builder must keep
+// them out of commercial packs (fail-closed) yet still ship them internally — the
+// same build-time mechanism ADR-0003 §4 uses for copyleft.
+func TestBuildManifest_CommercialExcludesAuthoredInternal(t *testing.T) {
+	recs := []*record.Record{
+		rec("exp-0001", "validated", record.SourceLicenseAuthoredInternal, ""),
+		rec("exp-0002", "validated", record.SourceLicenseFactsOnly, ""), // distilled fact — commercial-safe
+	}
+
+	com := pack.BuildManifest(recs, true /*commercial*/, false)
+	in := map[string]bool{}
+	for _, id := range com.Included {
+		in[id] = true
+	}
+	if in["exp-0001"] {
+		t.Errorf("commercial pack must NOT include a §5-authored internal-only record; included=%v", com.Included)
+	}
+	if !in["exp-0002"] {
+		t.Errorf("commercial pack should still include a distilled-facts record; included=%v", com.Included)
+	}
+	var reason string
+	for _, e := range com.Excluded {
+		if e.ID == "exp-0001" {
+			reason = e.Reason
+		}
+	}
+	if reason == "" {
+		t.Errorf("the §5-authored exclusion must carry a reason; excluded=%+v", com.Excluded)
+	}
+
+	// The internal (non-commercial) pack still includes it — internal use is cleared.
+	internal := pack.BuildManifest(recs, false /*commercial*/, false)
+	inInternal := map[string]bool{}
+	for _, id := range internal.Included {
+		inInternal[id] = true
+	}
+	if !inInternal["exp-0001"] {
+		t.Errorf("the internal pack should include the §5-authored record; included=%v", internal.Included)
 	}
 }
