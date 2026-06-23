@@ -53,6 +53,30 @@ func TestPromoteCorpus_BudgetCapStops(t *testing.T) {
 	}
 }
 
+func TestPromoteCorpus_ThroughputCapStopsCleanly(t *testing.T) {
+	recs := []*record.Record{eligibleRec("exp-0100"), eligibleRec("exp-0101"), eligibleRec("exp-0102")}
+	fp := &fakePromoter{promote: map[string]bool{"exp-0100": true, "exp-0101": true, "exp-0102": true}}
+	persist := func(_ string, _ *record.Record) error { return nil }
+	var buf bytes.Buffer
+
+	// MaxPromotions 1 with MaxActions 25: a normal full batch must stop CLEANLY at
+	// the cap (err == nil, NOT errAnomalyHalt) so the batch PR is mergeable — the
+	// #0084 fix for "every batch trips the anomaly halt" (cap doubling as throttle).
+	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxPromotions: 1, MaxActions: 25}, nil, nil, &buf, "")
+	if err != nil {
+		t.Fatalf("a throughput-cap stop must be clean (nil), got %v", err)
+	}
+	if st.promoted != 1 {
+		t.Fatalf("throughput cap of 1 must promote exactly one; promoted=%d", st.promoted)
+	}
+	if !strings.Contains(buf.String(), "throughput cap") {
+		t.Fatalf("expected a throughput-cap notice; got %q", buf.String())
+	}
+	if strings.Contains(buf.String(), "ANOMALY") {
+		t.Fatalf("a clean cap stop must not mention ANOMALY; got %q", buf.String())
+	}
+}
+
 func TestPromoteCorpus_AnomalyOnFinalActionStillHalts(t *testing.T) {
 	recs := []*record.Record{eligibleRec("exp-0100"), eligibleRec("exp-0101")}
 	fp := &fakePromoter{promote: map[string]bool{"exp-0100": true, "exp-0101": true}}
@@ -128,6 +152,26 @@ func TestAdaptCorpus_BudgetCapStops(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "budget cap") {
 		t.Fatalf("expected a budget-cap notice; got %q", buf.String())
+	}
+}
+
+func TestAdaptCorpus_ThroughputCapStopsCleanly(t *testing.T) {
+	recs, runner := adaptDemoting(t, 3)
+	adapter := promote.NewAdapter(&judge.StubJudge{Verdict: judge.ApproveVerdict("g")})
+	persist := func(_ string, _ *record.Record) error { return nil }
+	var buf bytes.Buffer
+
+	// MaxPromotions 1 with MaxActions 25: the adapt batch stops CLEANLY at the cap
+	// (err == nil, not errAnomalyHalt) — symmetric with promote (#0084).
+	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxPromotions: 1, MaxActions: 25}, nil, nil, &buf, "")
+	if err != nil {
+		t.Fatalf("a throughput-cap stop must be clean (nil), got %v", err)
+	}
+	if st.demoted != 1 {
+		t.Fatalf("throughput cap of 1 must demote exactly one; demoted=%d", st.demoted)
+	}
+	if !strings.Contains(buf.String(), "throughput cap") {
+		t.Fatalf("expected a throughput-cap notice; got %q", buf.String())
 	}
 }
 

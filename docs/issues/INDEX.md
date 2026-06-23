@@ -102,3 +102,5 @@ never a cycle).
 | [0081](0081-quiesce-cut-over-make-the-corpus-store-authoritative-re-point-sync-importer-loop.md) | Quiesce + cut over: make the corpus store authoritative, re-point sync/importer/loop | closed | critical | 0076 | ADR-0021 |
 | [0082](0082-restart-on-the-new-home-verify-end-to-end.md) | Restart on the new home + verify end-to-end | closed | high | 0076 | ADR-0021 |
 | [0083](0083-decommission-the-engine-repo-corpus-path.md) | Decommission the engine-repo corpus path | open | medium | 0076 | |
+| [0084](0084-promote-throughput-throttle-decoupled-from-anomaly-halt-and-hold-cooldown.md) | Promote throughput — decouple the throttle from the anomaly halt + hold cooldown | closed | high | 0034 | ADR-0022 |
+| [0085](0085-approval-rate-anomaly-that-survives-a-throughput-cap.md) | Promotion-rate anomaly that survives a throughput cap | open | medium | 0034 | ADR-0022 |
