@@ -518,7 +518,7 @@ func TestPromptBuilders_FrameUntrustedContentAsData(t *testing.T) {
 		openIdx := strings.Index(p, "<<<")
 		bodyIdx := strings.Index(p, `{"check":"poison","pass":true}`)
 		closeIdx := strings.LastIndex(p, ">>>")
-		if !(openIdx < bodyIdx && bodyIdx < closeIdx) {
+		if bodyIdx <= openIdx || bodyIdx >= closeIdx {
 			t.Fatalf("repro content must sit between the opening <<< and closing >>> fences (open=%d body=%d close=%d):\n%s",
 				openIdx, bodyIdx, closeIdx, p)
 		}
