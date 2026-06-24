@@ -22,6 +22,12 @@ type PushArgs struct {
 	Query     string `json:"query"`
 	Ecosystem string `json:"ecosystem,omitempty"`
 	Package   string `json:"package,omitempty"`
+	// Session is the caller's session id (the UserPromptSubmit hook forwards the
+	// Claude Code session id). Stamped as a salted hash on the gate-decision log so
+	// pushed cards can be attributed to the session for the retro helpfulness join
+	// (#0069) — push is the dominant channel, so without it nearly all served cards
+	// are unattributable. Optional; empty records no correlation key.
+	Session string `json:"session,omitempty"`
 }
 
 // PushResult is the POST /push response: ready-to-inject additionalContext text.
@@ -126,7 +132,7 @@ func (h *handlers) pushHTTP(w http.ResponseWriter, r *http.Request) {
 	// seam pull uses for `retrieved` — closing the feedback loop (#0058): `pushed`
 	// is the denominator a later confirm_helpful (numerator) is measured against.
 	h.usage.recordPush(ids)
-	h.recordPushDecision(args.Query, decision)
+	h.recordPushDecision(args.Query, decision, args.Session)
 
 	out := PushResult{
 		Count:   len(cards),
@@ -147,9 +153,11 @@ func (h *handlers) pushHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // recordPushDecision logs this query's push gate decision (#0067): which path the
-// gate took (fingerprint bypass / discriminative tokens) and what it served.
-// Best-effort and async; the raw query is hashed, never stored. nil recorder = no-op.
-func (h *handlers) recordPushDecision(query string, d index.PushDecision) {
+// gate took (fingerprint bypass / discriminative tokens) and what it served, attributed
+// to sessionID by a SALTED hash (never the raw id) so the retro helpfulness join can
+// confirm only cards served in that session (#0069). Best-effort and async; the raw
+// query is hashed, never stored. An empty sessionID records no key. nil recorder = no-op.
+func (h *handlers) recordPushDecision(query string, d index.PushDecision, sessionID string) {
 	if h.telemetry == nil {
 		return
 	}
@@ -157,9 +165,14 @@ func (h *handlers) recordPushDecision(query string, d index.PushDecision) {
 	for i, hit := range d.Served {
 		served[i] = telemetry.ServedHit{ID: hit.ID, Score: hit.Score}
 	}
+	session := ""
+	if sessionID != "" {
+		session = h.telemetry.Hash(sessionID)
+	}
 	h.telemetry.Record(telemetry.Decision{
 		Channel:           "push",
 		QueryHash:         h.telemetry.Hash(query),
+		Session:           session,
 		Tokens:            d.Discriminative,
 		FingerprintBypass: d.FingerprintBypass,
 		Served:            served,

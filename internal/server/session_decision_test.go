@@ -58,3 +58,33 @@ func TestRecordSearchDecision_AttributesSession(t *testing.T) {
 		t.Fatalf("a session-less search decision must not be attributable; got %v", s)
 	}
 }
+
+// recordPushDecision attributes a PUSH injection to its session by a SALTED hash, so the
+// retro helpfulness join (#0069) can confirm only cards served in that session. Push is
+// the DOMINANT served channel, so without this nearly all served cards are unattributable;
+// a push with no session still records no correlation key.
+func TestRecordPushDecision_AttributesSession(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "d.jsonl")
+	tel, err := telemetry.NewRecorder(telemetry.Config{Path: path, Salt: []byte("salt")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &handlers{telemetry: tel}
+	h.recordPushDecision("q1", index.PushDecision{Served: []index.Hit{{ID: "exp-0009", Score: 2}}}, "sess-abc")
+	h.recordPushDecision("q2", index.PushDecision{Served: []index.Hit{{ID: "exp-0010", Score: 2}}}, "") // no session
+	if err := tel.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	served, err := telemetry.ServedInSession(path, tel.Hash("sess-abc"))
+	if err != nil {
+		t.Fatalf("ServedInSession: %v", err)
+	}
+	if len(served) != 1 || !served["exp-0009"] {
+		t.Fatalf("sess-abc must be attributed exp-0009 only; got %v", served)
+	}
+	// A session-less push decision is attributable to no session.
+	if s, _ := telemetry.ServedInSession(path, tel.Hash("")); len(s) != 0 {
+		t.Fatalf("a session-less push decision must not be attributable; got %v", s)
+	}
+}
