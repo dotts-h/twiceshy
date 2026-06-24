@@ -72,13 +72,41 @@ type ConfirmHelpfuler interface {
 // malformed/garbage/injection-shaped id (empty, whitespace, non-exp, path-shaped) is
 // dropped. Within-session dedup keeps one Used card to one confirmation even if the
 // judge repeats it. AUTHORITATIVE attribution — that the id was actually SERVED in this
-// session, not merely well-formed — is the #0067 decision-log served-set cross-check,
-// the deferred acceptance 2 of #0069 (stronger than a bare existence check).
+// session, not merely well-formed — is RecordHelpfulnessAttributed below (the #0067
+// decision-log served-set cross-check, #0069 acceptance 2; stronger than a bare format check).
 func RecordHelpfulness(ctx context.Context, rec ConfirmHelpfuler, verdicts []CardVerdict) (int, error) {
 	seen := make(map[string]bool)
 	recorded := 0
 	for _, v := range verdicts {
 		if !v.Used || !record.ValidID(v.ID) || seen[v.ID] {
+			continue
+		}
+		seen[v.ID] = true
+		if err := rec.ConfirmHelpful(ctx, v.ID); err != nil {
+			return recorded, fmt.Errorf("retro: confirm helpful %s: %w", v.ID, err)
+		}
+		recorded++
+	}
+	return recorded, nil
+}
+
+// RecordHelpfulnessAttributed is the authoritative served-set-attributed variant of
+// RecordHelpfulness for real (telemetry-attributed) use; it supersedes the bare format
+// check for production callers. A verdict is confirmed only when ALL of: v.Used is true,
+// record.ValidID(v.ID) passes, served[v.ID] is true, and the id has not already been
+// confirmed this call. This closes the trust gap — a prompt-injectable model must not get
+// a NEVER-SERVED card confirmed; the served set is the authoritative source from
+// telemetry.ServedInSession (#0067 decision log, #0069 acceptance 2).
+//
+// A nil or empty served map means nothing is attributable — confirm nothing (the safe
+// default: an absent served set is "confirm none", never "confirm all"). On the first
+// recorder error it stops and returns the count so far plus the error, so the caller can
+// leave the transcript for retry.
+func RecordHelpfulnessAttributed(ctx context.Context, rec ConfirmHelpfuler, verdicts []CardVerdict, served map[string]bool) (int, error) {
+	seen := make(map[string]bool)
+	recorded := 0
+	for _, v := range verdicts {
+		if !v.Used || !record.ValidID(v.ID) || !served[v.ID] || seen[v.ID] {
 			continue
 		}
 		seen[v.ID] = true
