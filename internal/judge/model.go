@@ -12,13 +12,20 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const (
-	// judgeHTTPTimeout bounds a single judgement call. A judgement is one
-	// frontier-model round-trip over reasoning-heavy input, so it is generous.
+	// judgeHTTPTimeout bounds a single judgement call (connect + response read —
+	// http.Client.Timeout is a TOTAL deadline, so a hung-but-connected upstream
+	// fails here rather than blocking forever). A judgement is one frontier-model
+	// round-trip over reasoning-heavy input, so the default is generous; an
+	// operator tunes it down via TWICESHY_JUDGE_TIMEOUT when a slow upstream is
+	// eating the batch's time budget. It is the default ONLY — a Config.Client
+	// (e.g. judge-eval's -timeout) overrides it.
 	judgeHTTPTimeout = 60 * time.Second
 	// judgeMaxRespBytes caps the response body we read — a misbehaving endpoint
 	// cannot flood us, and the cap is far above any honest verdict.
@@ -27,6 +34,22 @@ const (
 	// confirms the endpoint answers, not that it can judge.
 	pingTimeout = 10 * time.Second
 )
+
+// judgeTimeout is the per-call HTTP timeout for the default judge client. It honors
+// TWICESHY_JUDGE_TIMEOUT (whole seconds, >0) so an operator can tune how long a
+// slow-but-real judge may take before a hung-but-connected upstream is failed fast.
+// Failing fast is the fix for the freeze class: a timed-out judge call returns an
+// error, the panel treats it as no-verdict (fail-safe — the record stays
+// quarantined), and the batch CONTINUES to the next record instead of one wedged
+// upstream eating the whole cycle until the systemd SIGTERM. Default judgeHTTPTimeout.
+func judgeTimeout() time.Duration {
+	if s := strings.TrimSpace(os.Getenv("TWICESHY_JUDGE_TIMEOUT")); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return judgeHTTPTimeout
+}
 
 // localFamilies are the cheap local model families twiceshy runs on the brain's
 // Ollama stack. The standing rule (ADR-0013) bars the local LLM from ever being
@@ -127,7 +150,7 @@ func NewModelJudge(cfg Config) (*ModelJudge, error) {
 	}
 	client := cfg.Client
 	if client == nil {
-		client = &http.Client{Timeout: judgeHTTPTimeout}
+		client = &http.Client{Timeout: judgeTimeout()}
 	}
 	return &ModelJudge{
 		endpoint: endpoint, model: cfg.Model, system: cfg.System,

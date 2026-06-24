@@ -161,6 +161,12 @@ type Provenance struct {
 	// (#0011), e.g. "secret:aws-access-key". A flagged record is documented and
 	// quarantined but MUST NOT be promoted to validated (see validateProvenance).
 	SecurityFlags []string `yaml:"security_flags,omitempty"`
+	// ConsistencyFlags records deterministic advisory transcription defects the
+	// ingest gate caught (record.AdvisoryDefects, the #0061 defect classes), e.g.
+	// "consistency:null-fixed-fix-text". Like SecurityFlags it documents a hazard
+	// on a quarantined record that MUST NOT reach validated — a rule-based gate so
+	// the LLM judge is never the sole one (see validateProvenance).
+	ConsistencyFlags []string `yaml:"consistency_flags,omitempty"`
 }
 
 // SourceLicenseFactsOnly is the source_license sentinel for a record that
@@ -677,6 +683,21 @@ func (r *Record) validateProvenance(fail func(string, ...any)) {
 	}
 	if r.Status == "validated" && len(p.SecurityFlags) > 0 {
 		fail("status validated is not allowed with provenance.security_flags %v — a flagged record cannot be promoted", p.SecurityFlags)
+	}
+	// Only BLOCKING-class consistency flags forbid promotion (#0061). The
+	// advisory-only classes (source-url-id-mismatch) are recorded but soft — they
+	// false-positive on OSV alias pairs, so they must not gate a validated record
+	// until the detector is alias-aware (see blockingConsistencyPrefixes).
+	if r.Status == "validated" {
+		var blocking []string
+		for _, f := range p.ConsistencyFlags {
+			if IsBlockingConsistencyFlag(f) {
+				blocking = append(blocking, f)
+			}
+		}
+		if len(blocking) > 0 {
+			fail("status validated is not allowed with blocking provenance.consistency_flags %v — a flagged record cannot be promoted", blocking)
+		}
 	}
 	// Desync guards (#0050): a manual reversal must not leave a validated record
 	// with a closed validity window or a lingering demotion block — either makes

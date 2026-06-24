@@ -83,6 +83,7 @@ func newPromoter(t *testing.T, att *stubAttestor, j judge.Judge, opts ...promote
 }
 
 func advisoryRecord() *record.Record {
+	fixed := "1.2.3"
 	return &record.Record{
 		SchemaVersion: 1, ID: "exp-0007", Kind: "trap", Status: "quarantined",
 		Title: "GHSA advisory long enough title here",
@@ -90,7 +91,10 @@ func advisoryRecord() *record.Record {
 			Summary:         "known vulnerability",
 			ErrorSignatures: []string{"GHSA-227x-7mh8-3cf6"},
 		},
-		AppliesTo: []record.AppliesTo{{Ecosystem: "Go", Package: "example.com/pkg"}},
+		// A real fixed version: the fix text promises one, so the record must carry
+		// it — without it this fixture is itself a #0061 null-fixed contradiction
+		// that the promote consistency pre-gate would (correctly) hold.
+		AppliesTo: []record.AppliesTo{{Ecosystem: "Go", Package: "example.com/pkg", Versions: &record.VersionRange{Fixed: &fixed}}},
 		Resolution: &record.Resolution{
 			RootCause: "Known vulnerability per OSV.",
 			Fix:       "Upgrade past the fixed version.",
