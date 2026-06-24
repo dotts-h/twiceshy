@@ -63,7 +63,11 @@
             "required": ["validated_at"],
             "properties": {
               "validated_at": { "$ref": "#/$defs/date" },
-              "security_flags": { "maxItems": 0 }
+              "security_flags": { "maxItems": 0 },
+              "consistency_flags": {
+                "comment": "only BLOCKING classes forbid validation (record.IsBlockingConsistencyFlag); advisory-only flags (source-url-id-mismatch) are recorded but soft, so this is enforced in Go, not by maxItems",
+                "not": { "contains": { "type": "string", "pattern": "^consistency:(null-fixed-fix-text|malformed-package-path)" } }
+              }
             }
           }
         }
@@ -277,6 +281,10 @@
           "pattern": "^https?://[^\\s]+$"
         },
         "security_flags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "consistency_flags": {
           "type": "array",
           "items": { "type": "string" }
         },

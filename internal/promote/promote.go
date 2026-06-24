@@ -260,6 +260,16 @@ func (p *Promoter) promoteAdvisory(ctx context.Context, rec *record.Record) (Out
 			return skip("runtime is end-of-life — born-stale, not promoted (#0071): " + f.Issue)
 		}
 	}
+	// Consistency pre-gate (#0061): a deterministic, LLM-free hold for the precise
+	// transcription-defect classes (null-fixed/fix-text contradiction, malformed
+	// package path), computed LIVE from the record. This protects the LEGACY
+	// backlog — records ingested before the ingest gate carry no STORED
+	// consistency_flags, so the validate rule never fires for them; without this the
+	// panel could approve an exp-0061-class contradiction. Fail-safe: held, never
+	// promoted. source-url-id-mismatch is advisory-only and is NOT gated here.
+	if defects := record.AdvisoryBlockingDefects(rec); len(defects) > 0 {
+		return skip(fmt.Sprintf("consistency defect — held, not promoted (fail-safe, #0061): %v", defects))
+	}
 	verdict, err := p.advisoryPanel.Judge(ctx, judge.Request{Record: rec})
 	if err != nil {
 		return Outcome{Reason: "advisory panel unavailable — stays quarantined (fail-safe): " + err.Error(), Verdict: verdict}, nil

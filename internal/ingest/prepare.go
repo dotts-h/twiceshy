@@ -127,6 +127,19 @@ func Prepare(ctx context.Context, ix *index.Index, repo string, d Draft, m Meta)
 		rec.Provenance.SecurityFlags = flags
 	}
 
+	// Consistency gate (#0061): a deterministic, LLM-free check for advisory
+	// transcription defects (null-fixed/fix-text contradiction, source_url id
+	// mismatch, malformed package path). Mirrors the safety gate: a hit is
+	// documented in consistency_flags and the record stays quarantined (it can
+	// never be promoted, see validateProvenance) — so the judge is not the sole
+	// gate; with RejectOnFlag the draft is refused outright.
+	if defects := record.AdvisoryDefects(rec); len(defects) > 0 {
+		if m.RejectOnFlag {
+			return Outcome{}, fmt.Errorf("ingest: draft rejected by consistency gate: %v", defects)
+		}
+		rec.Provenance.ConsistencyFlags = defects
+	}
+
 	if err := record.Validate(rec); err != nil {
 		return Outcome{}, fmt.Errorf("ingest: invalid draft: %w", err)
 	}
