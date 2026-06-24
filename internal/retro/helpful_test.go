@@ -114,6 +114,136 @@ func TestRecordHelpfulness_Empty(t *testing.T) {
 	}
 }
 
+// RecordHelpfulnessAttributed — served-set-attributed recording (#0069 acceptance (b)).
+
+// Used∧served → confirmed; Used∧NOT-served → dropped; ignored∧served → dropped.
+func TestRecordHelpfulnessAttributed_UsedAndServed(t *testing.T) {
+	served := map[string]bool{"exp-0001": true, "exp-0002": true, "exp-0003": true}
+	verdicts := []retro.CardVerdict{
+		{ID: "exp-0001", Used: true},  // Used ∧ served → confirm
+		{ID: "exp-0002", Used: false}, // ignored ∧ served → drop
+		{ID: "exp-0003", Used: true},  // Used ∧ served → confirm
+	}
+	rec := &fakeRecorder{}
+	n, err := retro.RecordHelpfulnessAttributed(context.Background(), rec, verdicts, served)
+	if err != nil {
+		t.Fatalf("RecordHelpfulnessAttributed: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("recorded = %d, want 2", n)
+	}
+	if len(rec.ids) != 2 || rec.ids[0] != "exp-0001" || rec.ids[1] != "exp-0003" {
+		t.Fatalf("confirmed ids = %v, want [exp-0001 exp-0003]", rec.ids)
+	}
+}
+
+// Used but NOT in served set → must be dropped (the trust gap the served-set closes).
+func TestRecordHelpfulnessAttributed_NotServed_Dropped(t *testing.T) {
+	served := map[string]bool{"exp-0001": true} // exp-0002 was never served
+	verdicts := []retro.CardVerdict{
+		{ID: "exp-0001", Used: true},
+		{ID: "exp-0002", Used: true}, // prompt-injected; not in served set
+	}
+	rec := &fakeRecorder{}
+	n, err := retro.RecordHelpfulnessAttributed(context.Background(), rec, verdicts, served)
+	if err != nil {
+		t.Fatalf("RecordHelpfulnessAttributed: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("recorded = %d, want 1 (only exp-0001 was served)", n)
+	}
+	if len(rec.ids) != 1 || rec.ids[0] != "exp-0001" {
+		t.Fatalf("confirmed ids = %v, want [exp-0001]", rec.ids)
+	}
+}
+
+// Invalid id (malformed) → dropped even if served and Used.
+func TestRecordHelpfulnessAttributed_InvalidID_Dropped(t *testing.T) {
+	served := map[string]bool{"bad-id": true, "exp-0007": true}
+	verdicts := []retro.CardVerdict{
+		{ID: "bad-id", Used: true},
+		{ID: "exp-0007", Used: true},
+	}
+	rec := &fakeRecorder{}
+	n, err := retro.RecordHelpfulnessAttributed(context.Background(), rec, verdicts, served)
+	if err != nil {
+		t.Fatalf("RecordHelpfulnessAttributed: %v", err)
+	}
+	if n != 1 || len(rec.ids) != 1 || rec.ids[0] != "exp-0007" {
+		t.Fatalf("recorded=%d ids=%v, want 1 [exp-0007]", n, rec.ids)
+	}
+}
+
+// A Used∧served card appearing more than once in verdicts confirms exactly once.
+func TestRecordHelpfulnessAttributed_DedupsWithinCall(t *testing.T) {
+	served := map[string]bool{"exp-0011": true}
+	verdicts := []retro.CardVerdict{
+		{ID: "exp-0011", Used: true},
+		{ID: "exp-0011", Used: true},
+		{ID: "exp-0011", Used: true},
+	}
+	rec := &fakeRecorder{}
+	n, err := retro.RecordHelpfulnessAttributed(context.Background(), rec, verdicts, served)
+	if err != nil {
+		t.Fatalf("RecordHelpfulnessAttributed: %v", err)
+	}
+	if n != 1 || len(rec.ids) != 1 || rec.ids[0] != "exp-0011" {
+		t.Fatalf("recorded=%d ids=%v, want 1 [exp-0011]", n, rec.ids)
+	}
+}
+
+// nil served map → nothing is attributable; confirm nothing (safe default).
+func TestRecordHelpfulnessAttributed_NilServed_ZeroConfirmed(t *testing.T) {
+	verdicts := []retro.CardVerdict{
+		{ID: "exp-0001", Used: true},
+		{ID: "exp-0002", Used: true},
+	}
+	rec := &fakeRecorder{}
+	n, err := retro.RecordHelpfulnessAttributed(context.Background(), rec, verdicts, nil)
+	if err != nil {
+		t.Fatalf("RecordHelpfulnessAttributed: %v", err)
+	}
+	if n != 0 || len(rec.ids) != 0 {
+		t.Fatalf("nil served must confirm nothing; n=%d ids=%v", n, rec.ids)
+	}
+}
+
+// empty served map → nothing is attributable; confirm nothing (safe default).
+func TestRecordHelpfulnessAttributed_EmptyServed_ZeroConfirmed(t *testing.T) {
+	verdicts := []retro.CardVerdict{
+		{ID: "exp-0001", Used: true},
+	}
+	rec := &fakeRecorder{}
+	n, err := retro.RecordHelpfulnessAttributed(context.Background(), rec, verdicts, map[string]bool{})
+	if err != nil {
+		t.Fatalf("RecordHelpfulnessAttributed: %v", err)
+	}
+	if n != 0 || len(rec.ids) != 0 {
+		t.Fatalf("empty served must confirm nothing; n=%d ids=%v", n, rec.ids)
+	}
+}
+
+// A recorder error mid-list stops with count-so-far + the error.
+func TestRecordHelpfulnessAttributed_StopsOnError(t *testing.T) {
+	served := map[string]bool{"exp-0001": true, "exp-0002": true, "exp-0003": true}
+	rec := &fakeRecorder{failOn: "exp-0002"}
+	verdicts := []retro.CardVerdict{
+		{ID: "exp-0001", Used: true},
+		{ID: "exp-0002", Used: true}, // fails here
+		{ID: "exp-0003", Used: true}, // never reached
+	}
+	n, err := retro.RecordHelpfulnessAttributed(context.Background(), rec, verdicts, served)
+	if err == nil {
+		t.Fatal("a recorder error must propagate")
+	}
+	if n != 1 {
+		t.Fatalf("recorded = %d, want 1 (the one before the error)", n)
+	}
+	if len(rec.ids) != 1 || rec.ids[0] != "exp-0001" {
+		t.Fatalf("confirmed ids = %v, want [exp-0001]", rec.ids)
+	}
+}
+
 // StubUsageJudge returns its primed verdicts (or error) and records the call.
 func TestStubUsageJudge(t *testing.T) {
 	want := []retro.CardVerdict{{ID: "exp-0005", Used: true}}
