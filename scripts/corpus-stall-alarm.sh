@@ -26,7 +26,7 @@ now() { date +%s; }
 notify() {
 	logger -t corpus-stall-alarm "$1" 2>/dev/null || true
 	[ -n "$ALERT_URL" ] || return 0
-	curl -fsS -m 10 -d "corpus-stall-alarm: $1" "$ALERT_URL" >/dev/null 2>&1 || true
+	curl -fsS -m 10 ${NTFY_TOKEN:+-H "Authorization: Bearer $NTFY_TOKEN"} -d "corpus-stall-alarm: $1" "$ALERT_URL" >/dev/null 2>&1 || true
 }
 
 # list_pipeline_prs: emit one line per OPEN import/* or validate/* PR, normalized to

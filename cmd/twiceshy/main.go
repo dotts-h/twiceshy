@@ -388,7 +388,7 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 	// A fatal serve exit (the crash-loop cause: a corpus the index can't build, a
 	// bind failure) fires to TWICESHY_ALERT_URL so a restart loop is never silent
 	// again; unset = no-op. Pairs with the /healthz + /readyz probes.
-	alerter := notify.New(getenv("TWICESHY_ALERT_URL"), logger)
+	alerter := notify.New(getenv("TWICESHY_ALERT_URL"), getenv("NTFY_TOKEN"), logger)
 
 	ix, n, err := buildIndex(ctx, c, true) // serve = tolerant reader: one bad record never crash-loops the service
 	if err != nil {
@@ -1064,7 +1064,7 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	runID := newRunID()
 	runLog := newRunLogger(runID)
 	// Guardrail trips fire to TWICESHY_ALERT_URL (ntfy) when set; unset = no-op.
-	alerter := notify.New(getenv("TWICESHY_ALERT_URL"), runLog)
+	alerter := notify.New(getenv("TWICESHY_ALERT_URL"), getenv("NTFY_TOKEN"), runLog)
 	persist := writeRecord
 	if *effect {
 		persist = func(string, *record.Record) error { return nil }
@@ -1274,7 +1274,7 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 	runID := newRunID()
 	runLog := newRunLogger(runID)
 	// Guardrail trips fire to TWICESHY_ALERT_URL (ntfy) when set; unset = no-op.
-	alerter := notify.New(getenv("TWICESHY_ALERT_URL"), runLog)
+	alerter := notify.New(getenv("TWICESHY_ALERT_URL"), getenv("NTFY_TOKEN"), runLog)
 	persist := writeRecord
 	if *effect {
 		persist = func(string, *record.Record) error { return nil }
