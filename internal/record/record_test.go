@@ -328,9 +328,12 @@ func TestLoadCorpusForServeSkipsBadAndToleratesUnknown(t *testing.T) {
 		"experience/2026/0044-broken-record.md":  []byte("---\n\tnot: [valid yaml\n---\nbody text\n"),
 		"experience/2026/0045-flagged-record.md": render(t, flagged),
 	})
-	recs, skipped, err := record.LoadCorpusForServe(root)
+	recs, skipped, critical, err := record.LoadCorpusForServe(root)
 	if err != nil {
 		t.Fatalf("LoadCorpusForServe must not hard-fail on one bad record: %v", err)
+	}
+	if len(critical) != 0 {
+		t.Fatalf("want no critical schema-version records, got %v", critical)
 	}
 	ids := map[string]bool{}
 	for _, r := range recs {
@@ -367,15 +370,47 @@ func TestLoadCorpusForServeSkipsDuplicateID(t *testing.T) {
 		"experience/2026/0042-first.md":  render(t, a),
 		"experience/2026/0042-second.md": render(t, b),
 	})
-	recs, skipped, err := record.LoadCorpusForServe(root)
+	recs, skipped, critical, err := record.LoadCorpusForServe(root)
 	if err != nil {
 		t.Fatalf("LoadCorpusForServe must not hard-fail on a duplicate id: %v", err)
+	}
+	if len(critical) != 0 {
+		t.Fatalf("want no critical schema-version records, got %v", critical)
 	}
 	if len(recs) != 1 || recs[0].ID != "exp-0042" {
 		t.Fatalf("want exactly one exp-0042 served, got %d: %v", len(recs), recs)
 	}
 	if len(skipped) != 1 || !strings.Contains(skipped[0], "duplicate id exp-0042") {
 		t.Fatalf("want the duplicate skipped+reported, got %d: %v", len(skipped), skipped)
+	}
+}
+
+func TestLoadCorpusForServeClassifiesUnsupportedSchemaVersionCritical(t *testing.T) {
+	good := fm()
+	futureSchema := fm()
+	futureSchema["id"] = "exp-0046"
+	futureSchema["schema_version"] = record.SchemaVersion + 1
+	root := writeCorpus(t, map[string][]byte{
+		"experience/2026/0042-good-record.md":   render(t, good),
+		"experience/2026/0044-broken-record.md": []byte("---\n\tnot: [valid yaml\n---\nbody text\n"),
+		"experience/2026/0046-future-schema.md": render(t, futureSchema),
+	})
+
+	recs, skipped, critical, err := record.LoadCorpusForServe(root)
+	if err != nil {
+		t.Fatalf("LoadCorpusForServe must not hard-fail on one bad record: %v", err)
+	}
+	if len(recs) != 1 || recs[0].ID != "exp-0042" {
+		t.Fatalf("want exactly the valid record served, got %d: %v", len(recs), recs)
+	}
+	if len(critical) != 1 || !strings.Contains(critical[0], "0046-future-schema") {
+		t.Fatalf("want unsupported schema_version classified critical, got %v", critical)
+	}
+	if len(skipped) != 1 || !strings.Contains(skipped[0], "0044-broken-record") {
+		t.Fatalf("want structurally unparseable record skipped, got %v", skipped)
+	}
+	if strings.Contains(strings.Join(skipped, "\n"), "0046-future-schema") {
+		t.Fatalf("unsupported schema_version must not be a benign skip, skipped=%v", skipped)
 	}
 }
 
