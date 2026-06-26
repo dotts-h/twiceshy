@@ -56,11 +56,11 @@ prefers validated craft traps over mined drafts. Mine for *candidates*, judge fo
       whole drain (engine PR #391, `retro.ErrUnprocessable`). Poison pill no longer blocks the pipeline.
 - [x] scale miner + automate — `git-miner-seen` ledger + `twiceshy-git-miner.timer` (daily 01:10) →
       `twiceshy-retro.timer` drain → quarantine → `twiceshy-validate` judge. 47 fix-commits queued.
-- [ ] **tighten the promote gate** to the criteria above (several drafts are weak "do X" advice) — the
-      NEXT priority: a deterministic pre-gate (require concrete error_sig + applied/verified fix + repro,
-      reject hedge-words) before the LLM panel, ideally provenance-aware (mined drafts face a higher bar).
-      Must land before the git-mined ids reach the front of the judge queue.
-- [ ] `twiceshy learned` command (engine feature; separate PR + tests)
+- [x] **tighten the promote gate** — `HasSubstantiveRootCause` deterministic pre-gate (engine PR #393):
+      holds any record whose `root_cause` is empty / "None" / "N/A" (advice, not a trap) cheaply before
+      attestation+panel, every path. Calibrated on the first batch: holds exp-2770/2771, passes the 8
+      traps. FOLLOW-UP: extend with error_sig-required + hedge-word reject + provenance-aware bar.
+- [ ] `twiceshy learned` command (engine feature; separate PR + tests) — the going-forward capture path
 - [ ] defer: transcript chunking + 317-session backfill (only for uncommitted dead-ends)
 
 ## Notes
