@@ -35,13 +35,15 @@ func (NopAlerter) Alert(context.Context, string, string) {}
 // swallowed.
 type HTTPNotifier struct {
 	url    string
+	token  string
 	client *http.Client
 	logger *slog.Logger
 }
 
 // New returns an Alerter posting to url, or a NopAlerter when url is empty. The
-// logger records post failures; a nil logger discards them.
-func New(url string, logger *slog.Logger) Alerter {
+// token, if non-empty, is sent as an Authorization: Bearer header. The logger
+// records post failures; a nil logger discards them.
+func New(url, token string, logger *slog.Logger) Alerter {
 	if url == "" {
 		return NopAlerter{}
 	}
@@ -49,7 +51,7 @@ func New(url string, logger *slog.Logger) Alerter {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	// 5s: long enough for a LAN ntfy POST, short enough never to stall a nightly run.
-	return &HTTPNotifier{url: url, client: &http.Client{Timeout: 5 * time.Second}, logger: logger}
+	return &HTTPNotifier{url: url, token: token, client: &http.Client{Timeout: 5 * time.Second}, logger: logger}
 }
 
 // Alert POSTs message to the ntfy topic with the event as the notification
@@ -63,6 +65,9 @@ func (n *HTTPNotifier) Alert(ctx context.Context, event, message string) {
 	}
 	req.Header.Set("Title", "twiceshy: "+event)
 	req.Header.Set("Tags", "warning")
+	if n.token != "" {
+		req.Header.Set("Authorization", "Bearer "+n.token)
+	}
 	resp, err := n.client.Do(req)
 	if err != nil {
 		n.logger.Warn("alert post failed", "event", event, "error", err.Error())
