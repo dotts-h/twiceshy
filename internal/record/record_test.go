@@ -467,6 +467,29 @@ func TestLoadCorpusRejectsDuplicateIDs(t *testing.T) {
 	}
 }
 
+func TestLoadCorpus_DuplicateIDsAcrossDistinctPaths(t *testing.T) {
+	other := fm()
+	root := writeCorpus(t, map[string][]byte{
+		fmPath: render(t, fm()),
+		"experience/2026/0042-same-id-different-slug.md": render(t, other),
+	})
+
+	_, err := record.LoadCorpus(root)
+	if err == nil {
+		t.Fatal("LoadCorpus must reject duplicate ids across distinct record paths")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"duplicate id exp-0042",
+		fmPath,
+		"experience/2026/0042-same-id-different-slug.md",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("duplicate-id error must name %q; got %v", want, err)
+		}
+	}
+}
+
 func TestLoadCorpusRejectsMissingReproFile(t *testing.T) {
 	front := fm()
 	front["guard"].(map[string]any)["repro"] = "experience/repro/0042-nope.sh"
