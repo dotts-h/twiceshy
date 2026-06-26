@@ -5,6 +5,7 @@ package retro
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -107,6 +108,46 @@ func TestModelAnalyzer_CancelledContextErrors(t *testing.T) {
 	}
 	if got != nil {
 		t.Errorf("cancelled request returned candidates %+v, want nil", got)
+	}
+}
+
+// A non-2xx HTTP response from the endpoint is a content failure scoped to THIS
+// transcript — the endpoint was reachable — so it must surface as ErrUnprocessable
+// (poison-pill detection), not as a generic transient error.
+func TestModelAnalyzer_NonOKStatusIsErrUnprocessable(t *testing.T) {
+	for _, code := range []int{http.StatusBadRequest, http.StatusUnprocessableEntity, http.StatusInternalServerError} {
+		code := code
+		t.Run(fmt.Sprintf("HTTP_%d", code), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(code)
+				_, _ = io.WriteString(w, "model refused")
+			}))
+			defer srv.Close()
+			a, _ := NewModelAnalyzer(ModelConfig{Endpoint: srv.URL, Model: "gpt-oss:20b", Client: srv.Client()})
+			_, err := a.Analyze(context.Background(), "x")
+			if err == nil {
+				t.Fatal("want error, got nil")
+			}
+			if !errors.Is(err, ErrUnprocessable) {
+				t.Errorf("non-2xx HTTP response must be ErrUnprocessable; got %v", err)
+			}
+		})
+	}
+}
+
+// A connection failure (no HTTP response received at all) is a transient outage
+// unrelated to the transcript content — it must NOT be ErrUnprocessable so the
+// caller keeps the transcript queued for retry.
+func TestModelAnalyzer_ConnectionFailureIsNotErrUnprocessable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	srv.Close() // close immediately so the connection is refused
+	a, _ := NewModelAnalyzer(ModelConfig{Endpoint: srv.URL, Model: "gpt-oss:20b", Client: srv.Client()})
+	_, err := a.Analyze(context.Background(), "x")
+	if err == nil {
+		t.Fatal("want error on connection failure, got nil")
+	}
+	if errors.Is(err, ErrUnprocessable) {
+		t.Errorf("connection failure must NOT be ErrUnprocessable (transient, not content-specific); got %v", err)
 	}
 }
 

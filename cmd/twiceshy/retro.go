@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -122,6 +123,18 @@ func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, r
 
 		candidates, err := analyzer.Analyze(ctx, tr.Transcript)
 		if err != nil {
+			if errors.Is(err, retro.ErrUnprocessable) {
+				// Deterministic content failure — dead-letter this entry so it is
+				// not retried forever (poison pill). The endpoint was reachable; the
+				// model just cannot process this specific transcript.
+				dead := filepath.Join(queue, "dead")
+				if mkErr := os.MkdirAll(dead, 0o755); mkErr == nil {
+					_ = os.Rename(f, filepath.Join(dead, base))
+				}
+				_, _ = fmt.Fprintf(out, "  skip %s: unprocessable (%v)\n", base, err)
+				skipped++
+				continue
+			}
 			// Transient (the off-pool endpoint is down): leave this and the rest
 			// queued and stop so a scheduled run alerts and retries — never drop.
 			return fmt.Errorf("retro-intake: analyze %s: %w", base, err)

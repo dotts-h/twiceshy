@@ -121,7 +121,7 @@ func (a *ModelAnalyzer) Analyze(ctx context.Context, transcript string) ([]Candi
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("retro: status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		return nil, fmt.Errorf("retro: status %d: %s: %w", resp.StatusCode, strings.TrimSpace(string(b)), ErrUnprocessable)
 	}
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, analyzerMaxRespBytes))
@@ -129,11 +129,11 @@ func (a *ModelAnalyzer) Analyze(ctx context.Context, transcript string) ([]Candi
 		return nil, fmt.Errorf("retro: read response: %w", err)
 	}
 	if len(bytes.TrimSpace(raw)) == 0 {
-		return nil, errors.New("retro: empty response")
+		return nil, fmt.Errorf("retro: empty response: %w", ErrUnprocessable)
 	}
 	var wc wireCandidates
 	if err := json.Unmarshal(raw, &wc); err != nil {
-		return nil, fmt.Errorf("retro: decode candidates: %w", err)
+		return nil, fmt.Errorf("retro: decode candidates: %w", errors.Join(err, ErrUnprocessable))
 	}
 
 	out := make([]Candidate, 0, len(wc.Candidates))

@@ -11,9 +11,17 @@ package retro
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
+
+// ErrUnprocessable is returned when the analyzer endpoint RESPONDED but the
+// response could not be turned into candidates (non-2xx HTTP status from the
+// shim, or empty/un-parseable model content) — a property of THIS transcript,
+// not a transient outage. A transport/timeout/connection error (no HTTP
+// response received) is NOT ErrUnprocessable.
+var ErrUnprocessable = errors.New("retro: transcript unprocessable")
 
 // Candidate is one experience record an Analyzer extracted from a transcript — the
 // fields needed to build a quarantined ingest.Draft. It mirrors the

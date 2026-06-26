@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -174,6 +175,66 @@ func TestDrainRetro_LimitHitStillDequeuesProcessedTranscript(t *testing.T) {
 	}
 	if paths, _ := spool.List(queue); len(paths) != 0 {
 		t.Errorf("a limit-hit must still dequeue the fully-processed transcript; %d left (a re-run would re-write signature-less drafts as duplicates)", len(paths))
+	}
+}
+
+// unprocessableAfterFirst is a local stub that returns ErrUnprocessable on the
+// first call and real candidates on every subsequent call.
+type unprocessableAfterFirst struct {
+	candidates []retro.Candidate
+	calls      int
+}
+
+func (u *unprocessableAfterFirst) Analyze(_ context.Context, _ string) ([]retro.Candidate, error) {
+	u.calls++
+	if u.calls == 1 {
+		return nil, fmt.Errorf("model returned garbage: %w", retro.ErrUnprocessable)
+	}
+	return u.candidates, nil
+}
+
+// drainRetro must dead-letter an ErrUnprocessable entry (not retry it forever)
+// while continuing to process subsequent entries normally.
+func TestDrainRetro_UnprocessableIsDeadLetteredAndContinues(t *testing.T) {
+	corpus, ix := retroTestCorpus(t)
+	queue := filepath.Join(t.TempDir(), "retro")
+
+	// Enqueue two transcripts. The first will hit ErrUnprocessable; the second succeeds.
+	spoolOne(t, queue, "transcript that confuses the model")
+	spoolOne(t, queue, "agent hit fts5: syntax error and recovered")
+
+	stub := &unprocessableAfterFirst{candidates: []retro.Candidate{aTrapCandidate()}}
+
+	var buf bytes.Buffer
+	if err := drainRetro(context.Background(), stub, ix, "", corpus, queue, retroOpts{now: "2026-06-26"}, &buf); err != nil {
+		t.Fatalf("drainRetro returned error (must continue past unprocessable): %v", err)
+	}
+
+	// The first entry must be dead-lettered (no longer listed by spool.List).
+	remaining, _ := spool.List(queue)
+	if len(remaining) != 0 {
+		t.Errorf("queue must be empty after processing both entries; %d left", len(remaining))
+	}
+
+	// The dead-letter dir must contain the first entry.
+	dead := filepath.Join(queue, "dead")
+	deadFiles, _ := spool.List(dead) // spool.List only picks *.json files
+	if len(deadFiles) != 1 {
+		t.Errorf("dead-letter dir must hold exactly 1 file; got %d", len(deadFiles))
+	}
+
+	// The second entry must have produced a quarantined draft.
+	recs, err := record.LoadCorpus(corpus)
+	if err != nil {
+		t.Fatalf("LoadCorpus: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("want 1 quarantined draft (from second transcript), got %d", len(recs))
+	}
+
+	// The output must mention the skip.
+	if !strings.Contains(buf.String(), "skip") || !strings.Contains(buf.String(), "unprocessable") {
+		t.Errorf("output must report the skip; got: %q", buf.String())
 	}
 }
 
