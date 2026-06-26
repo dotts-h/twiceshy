@@ -93,6 +93,30 @@ func TestReportOutcome_BuildsQuarantinedCounterRecord(t *testing.T) {
 	}
 }
 
+// Two report_outcome previews in one session (no queue) must allocate DISTINCT
+// counter-record ids. ingest.NextID is corpus-derived and stateless — the same
+// collision class record_experience fixed via the serialized allocator (#0089).
+// Without routing report_outcome through h.allocateNextID, two concurrent reports
+// (or a report racing a record_experience) hand back paste-PR markdown carrying
+// the same exp-NNNN.
+func TestReportOutcome_AllocatesDistinctIDsInOneSession(t *testing.T) {
+	h, _ := newUsageHandlers(t, usageFixture()) // corpus holds exp-0200, no queue
+	id := func() string {
+		t.Helper()
+		_, res, err := h.reportOutcome(context.Background(), nil, ReportArgs{
+			RecordID: "exp-0200", Outcome: "failed", Author: "agent-x",
+		})
+		if err != nil {
+			t.Fatalf("reportOutcome: %v", err)
+		}
+		return res.RecordID
+	}
+	id1, id2 := id(), id()
+	if id1 == id2 {
+		t.Errorf("two report_outcome previews collided on id %q — must be distinct (#0089 class)", id1)
+	}
+}
+
 func TestReportOutcome_RejectsUnknownRecord(t *testing.T) {
 	h, _ := newUsageHandlers(t, usageFixture())
 	if _, _, err := h.reportOutcome(context.Background(), nil, ReportArgs{
