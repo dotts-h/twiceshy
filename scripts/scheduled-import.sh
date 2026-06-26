@@ -104,7 +104,12 @@ fi
 # use status (porcelain) so new records are actually detected and committed.
 status="$(git status --porcelain -- experience/)"
 if [ -z "$status" ]; then
-  echo "no new records"; git checkout main -q; git branch -D "$branch" -q; exit 0
+  echo "no new records"
+  # Supply-depletion alert: a full sweep across every ecosystem produced zero new
+  # records — the upstream OSV feeds are exhausted. Surface it (don't exit mute) so
+  # a human knows to add new ecosystems/sources to grow the corpus again.
+  notify "twiceshy: corpus supply DEPLETED — import across [${ECOSYSTEMS}] produced 0 new records (all feeds exhausted). Add new ecosystems/sources to grow the corpus."
+  git checkout main -q; git branch -D "$branch" -q; exit 0
 fi
 n="$(printf '%s\n' "$status" | wc -l | tr -d ' ')"
 git add experience/
