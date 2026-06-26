@@ -9,7 +9,7 @@ import (
 )
 
 // The validated-record past-window guard (validateProvenance, #0050) rejects a
-// validated record whose valid.until lies before nowUTC(). The boundary is
+// validated record whose valid.until lies before the validation instant. The boundary is
 // deliberately a RAW UTC instant compared with `until.Before(now)` — byte-identical
 // to the staleness doctor — and must NOT truncate `now` to start-of-day. If it did,
 // a record with until == today (parsed as today 00:00 UTC) would compare
@@ -18,16 +18,10 @@ import (
 //
 // TestDesync_* (provenance_desync_test.go) only exercises far-past (2021) and
 // far-future (2999) until dates — never the until==today / until==yesterday /
-// until==tomorrow boundary, and never the injectable clock. This pins exactly that
-// boundary by stubbing the unexported nowUTC (reachable only from package record).
+// until==tomorrow boundary, and never the injected instant. This pins exactly that
+// boundary by calling the unexported validator (reachable only from package record).
 func TestValidate_PastWindowBoundaryAgainstPinnedClock(t *testing.T) {
-	// Pin the clock to a fixed mid-day instant. nowUTC is a package var precisely
-	// so a test can pin it; restore on exit. No t.Parallel() in this package, so a
-	// plain defer is safe.
-	orig := nowUTC
-	defer func() { nowUTC = orig }()
 	fixed := time.Date(2026, 6, 23, 14, 30, 0, 0, time.UTC)
-	nowUTC = func() time.Time { return fixed }
 
 	// validatedRecord builds a minimal validated convention record (no guard
 	// requirement fires for kind=convention) in the importer shape, mirroring the
@@ -76,7 +70,7 @@ func TestValidate_PastWindowBoundaryAgainstPinnedClock(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := validatedRecord(tc.until)
-			err := Validate(r)
+			err := r.validate(fixed)
 			if tc.wantReject {
 				if err == nil {
 					t.Fatalf("valid.until=%s with now=%s: want rejection, got nil", tc.until, fixed)

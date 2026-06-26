@@ -289,7 +289,8 @@ func loadAndRebuild(ctx context.Context, c *commonFlags, ix *index.Index, resili
 	)
 	if resilient {
 		var skipped []string
-		recs, skipped, err = record.LoadCorpusForServe(c.corpus)
+		var critical []string
+		recs, skipped, critical, err = record.LoadCorpusForServe(c.corpus)
 		if err != nil {
 			return 0, fmt.Errorf("loading corpus: %w", err)
 		}
@@ -298,6 +299,14 @@ func loadAndRebuild(ctx context.Context, c *commonFlags, ix *index.Index, resili
 		}
 		if len(skipped) > 0 {
 			slog.Warn("serve: corpus had unloadable records", "skipped", len(skipped))
+		}
+		// #0080 covers alert metrics and corpus-CI checks; this is the
+		// engine-side loud log ADR-0021 §2 requires.
+		for _, s := range critical {
+			slog.Error("serve: CRITICAL: unsupported schema_version, serving the rest", "record", s)
+		}
+		if len(critical) > 0 {
+			slog.Error("serve: CRITICAL: corpus had unsupported schema_version records", "critical", len(critical))
 		}
 	} else if recs, err = record.LoadCorpus(c.corpus); err != nil {
 		return 0, fmt.Errorf("loading corpus: %w", err)
