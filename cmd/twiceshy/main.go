@@ -54,6 +54,7 @@ import (
 	"github.com/dotts-h/twiceshy/internal/promote"
 	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/repro"
+	runpkg "github.com/dotts-h/twiceshy/internal/run"
 	"github.com/dotts-h/twiceshy/internal/server"
 	"github.com/dotts-h/twiceshy/internal/spool"
 	"github.com/dotts-h/twiceshy/internal/telemetry"
@@ -68,7 +69,7 @@ var errUsage = errors.New("invalid flags")
 // halted before persisting further (ADR-0013 §D1). main maps it to a distinct
 // non-zero exit (3) so an unattended wrapper can react to "the guardrail fired"
 // specifically, separate from a usage error (2) or a generic failure (1).
-var errAnomalyHalt = errors.New("run halted: anomaly threshold exceeded")
+var errAnomalyHalt = runpkg.ErrAnomalyHalt
 
 // errPreflight marks a run aborted by the preflight healthcheck (ADR-0013 §A3):
 // the broker substrate (docker/runsc) or the judge endpoint was down before any
@@ -709,21 +710,6 @@ func writeFileAtomic(dst string, data []byte, perm os.FileMode) error {
 	return os.Rename(tmpName, dst)
 }
 
-// pipelineRunner is the seam the draft command drives: drafter.Pipeline.Run
-// satisfies it. Abstracting it lets the corpus walk + selection + persistence be
-// unit-tested without Docker/runsc (the broker is the part that needs them).
-type pipelineRunner interface {
-	Run(ctx context.Context, rec *record.Record) (drafter.Outcome, error)
-}
-
-// draftStats summarizes a draft run.
-type draftStats struct {
-	attached    int // a drafted repro held under the gate and was attached
-	rejected    int // a drafted repro did not hold (auto-rejected, files removed)
-	unsupported int // no template covered the record (left for the model drafter)
-	skipped     int // a quarantined record already carried a positive proof (idempotent re-run)
-}
-
 // runDraft runs the deterministic drafter pipeline (ADR-0011 §8) over the corpus:
 // for each quarantined record without a repro, it drafts a candidate repro, gates
 // it in the gVisor broker (fail-pre / pass-post, offline), and attaches the proof
@@ -746,7 +732,7 @@ func runDraft(ctx context.Context, args []string, out io.Writer, getenv func(str
 	if *dryRun {
 		n := 0
 		for _, rec := range recs {
-			if isCandidate(rec) {
+			if runpkg.IsCandidate(rec) {
 				n++
 				_, _ = fmt.Fprintf(out, "  candidate %s %s\n", rec.ID, rec.Path)
 			}
@@ -762,12 +748,11 @@ func runDraft(ctx context.Context, args []string, out io.Writer, getenv func(str
 	rv := repro.NewRevalidator(b, *corpus)
 	p := drafter.NewPipeline(rv, *corpus, draftersFrom(getenv)...)
 
-	st, err := draftCorpus(ctx, *corpus, recs, p, writeRecord, out)
+	st, err := runpkg.DraftCorpus(ctx, *corpus, recs, p, writeRecord, out)
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(out, "draft: attached %d, rejected %d, unsupported %d, skipped %d (already proven)\n",
-		st.attached, st.rejected, st.unsupported, st.skipped)
+	runpkg.WriteDraftSummary(out, st)
 	return nil
 }
 
@@ -786,68 +771,6 @@ func draftersFrom(getenv func(string) string) []drafter.Drafter {
 		ds = append(ds, drafter.NewModelDrafter(url, model))
 	}
 	return ds
-}
-
-// isCandidate reports whether the drafter should attempt rec: a quarantined
-// record that does not already carry a positive (fail-to-pass) proof. The same
-// predicate drives the -dry-run listing and the real walk, so the preview can
-// never diverge from what the gate actually touches. A record with only a
-// negative (dead-end) repro is still a candidate — it lacks a positive proof.
-func isCandidate(rec *record.Record) bool {
-	return rec.Status == "quarantined" && !record.HasPositiveRepro(rec)
-}
-
-// draftCorpus is the testable core of `twiceshy draft`: it walks the candidate
-// records, runs each through the pipeline, and persists the record whose drafted
-// repro held (the pipeline already wrote/removed the repro files and mutated the
-// guard in place). run and persist are injected so the walk is exercised without
-// a sandbox. A gate error aborts; records attached before it stay written (each
-// is an independently-valid proven repro, and a re-run resumes — already-proven
-// records are skipped).
-func draftCorpus(ctx context.Context, corpus string, recs []*record.Record, run pipelineRunner, persist func(string, *record.Record) error, out io.Writer) (draftStats, error) {
-	var st draftStats
-	for _, rec := range recs {
-		if !isCandidate(rec) {
-			if rec.Status == "quarantined" {
-				st.skipped++ // already carries a positive proof — re-running attaches nothing new
-			}
-			continue
-		}
-		outcome, err := run.Run(ctx, rec)
-		if err != nil {
-			return st, fmt.Errorf("draft %s: %w", rec.ID, err)
-		}
-		if !outcome.Drafted {
-			st.unsupported++
-			continue
-		}
-		if !outcome.Attached {
-			st.rejected++
-			_, _ = fmt.Fprintf(out, "  rejected %s (%s)\n", rec.ID, outcome.Reason)
-			continue
-		}
-		if err := persist(corpus, rec); err != nil {
-			// The drafter wrote the repro dir and the gate proved it, but the record
-			// that references it never landed — remove the now-orphan repro so a
-			// failed persist leaves no dangling files in the corpus.
-			removeRepro(corpus, outcome.ReproPath)
-			return st, fmt.Errorf("persist %s: %w", rec.ID, err)
-		}
-		st.attached++
-		_, _ = fmt.Fprintf(out, "  attached %s -> %s\n", rec.ID, outcome.ReproPath)
-	}
-	return st, nil
-}
-
-// removeRepro best-effort deletes a drafted repro directory under the corpus,
-// used to roll back a proven-but-unpersisted draft.
-func removeRepro(corpus, reproPath string) {
-	if reproPath == "" {
-		return
-	}
-	if dst, err := safeJoin(corpus, reproPath); err == nil {
-		_ = os.RemoveAll(dst)
-	}
 }
 
 // defaultMaxActions is the default anomaly-halt threshold (ADR-0013 §7/§D1, #0033):
@@ -906,22 +829,95 @@ func wrapFrontierFallback(primary judge.Judge, fbURL, fbModel, drafterModel stri
 	return judge.NewFallback(primary, judge.NewMajority(judge.NewTiming(fb), votes)), nil
 }
 
-// loopLogger returns logger, or one that discards everything when nil, so the
-// promote/adapt core can log unconditionally while tests pass nil to stay quiet.
-func loopLogger(logger *slog.Logger) *slog.Logger {
-	if logger != nil {
-		return logger
+func buildPromoterOptions(getenv func(string) string, judgeURL, judgeModel, drafterModel string, votes int) ([]promote.Option, error) {
+	promoterOpts := []promote.Option{}
+	if panelURL := getenv("TWICESHY_PANEL_JUDGE_URL"); panelURL != "" {
+		panelModel := getenv("TWICESHY_PANEL_JUDGE_MODEL")
+		aj1, err := judge.NewModelJudge(judge.Config{
+			Endpoint: judgeURL, Model: judgeModel, DrafterModel: drafterModel,
+			System: judge.AdvisorySystemV1, Advisory: true,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("configuring advisory panel primary judge: %w", err)
+		}
+		aj2, err := judge.NewModelJudge(judge.Config{
+			Endpoint: panelURL, Model: panelModel, DrafterModel: drafterModel,
+			System: judge.AdvisorySystemV1, Advisory: true,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("configuring advisory panel secondary judge: %w", err)
+		}
+		// Frontier seat = the panel's diverse second family. Default: just the
+		// PANEL_JUDGE model. Hybrid (#0086): when TWICESHY_PANEL_JUDGE_FALLBACK_URL is
+		// set, wrap it so a primary FAILURE (e.g. a free-tier Gemini exhausting its
+		// daily quota → 429) falls back to a pooled secondary (Sonnet) instead of
+		// fail-safe-skipping the record. A primary REJECT does NOT fall back (it is a
+		// real verdict, not a failure). The panel member keeps the primary's family
+		// label for the construction-time diversity check; the runtime verdict.Model
+		// records whichever model actually answered.
+		frontier, err := wrapFrontierFallback(
+			judge.NewMajority(judge.NewTiming(aj2), votes),
+			getenv("TWICESHY_PANEL_JUDGE_FALLBACK_URL"),
+			getenv("TWICESHY_PANEL_JUDGE_FALLBACK_MODEL"), drafterModel, votes)
+		if err != nil {
+			return nil, err
+		}
+		panel, err := judge.NewPanel(
+			judge.PanelMember{Model: judgeModel, Judge: judge.NewMajority(judge.NewTiming(aj1), votes)},
+			judge.PanelMember{Model: panelModel, Judge: frontier},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("configuring advisory panel: %w", err)
+		}
+		promoterOpts = append(promoterOpts, promote.WithAdvisoryPanel(panel))
+		// Born-stale gate (#0071, companion to #302), paired with the panel since it
+		// only fires on the advisory path: never promote an advisory whose runtime is
+		// already EOL — it would trip the (validated-scoped) D2 staleness guard the
+		// instant it became validated, the very thing that stuck ~36 validate PRs.
+		// Uses the public endoflife.date source (TWICESHY_EOL_URL overrides — e.g. a
+		// test/offline stub). Fails open (a source outage ⇒ no flag ⇒ promotion
+		// proceeds), with the deterministic D2 guard test as the backstop.
+		staleGate := doctor.NewStaleness(doctor.NewEndOfLifeSource(getenv("TWICESHY_EOL_URL")), time.Now().UTC())
+		promoterOpts = append(promoterOpts, promote.WithStalenessGate(staleGate.WouldFlag))
 	}
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
-
-// loopAlerter returns alerter, or a no-op when nil, so the promote/adapt core can
-// fire guardrail alerts unconditionally while tests inject a recorder or nil.
-func loopAlerter(alerter notify.Alerter) notify.Alerter {
-	if alerter != nil {
-		return alerter
+	// Prose-class panel (ADR-0020): a cross-family panel for no-repro, no-source lessons.
+	// Members are gpt-oss (the off-pool local judge) + an operator-designated frontier
+	// family on TWICESHY_PROSE_PANEL_JUDGE_URL (agy) — the gemini FREE tier is excluded
+	// for prose (privacy, ADR-0016 §5), and the ADR-0013 §6 local denylist stays enforced
+	// (neither member is a denylisted family). The prompt foregrounds poison and rejects
+	// on uncertainty; the mandatory content-screen + fail-safe panel are in promote.
+	if prosePanelURL := getenv("TWICESHY_PROSE_PANEL_JUDGE_URL"); prosePanelURL != "" {
+		prosePanelModel := getenv("TWICESHY_PROSE_PANEL_JUDGE_MODEL")
+		pj1, err := judge.NewModelJudge(judge.Config{
+			Endpoint: judgeURL, Model: judgeModel, DrafterModel: drafterModel,
+			System: judge.ProsePanelSystemV1, Prose: true,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("configuring prose panel primary judge: %w", err)
+		}
+		pj2, err := judge.NewModelJudge(judge.Config{
+			Endpoint: prosePanelURL, Model: prosePanelModel, DrafterModel: drafterModel,
+			System: judge.ProsePanelSystemV1, Prose: true,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("configuring prose panel secondary judge: %w", err)
+		}
+		prosePanel, err := judge.NewPanel(
+			judge.PanelMember{Model: judgeModel, Judge: judge.NewMajority(judge.NewTiming(pj1), votes)},
+			judge.PanelMember{Model: prosePanelModel, Judge: judge.NewMajority(judge.NewTiming(pj2), votes)},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("configuring prose panel: %w", err)
+		}
+		promoterOpts = append(promoterOpts, promote.WithProsePanel(prosePanel))
+		// The born-stale gate (valid.until) guards the prose path too; add it if the
+		// advisory block above didn't already wire the (idempotent) same gate.
+		if getenv("TWICESHY_PANEL_JUDGE_URL") == "" {
+			staleGate := doctor.NewStaleness(doctor.NewEndOfLifeSource(getenv("TWICESHY_EOL_URL")), time.Now().UTC())
+			promoterOpts = append(promoterOpts, promote.WithStalenessGate(staleGate.WouldFlag))
+		}
 	}
-	return notify.NopAlerter{}
+	return promoterOpts, nil
 }
 
 // newRunLogger builds the structured loop logger for one promote/adapt run: JSON
@@ -971,33 +967,6 @@ func acquireLoopLock(corpus string) (*lock.Lock, error) {
 		return nil, fmt.Errorf("acquiring run lock %s: %w", path, err)
 	}
 	return lk, nil
-}
-
-// recordPromoter is the seam the promote command drives: promote.Promoter.Promote
-// satisfies it. Abstracting it lets the corpus walk + persistence be unit-tested
-// without a broker or a live judge.
-type recordPromoter interface {
-	Promote(ctx context.Context, rec *record.Record) (promote.Outcome, error)
-}
-
-// promoteStats summarizes a promote run.
-type promoteStats struct {
-	promoted   int // holding attestation + judge PASS → flipped to validated
-	held       int // eligible but not promoted (attestation didn't hold or judge declined)
-	ineligible int // not the execution-provable class (left for a human)
-}
-
-// printEffectPreview reports the would-be transitions of a no-persist run; a
-// record whose status is unchanged (held/ineligible/orphan) is shown as no-op.
-func printEffectPreview(out io.Writer, stage string, actions []promote.RecordAction) {
-	changed := 0
-	for _, a := range actions {
-		if a.FromStatus != a.ToStatus {
-			_, _ = fmt.Fprintf(out, "  %s: %s→%s (%s)\n", a.ID, a.FromStatus, a.ToStatus, a.Outcome)
-			changed++
-		}
-	}
-	_, _ = fmt.Fprintf(out, "%s -effect: %d of %d record(s) would change status — nothing written\n", stage, changed, len(actions))
 }
 
 // runPromote is the positive direction of ADR-0013 (#0029): for each quarantined
@@ -1079,92 +1048,9 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	// Ping for preflight; only the gate sees the voting wrapper. TimingJudge sits
 	// inside Majority so each inner HTTP call is timed, not the N-vote group.
 	tj := judge.NewTiming(j)
-	promoterOpts := []promote.Option{}
-	if panelURL := getenv("TWICESHY_PANEL_JUDGE_URL"); panelURL != "" {
-		panelModel := getenv("TWICESHY_PANEL_JUDGE_MODEL")
-		aj1, err := judge.NewModelJudge(judge.Config{
-			Endpoint: judgeURL, Model: *judgeModel, DrafterModel: *drafterModel,
-			System: judge.AdvisorySystemV1, Advisory: true,
-		})
-		if err != nil {
-			return fmt.Errorf("configuring advisory panel primary judge: %w", err)
-		}
-		aj2, err := judge.NewModelJudge(judge.Config{
-			Endpoint: panelURL, Model: panelModel, DrafterModel: *drafterModel,
-			System: judge.AdvisorySystemV1, Advisory: true,
-		})
-		if err != nil {
-			return fmt.Errorf("configuring advisory panel secondary judge: %w", err)
-		}
-		// Frontier seat = the panel's diverse second family. Default: just the
-		// PANEL_JUDGE model. Hybrid (#0086): when TWICESHY_PANEL_JUDGE_FALLBACK_URL is
-		// set, wrap it so a primary FAILURE (e.g. a free-tier Gemini exhausting its
-		// daily quota → 429) falls back to a pooled secondary (Sonnet) instead of
-		// fail-safe-skipping the record. A primary REJECT does NOT fall back (it is a
-		// real verdict, not a failure). The panel member keeps the primary's family
-		// label for the construction-time diversity check; the runtime verdict.Model
-		// records whichever model actually answered.
-		frontier, err := wrapFrontierFallback(
-			judge.NewMajority(judge.NewTiming(aj2), *votes),
-			getenv("TWICESHY_PANEL_JUDGE_FALLBACK_URL"),
-			getenv("TWICESHY_PANEL_JUDGE_FALLBACK_MODEL"), *drafterModel, *votes)
-		if err != nil {
-			return err
-		}
-		panel, err := judge.NewPanel(
-			judge.PanelMember{Model: *judgeModel, Judge: judge.NewMajority(judge.NewTiming(aj1), *votes)},
-			judge.PanelMember{Model: panelModel, Judge: frontier},
-		)
-		if err != nil {
-			return fmt.Errorf("configuring advisory panel: %w", err)
-		}
-		promoterOpts = append(promoterOpts, promote.WithAdvisoryPanel(panel))
-		// Born-stale gate (#0071, companion to #302), paired with the panel since it
-		// only fires on the advisory path: never promote an advisory whose runtime is
-		// already EOL — it would trip the (validated-scoped) D2 staleness guard the
-		// instant it became validated, the very thing that stuck ~36 validate PRs.
-		// Uses the public endoflife.date source (TWICESHY_EOL_URL overrides — e.g. a
-		// test/offline stub). Fails open (a source outage ⇒ no flag ⇒ promotion
-		// proceeds), with the deterministic D2 guard test as the backstop.
-		staleGate := doctor.NewStaleness(doctor.NewEndOfLifeSource(getenv("TWICESHY_EOL_URL")), time.Now().UTC())
-		promoterOpts = append(promoterOpts, promote.WithStalenessGate(staleGate.WouldFlag))
-	}
-	// Prose-class panel (ADR-0020): a cross-family panel for no-repro, no-source lessons.
-	// Members are gpt-oss (the off-pool local judge) + an operator-designated frontier
-	// family on TWICESHY_PROSE_PANEL_JUDGE_URL (agy) — the gemini FREE tier is excluded
-	// for prose (privacy, ADR-0016 §5), and the ADR-0013 §6 local denylist stays enforced
-	// (neither member is a denylisted family). The prompt foregrounds poison and rejects
-	// on uncertainty; the mandatory content-screen + fail-safe panel are in promote.
-	if prosePanelURL := getenv("TWICESHY_PROSE_PANEL_JUDGE_URL"); prosePanelURL != "" {
-		prosePanelModel := getenv("TWICESHY_PROSE_PANEL_JUDGE_MODEL")
-		pj1, err := judge.NewModelJudge(judge.Config{
-			Endpoint: judgeURL, Model: *judgeModel, DrafterModel: *drafterModel,
-			System: judge.ProsePanelSystemV1, Prose: true,
-		})
-		if err != nil {
-			return fmt.Errorf("configuring prose panel primary judge: %w", err)
-		}
-		pj2, err := judge.NewModelJudge(judge.Config{
-			Endpoint: prosePanelURL, Model: prosePanelModel, DrafterModel: *drafterModel,
-			System: judge.ProsePanelSystemV1, Prose: true,
-		})
-		if err != nil {
-			return fmt.Errorf("configuring prose panel secondary judge: %w", err)
-		}
-		prosePanel, err := judge.NewPanel(
-			judge.PanelMember{Model: *judgeModel, Judge: judge.NewMajority(judge.NewTiming(pj1), *votes)},
-			judge.PanelMember{Model: prosePanelModel, Judge: judge.NewMajority(judge.NewTiming(pj2), *votes)},
-		)
-		if err != nil {
-			return fmt.Errorf("configuring prose panel: %w", err)
-		}
-		promoterOpts = append(promoterOpts, promote.WithProsePanel(prosePanel))
-		// The born-stale gate (valid.until) guards the prose path too; add it if the
-		// advisory block above didn't already wire the (idempotent) same gate.
-		if getenv("TWICESHY_PANEL_JUDGE_URL") == "" {
-			staleGate := doctor.NewStaleness(doctor.NewEndOfLifeSource(getenv("TWICESHY_EOL_URL")), time.Now().UTC())
-			promoterOpts = append(promoterOpts, promote.WithStalenessGate(staleGate.WouldFlag))
-		}
+	promoterOpts, err := buildPromoterOptions(getenv, judgeURL, *judgeModel, *drafterModel, *votes)
+	if err != nil {
+		return err
 	}
 	p := promote.NewPromoter(rv, judge.NewMajority(tj, *votes), *corpus, promoterOpts...)
 
@@ -1179,73 +1065,41 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	runLog := newRunLogger(runID)
 	// Guardrail trips fire to TWICESHY_ALERT_URL (ntfy) when set; unset = no-op.
 	alerter := notify.New(getenv("TWICESHY_ALERT_URL"), runLog)
-	// In -json or -effect mode stdout carries only the manifest or effect preview;
-	// the per-record prose is suppressed (the slog stream on stderr stays the
-	// human-followable channel).
-	proseOut := out
-	if *asJSON || *effect {
-		proseOut = io.Discard
-	}
 	persist := writeRecord
 	if *effect {
 		persist = func(string, *record.Record) error { return nil }
 	}
-	// Sweep a crashed prior run's leaked sandbox resources before the walk (#0052).
-	startupReap(ctx, "promote", *effect, runLog, proseOut)
-	logSkippedPoison(runLog, proseOut, "promote", skipped)
-	// Hold cooldown (#0084): drop records the panel declined within the window so a
-	// scheduled run doesn't re-run the costly judge on the same held backlog every
-	// time. The ledger is operational state under <corpus>/runs/, alongside the
-	// journals; a nil ledger (cooldown 0) keeps every record.
 	now := time.Now()
 	holds := loadHoldLedger(*corpus, *holdCooldown)
-	recs, cooled := filterCooldown(recs, holds, now)
-	if cooled > 0 {
-		_, _ = fmt.Fprintf(proseOut, "promote: %d record(s) in hold-cooldown — skipped (re-judged at most once per %s)\n", cooled, *holdCooldown)
-		runLog.Info("hold cooldown", "skipped", cooled, "cooldown", holdCooldown.String())
-	}
-	st, actions, err := promoteCorpus(ctx, *corpus, recs, p, persist, g, runLog, alerter, proseOut, journalPathForRun(*corpus, "promote", *effect))
-	if *effect {
-		if err != nil && !errors.Is(err, errAnomalyHalt) {
-			return err
-		}
-		printEffectPreview(out, "promote", actions)
-		return err
-	}
-	// Fold this run's outcomes into the cooldown ledger: a held record starts its
-	// cooldown; a promoted one is cleared. Done after the effect short-circuit so a
-	// preview run never mutates the ledger.
-	noteOutcomes(holds, actions, now)
-	if serr := holds.save(now); serr != nil {
-		runLog.Warn("hold ledger save failed", "err", serr.Error())
-	}
-	judgeStats := surfaceJudgeStats(runLog, tj)
-	// An anomaly halt still produces a summary/manifest (the run is legible and the
-	// anomaly is flagged); only a hard failure short-circuits without one.
-	if err != nil && !errors.Is(err, errAnomalyHalt) {
-		return err
-	}
-	anomaly := errors.Is(err, errAnomalyHalt)
-	if *asJSON {
-		if werr := (promote.RunManifest{
-			RunID: runID, Stage: "promote", Anomaly: anomaly,
-			Counts:     map[string]int{"promoted": st.promoted, "held": st.held, "ineligible": st.ineligible},
-			JudgeStats: judgeStats,
-			Actions:    actions,
-		}).WriteJSON(out); werr != nil {
-			return werr
-		}
-		if err == nil {
-			notify.Heartbeat(ctx, getenv("TWICESHY_HEARTBEAT_URL"), runLog)
-		}
-		return err
-	}
-	_, _ = fmt.Fprintf(out, "promote: promoted %d, held %d (attestation/judge declined), ineligible %d\n",
-		st.promoted, st.held, st.ineligible)
-	if err == nil {
-		notify.Heartbeat(ctx, getenv("TWICESHY_HEARTBEAT_URL"), runLog)
-	}
-	return err
+	return runpkg.RunStage(ctx, out, getenv, runLog, "promote", runID, *asJSON, *effect,
+		func() *judge.JudgeStats { return surfaceJudgeStats(runLog, tj) },
+		func(proseOut io.Writer) (runpkg.PromoteStats, []promote.RecordAction, error) {
+			// Sweep a crashed prior run's leaked sandbox resources before the walk (#0052).
+			startupReap(ctx, "promote", *effect, runLog, proseOut)
+			logSkippedPoison(runLog, proseOut, "promote", skipped)
+			// Hold cooldown (#0084): drop records the panel declined within the window so a
+			// scheduled run doesn't re-run the costly judge on the same held backlog every
+			// time. The ledger is operational state under <corpus>/runs/, alongside the
+			// journals; a nil ledger (cooldown 0) keeps every record.
+			cooledRecs, cooled := filterCooldown(recs, holds, now)
+			if cooled > 0 {
+				_, _ = fmt.Fprintf(proseOut, "promote: %d record(s) in hold-cooldown — skipped (re-judged at most once per %s)\n", cooled, *holdCooldown)
+				runLog.Info("hold cooldown", "skipped", cooled, "cooldown", holdCooldown.String())
+			}
+			return runpkg.PromoteCorpus(ctx, *corpus, cooledRecs, p, persist, g, runLog, alerter, proseOut, runpkg.JournalPathForRun(*corpus, "promote", *effect))
+		},
+		func(_ runpkg.PromoteStats, actions []promote.RecordAction, _ error) error {
+			// Fold this run's outcomes into the cooldown ledger: a held record starts its
+			// cooldown; a promoted one is cleared. Done after the effect short-circuit so a
+			// preview run never mutates the ledger.
+			noteOutcomes(holds, actions, now)
+			if serr := holds.save(now); serr != nil {
+				runLog.Warn("hold ledger save failed", "err", serr.Error())
+			}
+			return nil
+		},
+		runpkg.PromoteManifest,
+		runpkg.WritePromoteSummary)
 }
 
 // runRepromote is the reversal path of ADR-0013 (#0048): for one stale or
@@ -1339,244 +1193,6 @@ func runRepromote(ctx context.Context, args []string, out io.Writer, getenv func
 	return nil
 }
 
-func journalPathForRun(corpus, stage string, effect bool) string {
-	if effect {
-		return ""
-	}
-	return promote.JournalPath(corpus, stage)
-}
-
-// corpusJournal incrementally persists promote/adapt decisions for resume (#0054).
-type corpusJournal struct {
-	j      *promote.Journal
-	path   string
-	resume map[string]bool
-}
-
-func startCorpusJournal(path, stage string) (*corpusJournal, []promote.RecordAction, error) {
-	if path == "" {
-		return nil, nil, nil
-	}
-	loaded, err := promote.LoadJournal(path)
-	if err != nil {
-		return nil, nil, err
-	}
-	if loaded != nil && !loaded.Complete {
-		return &corpusJournal{j: loaded, path: path, resume: loaded.DoneIDs()},
-			append([]promote.RecordAction(nil), loaded.Actions...), nil
-	}
-	return &corpusJournal{
-		j:      &promote.Journal{Stage: stage, Actions: []promote.RecordAction{}},
-		path:   path,
-		resume: map[string]bool{},
-	}, nil, nil
-}
-
-func (cj *corpusJournal) skip(id string) bool {
-	return cj != nil && cj.resume[id]
-}
-
-func (cj *corpusJournal) record(action promote.RecordAction) {
-	if cj == nil {
-		return
-	}
-	cj.j.Actions = append(cj.j.Actions, action)
-	_ = cj.j.Save(cj.path)
-}
-
-func (cj *corpusJournal) abort(recordID string, err error) {
-	if cj == nil {
-		return
-	}
-	cj.j.StoppedAt = &promote.JournalStop{RecordID: recordID, Error: err.Error()}
-	cj.j.Complete = false
-	_ = cj.j.Save(cj.path)
-}
-
-func (cj *corpusJournal) complete() {
-	if cj == nil {
-		return
-	}
-	cj.j.Complete = true
-	cj.j.StoppedAt = nil
-	_ = cj.j.Save(cj.path)
-}
-
-// promoteCorpus is the testable core of `twiceshy promote`: it walks the records,
-// runs each through the promoter, and persists the records that were promoted
-// (the promoter mutated status/validated_at/provenance in place). run and persist
-// are injected so the walk is exercised without a sandbox or a live judge. A hard
-// promoter error (broker failure, an invalid promoted record) aborts; records
-// promoted before it stay written (each is an independently-valid delta).
-func promoteCorpus(ctx context.Context, corpus string, recs []*record.Record, run recordPromoter, persist func(string, *record.Record) error, g guard.Guardrails, logger *slog.Logger, alerter notify.Alerter, out io.Writer, journalPath string) (promoteStats, []promote.RecordAction, error) {
-	log := loopLogger(logger).With("stage", "promote")
-	alert := loopAlerter(alerter)
-	start := time.Now()
-	var st promoteStats
-	actions := []promote.RecordAction{}
-	// Emergency stop (ADR-0013 §7): nothing auto-releases; records pile up.
-	if g.Engaged() {
-		_, _ = fmt.Fprintln(out, "promote: emergency stop engaged (TWICESHY_PAUSE) — no promotions")
-		log.Warn("emergency stop engaged", "outcome", "emergency_stop")
-		alert.Alert(ctx, "emergency_stop", "promote: emergency stop engaged (TWICESHY_PAUSE) — no promotions")
-		log.Info("run complete", "outcome", "summary", "promoted", st.promoted, "held", st.held, "ineligible", st.ineligible, "anomaly", false, "duration_ms", time.Since(start).Milliseconds())
-		return st, actions, nil
-	}
-	journal, prior, err := startCorpusJournal(journalPath, "promote")
-	if err != nil {
-		return st, actions, fmt.Errorf("load promote journal: %w", err)
-	}
-	if prior != nil {
-		actions = prior
-	}
-	budget := g.Budget()
-	for _, rec := range recs {
-		if journal.skip(rec.ID) {
-			continue
-		}
-		// Throughput cap (clean stop, #0084): the intended per-run promotion
-		// ceiling. A normal, mergeable batch — distinct from the anomaly halt
-		// below. Placed FIRST and set below MaxActions so a full batch stops here
-		// cleanly (zero exit, "re-run to continue") instead of tripping the anomaly
-		// halt every run — the bug where MaxActions doubled as the throttle.
-		if budget.Capped() {
-			msg := fmt.Sprintf("promote: throughput cap reached (%d promotions) — stopping cleanly; re-run to continue", budget.Actions())
-			_, _ = fmt.Fprintln(out, msg)
-			log.Info("throughput cap reached", "outcome", "throughput_cap", "promotions", budget.Actions())
-			break
-		}
-		// Anomaly HALT (ADR-0013 §D1): a promotion spike already past the alert
-		// threshold is the "judge approving everything" signal. Check BEFORE doing
-		// any further work — the old path persisted, then checked, then continued,
-		// then exited 0, so a compromised judge wrote bad records and reported
-		// success. Stop here; the post-loop summary flags it + a non-zero exit.
-		if budget.Anomalous() {
-			msg := fmt.Sprintf("promote: ANOMALY HALT — %d promotions exceed the alert threshold; stopping with nothing further written (investigate a compromised judge; TWICESHY_PAUSE=1)", budget.Actions())
-			_, _ = fmt.Fprintln(out, msg)
-			log.Warn("anomaly halt — stopping before further writes", "outcome", "anomaly_halt", "actions", budget.Actions())
-			alert.Alert(ctx, "anomaly", msg)
-			break
-		}
-		if ok, reason := promote.Promotable(rec); !ok {
-			st.ineligible++
-			log.Info("decision", "record_id", rec.ID, "outcome", "ineligible", "reason", reason)
-			action := promote.RecordAction{ID: rec.ID, Outcome: "ineligible", FromStatus: rec.Status, ToStatus: rec.Status, Reason: reason}
-			actions = append(actions, action)
-			journal.record(action)
-			continue
-		}
-		// Budget cap: stop draining the sandbox past the per-run ceiling.
-		if !budget.AllowRun() {
-			msg := fmt.Sprintf("promote: budget cap reached (%d runs) — stopping; re-run to continue", budget.Runs())
-			_, _ = fmt.Fprintln(out, msg)
-			log.Warn("budget cap reached", "outcome", "budget_cap", "runs", budget.Runs())
-			alert.Alert(ctx, "budget_cap", msg)
-			break
-		}
-		budget.StartRun()
-		from := rec.Status
-		recStart := time.Now()
-		outcome, err := run.Promote(ctx, rec)
-		dur := time.Since(recStart).Milliseconds()
-		if err != nil {
-			log.Error("decision", "record_id", rec.ID, "outcome", "error", "reason", err.Error(), "duration_ms", dur)
-			promoteErr := fmt.Errorf("promote %s: %w", rec.ID, err)
-			journal.abort(rec.ID, promoteErr)
-			return st, actions, promoteErr
-		}
-		if !outcome.Promoted {
-			st.held++
-			_, _ = fmt.Fprintf(out, "  held %s (%s)\n", rec.ID, outcome.Reason)
-			log.Info("decision", "record_id", rec.ID, "outcome", "held", "reason", outcome.Reason, "duration_ms", dur)
-			action := promote.RecordAction{ID: rec.ID, Outcome: "held", FromStatus: from, ToStatus: rec.Status, Reason: outcome.Reason}
-			actions = append(actions, action)
-			journal.record(action)
-			continue
-		}
-		if err := persist(corpus, rec); err != nil {
-			log.Error("decision", "record_id", rec.ID, "outcome", "error", "reason", err.Error(), "duration_ms", dur)
-			persistErr := fmt.Errorf("persist %s: %w", rec.ID, err)
-			journal.abort(rec.ID, persistErr)
-			return st, actions, persistErr
-		}
-		st.promoted++
-		budget.CountAction()
-		advisory := rec.Provenance.Promotion != nil && len(rec.Provenance.Promotion.Panel) > 0
-		if advisory {
-			_, _ = fmt.Fprintf(out, "  promoted %s -> validated (advisory panel %s)\n",
-				rec.ID, outcome.Verdict.Model)
-		} else {
-			_, _ = fmt.Fprintf(out, "  promoted %s -> validated (judge %s, reproduced under %s)\n",
-				rec.ID, outcome.Verdict.Model, strings.Join(outcome.Attestation.ReproducedUnder, ", "))
-		}
-		log.Info("decision",
-			"record_id", rec.ID,
-			"outcome", "promoted",
-			"judge_model", outcome.Verdict.Model,
-			"judge_decision", string(outcome.Verdict.Decision),
-			"reproduced_under", outcome.Attestation.ReproducedUnder,
-			"attestation_ran_at", outcome.Attestation.RanAt,
-			"advisory", advisory,
-			"duration_ms", dur,
-		)
-		action := promote.RecordAction{
-			ID: rec.ID, Outcome: "promoted", FromStatus: from, ToStatus: rec.Status,
-			JudgeModel: outcome.Verdict.Model, JudgeDecision: string(outcome.Verdict.Decision),
-			ReproducedUnder: outcome.Attestation.ReproducedUnder,
-			Advisory:        advisory,
-		}
-		actions = append(actions, action)
-		journal.record(action)
-	}
-	anomaly := budget.Anomalous()
-	// Approval-RATE anomaly (#0085): the count anomaly above is moot once a throughput
-	// cap is set (a normal run stops at the cap). A compromised judge approving
-	// ~everything instead shows as a high promoted/judged fraction, which survives the
-	// cap — assess it post-loop on the full sample and fold it into the halt/alert.
-	if budget.RateAnomalous() {
-		anomaly = true
-		msg := fmt.Sprintf("promote: APPROVAL-RATE ANOMALY — %d/%d promoted (%.0f%%) over the %.0f%% baseline (min sample %d); a batch approving ~everything signals a compromised judge even under a throughput cap (investigate; TWICESHY_PAUSE=1)",
-			budget.Actions(), budget.Runs(), 100*budget.ActionRate(), 100*g.MaxActionRate, g.MinSample)
-		_, _ = fmt.Fprintln(out, msg)
-		log.Warn("approval-rate anomaly", "outcome", "rate_anomaly", "promoted", budget.Actions(), "judged", budget.Runs(), "rate", budget.ActionRate())
-		alert.Alert(ctx, "rate_anomaly", msg)
-	}
-	log.Info("run complete", "outcome", "summary", "promoted", st.promoted, "held", st.held, "ineligible", st.ineligible, "anomaly", anomaly, "duration_ms", time.Since(start).Milliseconds())
-	// Marking complete here (including an anomaly halt or a budget-cap break) is
-	// deliberate: only a hard mid-record error is a resumable abort (it set
-	// StoppedAt). An anomaly halt is held for human review and a budget cap means
-	// "re-run to continue" with a fresh walk — neither should auto-resume.
-	journal.complete()
-	if anomaly {
-		return st, actions, errAnomalyHalt
-	}
-	return st, actions, nil
-}
-
-// counterRunner re-runs an original record's repro and the report's evidence as
-// a counter-repro, returning both attestations. The broker-backed impl needs
-// docker+runsc; a fake drives the adaptCorpus walk in tests.
-type counterRunner interface {
-	Run(ctx context.Context, original, report *record.Record) (promote.CounterEvidence, error)
-}
-
-// adaptStats summarizes an adapt run.
-type adaptStats struct {
-	demoted  int // reproduced failure + judge PASS → validated→stale
-	disputed int // non-reproducing reports corroborated past threshold → validated→disputed
-	held     int // no execution-backed counter-evidence and uncorroborated — no change
-	orphan   int // report disputes a record not in the corpus
-}
-
-// reportDisputes returns the disputed record id if rec is a quarantined outcome
-// report (carries provenance.disputes), else "".
-func reportDisputes(rec *record.Record) string {
-	if rec.Status == "quarantined" && rec.Provenance.Disputes != nil {
-		return *rec.Provenance.Disputes
-	}
-	return ""
-}
-
 // runAdapt is the negative direction of ADR-0013 (#0032): for each quarantined
 // outcome report, re-run the disputed record's repro plus the report's counter
 // through the broker; a reproduced failure + a judge PASS demotes the record to
@@ -1608,7 +1224,7 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 	if *dryRun && !*effect {
 		n := 0
 		for _, rec := range recs {
-			if d := reportDisputes(rec); d != "" {
+			if d := runpkg.ReportDisputes(rec); d != "" {
 				n++
 				_, _ = fmt.Fprintf(out, "  report %s disputes %s\n", rec.ID, d)
 			}
@@ -1659,218 +1275,21 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 	runLog := newRunLogger(runID)
 	// Guardrail trips fire to TWICESHY_ALERT_URL (ntfy) when set; unset = no-op.
 	alerter := notify.New(getenv("TWICESHY_ALERT_URL"), runLog)
-	proseOut := out
-	if *asJSON || *effect {
-		proseOut = io.Discard
-	}
 	persist := writeRecord
 	if *effect {
 		persist = func(string, *record.Record) error { return nil }
 	}
-	// Sweep a crashed prior run's leaked sandbox resources before the walk (#0052).
-	startupReap(ctx, "adapt", *effect, runLog, proseOut)
-	logSkippedPoison(runLog, proseOut, "adapt", skipped)
-	st, actions, err := adaptCorpus(ctx, *corpus, recs, runner, adapter, persist, g, runLog, alerter, proseOut, journalPathForRun(*corpus, "adapt", *effect))
-	if *effect {
-		if err != nil && !errors.Is(err, errAnomalyHalt) {
-			return err
-		}
-		printEffectPreview(out, "adapt", actions)
-		return err
-	}
-	judgeStats := surfaceJudgeStats(runLog, tj)
-	// An anomaly halt still produces a summary/manifest; only a hard failure short-circuits.
-	if err != nil && !errors.Is(err, errAnomalyHalt) {
-		return err
-	}
-	anomaly := errors.Is(err, errAnomalyHalt)
-	if *asJSON {
-		if werr := (promote.RunManifest{
-			RunID: runID, Stage: "adapt", Anomaly: anomaly,
-			Counts:     map[string]int{"demoted": st.demoted, "disputed": st.disputed, "held": st.held, "orphan": st.orphan},
-			JudgeStats: judgeStats,
-			Actions:    actions,
-		}).WriteJSON(out); werr != nil {
-			return werr
-		}
-		if err == nil {
-			notify.Heartbeat(ctx, getenv("TWICESHY_HEARTBEAT_URL"), runLog)
-		}
-		return err
-	}
-	_, _ = fmt.Fprintf(out, "adapt: demoted %d, disputed %d, held %d, orphan %d\n", st.demoted, st.disputed, st.held, st.orphan)
-	if err == nil {
-		notify.Heartbeat(ctx, getenv("TWICESHY_HEARTBEAT_URL"), runLog)
-	}
-	return err
-}
-
-// adaptCorpus is the testable core of `twiceshy adapt`: it pairs each outcome
-// report with the record it disputes, runs the counter-evidence through `run`,
-// adjudicates it with the Adapter, and persists the disputed record when it is
-// demoted or disputed. The corroboration count (other reports disputing the same
-// record) is computed from the corpus. run and persist are injected so the walk
-// is exercised without a sandbox or a live judge.
-func adaptCorpus(ctx context.Context, corpus string, recs []*record.Record, run counterRunner, adapter *promote.Adapter, persist func(string, *record.Record) error, g guard.Guardrails, logger *slog.Logger, alerter notify.Alerter, out io.Writer, journalPath string) (adaptStats, []promote.RecordAction, error) {
-	log := loopLogger(logger).With("stage", "adapt")
-	alert := loopAlerter(alerter)
-	start := time.Now()
-	byID := make(map[string]*record.Record, len(recs))
-	disputesCount := make(map[string]int)
-	for _, r := range recs {
-		byID[r.ID] = r
-		if d := reportDisputes(r); d != "" {
-			disputesCount[d]++
-		}
-	}
-
-	var st adaptStats
-	actions := []promote.RecordAction{}
-	// Emergency stop (ADR-0013 §7) halts auto-demotion too.
-	if g.Engaged() {
-		_, _ = fmt.Fprintln(out, "adapt: emergency stop engaged (TWICESHY_PAUSE) — no demotions")
-		log.Warn("emergency stop engaged", "outcome", "emergency_stop")
-		alert.Alert(ctx, "emergency_stop", "adapt: emergency stop engaged (TWICESHY_PAUSE) — no demotions")
-		log.Info("run complete", "outcome", "summary", "demoted", st.demoted, "disputed", st.disputed, "held", st.held, "orphan", st.orphan, "anomaly", false, "duration_ms", time.Since(start).Milliseconds())
-		return st, actions, nil
-	}
-	journal, prior, err := startCorpusJournal(journalPath, "adapt")
-	if err != nil {
-		return st, actions, fmt.Errorf("load adapt journal: %w", err)
-	}
-	if prior != nil {
-		actions = prior
-	}
-	budget := g.Budget()
-	for _, rep := range recs {
-		// Throughput cap (clean stop, #0084): the intended per-run demote/dispute
-		// ceiling. A normal, mergeable batch — set below MaxActions so a full run
-		// stops here cleanly instead of tripping the anomaly halt every time.
-		if budget.Capped() {
-			msg := fmt.Sprintf("adapt: throughput cap reached (%d actions) — stopping cleanly; re-run to continue", budget.Actions())
-			_, _ = fmt.Fprintln(out, msg)
-			log.Info("throughput cap reached", "outcome", "throughput_cap", "actions", budget.Actions())
-			break
-		}
-		// Anomaly HALT (ADR-0013 §D1): a demote/dispute spike past the alert
-		// threshold is the "compromised judge" signal — stop BEFORE persisting any
-		// more (the old path persisted, then checked, then continued, then exited 0).
-		// The post-loop summary flags it + a non-zero exit.
-		if budget.Anomalous() {
-			msg := fmt.Sprintf("adapt: ANOMALY HALT — %d demote/dispute actions exceed the alert threshold; stopping with nothing further written (investigate a compromised judge; TWICESHY_PAUSE=1)", budget.Actions())
-			_, _ = fmt.Fprintln(out, msg)
-			log.Warn("anomaly halt — stopping before further writes", "outcome", "anomaly_halt", "actions", budget.Actions())
-			alert.Alert(ctx, "anomaly", msg)
-			break
-		}
-		origID := reportDisputes(rep)
-		if origID == "" {
-			continue
-		}
-		original, ok := byID[origID]
-		skipID := origID
-		if !ok {
-			skipID = rep.ID
-		}
-		if journal.skip(skipID) {
-			continue
-		}
-		if !ok {
-			st.orphan++
-			_, _ = fmt.Fprintf(out, "  orphan report %s disputes unknown %s\n", rep.ID, origID)
-			log.Info("decision", "record_id", rep.ID, "outcome", "orphan", "reason", "disputes unknown "+origID)
-			action := promote.RecordAction{ID: rep.ID, Outcome: "orphan", FromStatus: rep.Status, ToStatus: rep.Status, Reason: "disputes unknown " + origID}
-			actions = append(actions, action)
-			journal.record(action)
-			continue
-		}
-		// Budget cap: a report flood can't drain the broker/judge past the ceiling.
-		if !budget.AllowRun() {
-			msg := fmt.Sprintf("adapt: budget cap reached (%d runs) — stopping; re-run to continue", budget.Runs())
-			_, _ = fmt.Fprintln(out, msg)
-			log.Warn("budget cap reached", "outcome", "budget_cap", "runs", budget.Runs())
-			alert.Alert(ctx, "budget_cap", msg)
-			break
-		}
-		budget.StartRun()
-		from := original.Status
-		recStart := time.Now()
-		ev, err := run.Run(ctx, original, rep)
-		if err != nil {
-			log.Error("decision", "record_id", original.ID, "outcome", "error", "reason", err.Error(), "duration_ms", time.Since(recStart).Milliseconds())
-			adaptErr := fmt.Errorf("adapt %s: %w", rep.ID, err)
-			journal.abort(rep.ID, adaptErr)
-			return st, actions, adaptErr
-		}
-		outcome, err := adapter.Adapt(ctx, original, rep, ev, disputesCount[origID]-1)
-		dur := time.Since(recStart).Milliseconds()
-		if err != nil {
-			log.Error("decision", "record_id", original.ID, "outcome", "error", "reason", err.Error(), "duration_ms", dur)
-			adaptErr := fmt.Errorf("adapt %s: %w", rep.ID, err)
-			journal.abort(rep.ID, adaptErr)
-			return st, actions, adaptErr
-		}
-		switch outcome.Action {
-		case promote.ActionDemote:
-			if err := persist(corpus, original); err != nil {
-				log.Error("decision", "record_id", original.ID, "outcome", "error", "reason", err.Error(), "duration_ms", dur)
-				persistErr := fmt.Errorf("persist %s: %w", original.ID, err)
-				journal.abort(original.ID, persistErr)
-				return st, actions, persistErr
-			}
-			st.demoted++
-			budget.CountAction()
-			_, _ = fmt.Fprintf(out, "  demoted %s -> stale (report %s, judge %s)\n", original.ID, rep.ID, outcome.Verdict.Model)
-			log.Info("decision", "record_id", original.ID, "outcome", "demoted", "report_id", rep.ID,
-				"judge_model", outcome.Verdict.Model, "judge_decision", string(outcome.Verdict.Decision), "duration_ms", dur)
-			action := promote.RecordAction{ID: original.ID, Outcome: "demoted", FromStatus: from, ToStatus: original.Status,
-				JudgeModel: outcome.Verdict.Model, JudgeDecision: string(outcome.Verdict.Decision)}
-			actions = append(actions, action)
-			journal.record(action)
-		case promote.ActionDispute:
-			if err := persist(corpus, original); err != nil {
-				log.Error("decision", "record_id", original.ID, "outcome", "error", "reason", err.Error(), "duration_ms", dur)
-				persistErr := fmt.Errorf("persist %s: %w", original.ID, err)
-				journal.abort(original.ID, persistErr)
-				return st, actions, persistErr
-			}
-			st.disputed++
-			budget.CountAction()
-			_, _ = fmt.Fprintf(out, "  disputed %s (corroborated by %d reports)\n", original.ID, disputesCount[origID])
-			log.Info("decision", "record_id", original.ID, "outcome", "disputed", "report_id", rep.ID,
-				"reason", outcome.Reason, "corroborating", disputesCount[origID], "duration_ms", dur)
-			action := promote.RecordAction{ID: original.ID, Outcome: "disputed", FromStatus: from, ToStatus: original.Status, Reason: outcome.Reason}
-			actions = append(actions, action)
-			journal.record(action)
-		default:
-			st.held++
-			log.Info("decision", "record_id", original.ID, "outcome", "held", "report_id", rep.ID, "reason", outcome.Reason, "duration_ms", dur)
-			action := promote.RecordAction{ID: original.ID, Outcome: "held", FromStatus: from, ToStatus: original.Status, Reason: outcome.Reason}
-			actions = append(actions, action)
-			journal.record(action)
-		}
-	}
-	anomaly := budget.Anomalous()
-	// Action-RATE anomaly (#0085): like promote, the count anomaly is moot under a
-	// throughput cap; a judge demoting/disputing ~everything instead shows as a high
-	// action/judged fraction that survives the cap. Assess post-loop on the full
-	// sample and fold into the halt/alert.
-	if budget.RateAnomalous() {
-		anomaly = true
-		msg := fmt.Sprintf("adapt: ACTION-RATE ANOMALY — %d/%d demote/dispute actions (%.0f%%) over the %.0f%% baseline (min sample %d); a judge demoting ~everything signals compromise even under a throughput cap (investigate; TWICESHY_PAUSE=1)",
-			budget.Actions(), budget.Runs(), 100*budget.ActionRate(), 100*g.MaxActionRate, g.MinSample)
-		_, _ = fmt.Fprintln(out, msg)
-		log.Warn("action-rate anomaly", "outcome", "rate_anomaly", "actions", budget.Actions(), "judged", budget.Runs(), "rate", budget.ActionRate())
-		alert.Alert(ctx, "rate_anomaly", msg)
-	}
-	log.Info("run complete", "outcome", "summary", "demoted", st.demoted, "disputed", st.disputed, "held", st.held, "orphan", st.orphan, "anomaly", anomaly, "duration_ms", time.Since(start).Milliseconds())
-	// Complete (incl. anomaly halt / budget-cap break) is deliberate: only a hard
-	// mid-record error is a resumable abort (StoppedAt set). See promoteCorpus.
-	journal.complete()
-	if anomaly {
-		return st, actions, errAnomalyHalt
-	}
-	return st, actions, nil
+	return runpkg.RunStage(ctx, out, getenv, runLog, "adapt", runID, *asJSON, *effect,
+		func() *judge.JudgeStats { return surfaceJudgeStats(runLog, tj) },
+		func(proseOut io.Writer) (runpkg.AdaptStats, []promote.RecordAction, error) {
+			// Sweep a crashed prior run's leaked sandbox resources before the walk (#0052).
+			startupReap(ctx, "adapt", *effect, runLog, proseOut)
+			logSkippedPoison(runLog, proseOut, "adapt", skipped)
+			return runpkg.AdaptCorpus(ctx, *corpus, recs, runner, adapter, persist, g, runLog, alerter, proseOut, runpkg.JournalPathForRun(*corpus, "adapt", *effect))
+		},
+		nil,
+		runpkg.AdaptManifest,
+		runpkg.WriteAdaptSummary)
 }
 
 // brokerCounterRunner re-runs the original's repro in the sandbox and, when the
