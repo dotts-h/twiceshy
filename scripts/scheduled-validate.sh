@@ -93,6 +93,11 @@ cd "$REPO"
 git fetch origin -q
 git checkout main -q
 git reset --hard origin/main -q
+git fetch origin main -q || true
+BASE_ARGS=()
+if git rev-parse --verify -q origin/main >/dev/null; then
+	BASE_ARGS=(-base origin/main)
+fi
 # Sweep untracked stragglers from a prior crashed run (a missing pathspec is a
 # no-op, not an error) so the next batch never commits a stale manifest/record.
 git clean -fdq -- experience/ runs/
@@ -161,7 +166,7 @@ abort() {
 
 # Intake queued outcome reports so adapt has input (#0042). Best-effort.
 if [ -n "$QUEUE" ]; then
-	"$bin" intake-reports -corpus "$REPO" -queue "$QUEUE" || notify "twiceshy validate: intake-reports failed (continuing)"
+	"$bin" intake-reports -corpus "$REPO" -queue "$QUEUE" "${BASE_ARGS[@]}" || notify "twiceshy validate: intake-reports failed (continuing)"
 fi
 
 mkdir -p "$REPO/runs"

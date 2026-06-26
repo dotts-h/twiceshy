@@ -46,6 +46,11 @@ notify() { [ -n "$NTFY_URL" ] && curl -fsS -d "$1" "$NTFY_URL" >/dev/null 2>&1 |
 
 cd "$REPO"
 git fetch origin -q && git checkout main -q && git reset --hard origin/main -q && git clean -fdq -- experience/
+git fetch origin main -q || true
+BASE_ARGS=()
+if git rev-parse --verify -q origin/main >/dev/null; then
+  BASE_ARGS=(-base origin/main)
+fi
 
 dbtmp="$(mktemp -u).retro.db"
 preflight="$BIN index -corpus $REPO -db $(mktemp -u).preflight.db"
@@ -54,7 +59,7 @@ preflight="$BIN index -corpus $REPO -db $(mktemp -u).preflight.db"
 # code path as a real drain up to the write — safe end-to-end verification.
 if [ "$DRYRUN" = "1" ]; then
   echo "=== DRY-RUN retro drain (no write, no dequeue, no PR) ==="
-  "$BIN" retro-intake -queue "$QUEUE" -corpus "$REPO" -db "$dbtmp" -limit "$LIMIT" -dry-run
+  "$BIN" retro-intake -queue "$QUEUE" -corpus "$REPO" -db "$dbtmp" -limit "$LIMIT" -dry-run "${BASE_ARGS[@]}"
   exit 0
 fi
 
@@ -62,7 +67,7 @@ branch="retro/capture-$(date -u +%Y%m%d-%H%M%S)"
 git checkout -b "$branch" -q
 
 # Drain: analyze each queued transcript into quarantined drafts (dequeued on success).
-if ! out="$("$BIN" retro-intake -queue "$QUEUE" -corpus "$REPO" -db "$dbtmp" -limit "$LIMIT" 2>&1)"; then
+if ! out="$("$BIN" retro-intake -queue "$QUEUE" -corpus "$REPO" -db "$dbtmp" -limit "$LIMIT" "${BASE_ARGS[@]}" 2>&1)"; then
   notify "twiceshy retro drain FAILED (queue $QUEUE held, nothing dequeued): $(printf '%s' "$out" | tail -n 3)"
   echo "retro-intake failed:"; printf '%s\n' "$out" | tail -n 20
   git checkout main -q; git branch -D "$branch" -q

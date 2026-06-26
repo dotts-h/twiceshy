@@ -63,6 +63,44 @@ func TestIntakeReports_MaterializesQueueIntoCorpus(t *testing.T) {
 	}
 }
 
+func TestIntakeReports_BaseAllocatesPastBaseMax(t *testing.T) {
+	corpus, base := corpusWithLocal2758AndBase2768(t)
+	queue := filepath.Join(t.TempDir(), "queue")
+	if _, err := spool.Enqueue(queue, spool.Report{
+		RecordID:   "exp-0043",
+		Outcome:    "failed",
+		Evidence:   "go build still errors",
+		Author:     "agent-x",
+		ReportedAt: "2026-06-19T12:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	if err := runIntakeReports([]string{"-corpus", corpus, "-queue", queue, "-base", base}, &buf); err != nil {
+		t.Fatalf("runIntakeReports: %v", err)
+	}
+
+	recs, err := record.LoadCorpus(corpus)
+	if err != nil {
+		t.Fatalf("LoadCorpus: %v", err)
+	}
+	for _, r := range recs {
+		if r.ID == "exp-2769" && reportDisputes(r) == "exp-0043" {
+			return
+		}
+	}
+	t.Fatalf("intake-reports with -base must allocate exp-2769; records: %v", recordIDs(recs))
+}
+
+func recordIDs(recs []*record.Record) []string {
+	ids := make([]string, 0, len(recs))
+	for _, r := range recs {
+		ids = append(ids, r.ID)
+	}
+	return ids
+}
+
 func TestIntakeReports_RequiresQueueFlag(t *testing.T) {
 	var buf bytes.Buffer
 	err := runIntakeReports([]string{"-corpus", "."}, &buf)

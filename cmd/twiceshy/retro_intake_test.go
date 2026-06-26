@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,6 +97,43 @@ func TestDrainRetro_MaterializesQuarantinedDraftAndDrains(t *testing.T) {
 	if paths, _ := spool.List(queue); len(paths) != 0 {
 		t.Errorf("queue must drain after a successful analysis; %d left", len(paths))
 	}
+}
+
+func TestRunRetroIntake_BaseAllocatesPastBaseMax(t *testing.T) {
+	corpus, base := corpusWithLocal2758AndBase2768(t)
+	queue := filepath.Join(t.TempDir(), "retro")
+	spoolOne(t, queue, "agent hit fts5: syntax error and recovered")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"candidates":[{"kind":"trap","title":"fts5 MATCH treats raw input as query syntax","summary":"a dotted token throws fts5: syntax error","error_signatures":["fts5: syntax error"],"ecosystem":"Go","package":"modernc.org/sqlite","root_cause":"raw query is parsed as FTS5 query syntax","fix":"quote the user query before MATCH","body":"Quote user input before passing it to a MATCH clause."}]}`))
+	}))
+	defer srv.Close()
+
+	var buf bytes.Buffer
+	err := runRetroIntake(context.Background(), []string{"-queue", queue, "-corpus", corpus,
+		"-db", filepath.Join(t.TempDir(), "ix.db"), "-base", base}, &buf, func(k string) string {
+		switch k {
+		case "TWICESHY_RETRO_URL":
+			return srv.URL
+		case "TWICESHY_RETRO_MODEL":
+			return "test-model"
+		default:
+			return ""
+		}
+	})
+	if err != nil {
+		t.Fatalf("retro-intake: %v", err)
+	}
+
+	recs, err := record.LoadCorpus(corpus)
+	if err != nil {
+		t.Fatalf("LoadCorpus: %v", err)
+	}
+	for _, r := range recs {
+		if r.ID == "exp-2769" && strings.Contains(r.Title, "fts5 MATCH") {
+			return
+		}
+	}
+	t.Fatalf("retro-intake with -base must allocate exp-2769; records: %v", recordIDs(recs))
 }
 
 // Fail-safe: an analyzer outage leaves the transcript queued for retry and writes

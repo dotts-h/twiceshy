@@ -568,6 +568,7 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 	limit := fs.Int("limit", 0, "max new records to write this run (0 = unlimited); bounds a scheduled import")
 	author := fs.String("author", "twiceshy-importer", "provenance author recorded on imported records")
 	ecosystem := fs.String("ecosystem", "", "OSV ecosystem for osv-live (e.g. npm, PyPI, Go); empty = Go")
+	base := fs.String("base", "", "base git ref for merge-safe id allocation")
 	if err := parseFlags(fs, args[1:]); err != nil {
 		return err
 	}
@@ -587,7 +588,7 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 
-	id, err := ingest.NextID(ctx, ix, c.corpus)
+	id, err := ingest.NextIDWithBase(ctx, ix, c.corpus, *base)
 	if err != nil {
 		return err
 	}
@@ -1344,16 +1345,20 @@ func reportEvidence(report *record.Record) string {
 	return report.Body
 }
 
-// maxRecordNum returns the highest numeric suffix among exp-NNNN record ids, or 0
-// for an empty corpus — the base for allocating fresh intake ids.
-func maxRecordNum(recs []*record.Record) int {
-	max := 0
-	for _, r := range recs {
-		if n, ok := record.Num(r.ID); ok && n > max {
-			max = n
-		}
+func nextIDForCorpus(ctx context.Context, corpus, base string) (string, error) {
+	tmp, err := os.CreateTemp("", "twiceshy-nextid-*.db")
+	if err != nil {
+		return "", err
 	}
-	return max
+	db := tmp.Name()
+	_ = tmp.Close()
+	defer func() { _ = os.Remove(db) }()
+	ix, err := index.Open(db)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = ix.Close() }()
+	return ingest.NextIDWithBase(ctx, ix, corpus, base)
 }
 
 // runIntakeReports drains the report queue (ADR-0013 §E1, #0042): each queued
@@ -1367,6 +1372,7 @@ func runIntakeReports(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("intake-reports", flag.ContinueOnError)
 	corpus := fs.String("corpus", ".", "corpus root (the directory containing experience/)")
 	queue := fs.String("queue", "", "report queue directory written by `serve -report-queue` (required)")
+	base := fs.String("base", "", "base git ref for merge-safe id allocation")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -1374,8 +1380,7 @@ func runIntakeReports(args []string, out io.Writer) error {
 		return errors.New("intake-reports requires -queue <dir> (the directory serve enqueues reports into)")
 	}
 
-	recs, err := record.LoadCorpus(*corpus)
-	if err != nil {
+	if _, err := record.LoadCorpus(*corpus); err != nil {
 		return fmt.Errorf("loading corpus: %w", err)
 	}
 	files, err := spool.List(*queue)
@@ -1383,7 +1388,10 @@ func runIntakeReports(args []string, out io.Writer) error {
 		return fmt.Errorf("listing report queue: %w", err)
 	}
 
-	next := maxRecordNum(recs)
+	id, err := nextIDForCorpus(context.Background(), *corpus, *base)
+	if err != nil {
+		return fmt.Errorf("allocating next id: %w", err)
+	}
 	today := time.Now().UTC().Format("2006-01-02")
 	intaken, skipped := 0, 0
 	for _, f := range files {
@@ -1394,7 +1402,7 @@ func runIntakeReports(args []string, out io.Writer) error {
 			skipped++
 			continue
 		}
-		meta := ingest.Meta{ID: record.FormatID(next + 1), Author: rep.Author, Now: today}
+		meta := ingest.Meta{ID: id, Author: rep.Author, Now: today}
 		if rep.Session != "" {
 			s := rep.Session
 			meta.Session = &s
@@ -1411,7 +1419,7 @@ func runIntakeReports(args []string, out io.Writer) error {
 			return fmt.Errorf("writing counter-record for %s: %w", rep.RecordID, err)
 		}
 		_ = spool.Remove(f)
-		next++
+		id = bumpID(id)
 		intaken++
 		_, _ = fmt.Fprintf(out, "  intake %s -> %s (disputes %s)\n", filepath.Base(f), rec.ID, rep.RecordID)
 	}

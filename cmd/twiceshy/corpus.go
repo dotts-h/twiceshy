@@ -7,10 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 
-	"github.com/dotts-h/twiceshy/internal/index"
-	"github.com/dotts-h/twiceshy/internal/ingest"
 	"github.com/dotts-h/twiceshy/internal/mergecheck"
 )
 
@@ -57,19 +54,7 @@ func runNextID(ctx context.Context, args []string, out io.Writer) error {
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp("", "twiceshy-nextid-*.db")
-	if err != nil {
-		return err
-	}
-	db := tmp.Name()
-	_ = tmp.Close()
-	defer func() { _ = os.Remove(db) }()
-	ix, err := index.Open(db)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = ix.Close() }()
-	id, err := ingest.NextIDWithBase(ctx, ix, *corpus, *base)
+	id, err := nextIDForCorpus(ctx, *corpus, *base)
 	if err != nil {
 		return err
 	}
