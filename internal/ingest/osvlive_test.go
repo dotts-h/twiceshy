@@ -732,3 +732,55 @@ func TestOSVLiveSource_EcosystemParameterized(t *testing.T) {
 		t.Errorf("applies_to = %+v, want npm/left-pad", a)
 	}
 }
+
+// OSV stamps the Linux-distro ecosystems with a release suffix in each record's
+// package.ecosystem ("Alpine:v3.20", "Debian:13", "Ubuntu:24.04:LTS"), never the
+// bare label. An exact-equality affected-package filter therefore drops every
+// distro advisory (created 0 records), so the Debian/Ubuntu/Alpine exports — the
+// corpus's largest untapped supply — never import. The filter must match the
+// ecosystem BASE (the part before the first ':') while still rejecting a genuinely
+// different ecosystem, preserving the #0061 mis-scope protection.
+func TestOSVLiveSource_SuffixedDistroEcosystemImports(t *testing.T) {
+	// One Alpine advisory (suffixed) that must import, plus an npm block in the same
+	// record that must NOT be pulled when importing Alpine (mis-scope guard).
+	rec := map[string]any{
+		"id":      "CVE-2024-ALPINE-1",
+		"summary": "a distinctly worded alpine advisory summary for this fixture only",
+		"details": "a distinctly worded alpine advisory details body for this fixture only",
+		"affected": []map[string]any{
+			{
+				"package": map[string]string{"ecosystem": "Alpine:v3.20", "name": "openssl"},
+				"ranges": []map[string]any{{
+					"type":   "ECOSYSTEM",
+					"events": []map[string]string{{"introduced": "0"}, {"fixed": "3.3.2-r1"}},
+				}},
+			},
+			{
+				"package": map[string]string{"ecosystem": "npm", "name": "should-not-appear"},
+				"ranges": []map[string]any{{
+					"type":   "SEMVER",
+					"events": []map[string]string{{"introduced": "0"}, {"fixed": "1.0.0"}},
+				}},
+			},
+		},
+	}
+	src := ingest.NewOSVLiveSource(
+		ingest.WithEcosystem("Alpine"),
+		ingest.WithOSVLiveFetch(func(_ context.Context) (io.ReadCloser, error) {
+			return buildOSVLiveZip(t, map[string]any{"CVE-2024-ALPINE-1.json": rec}), nil
+		}),
+	)
+	drafts, err := src.Drafts(context.Background())
+	if err != nil {
+		t.Fatalf("Drafts: %v", err)
+	}
+	if len(drafts) != 1 {
+		t.Fatalf("want 1 Alpine draft from a suffixed (Alpine:v3.20) record, got %d", len(drafts))
+	}
+	if len(drafts[0].AppliesTo) != 1 {
+		t.Fatalf("applies_to len = %d, want 1 (npm block must be mis-scoped out)", len(drafts[0].AppliesTo))
+	}
+	if a := drafts[0].AppliesTo[0]; a.Ecosystem != "Alpine" || a.Package != "openssl" {
+		t.Errorf("applies_to = %+v, want Alpine/openssl", a)
+	}
+}
