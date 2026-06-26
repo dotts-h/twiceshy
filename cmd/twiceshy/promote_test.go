@@ -47,16 +47,20 @@ func eligibleRec(id string) *record.Record {
 	return &record.Record{
 		ID: id, Status: "quarantined",
 		Guard: &record.Guard{Repro: &rp},
-		Path:  "experience/2026/" + id[len("exp-"):] + "-x.md",
+		// Resolution with a substantive root_cause is required by the
+		// promote root-cause pre-gate (#0094): records without one are held.
+		Resolution: &record.Resolution{RootCause: "stub root cause for corpus-level orchestration test"},
+		Path:       "experience/2026/" + id[len("exp-"):] + "-x.md",
 	}
 }
 
 func TestPromoteCorpus_PromotesEligiblePersistsFlip(t *testing.T) {
 	recs := []*record.Record{
-		eligibleRec("exp-0100"),                 // promoted (repro-eligible)
-		eligibleRec("exp-0101"),                 // held (repro-eligible, not promoted)
-		{ID: "exp-0102", Status: "validated"},   // ineligible (not quarantined)
-		{ID: "exp-0103", Status: "quarantined"}, // prose-class (no repro, no vuln id) → held, ADR-0020
+		eligibleRec("exp-0100"),               // promoted (repro-eligible)
+		eligibleRec("exp-0101"),               // held (repro-eligible, not promoted)
+		{ID: "exp-0102", Status: "validated"}, // ineligible (not quarantined)
+		// prose-class (no repro, no vuln id) → held, ADR-0020; root cause required by #0094.
+		{ID: "exp-0103", Status: "quarantined", Resolution: &record.Resolution{RootCause: "stub root cause"}},
 	}
 	fp := &fakePromoter{promote: map[string]bool{"exp-0100": true}}
 	var persisted []string

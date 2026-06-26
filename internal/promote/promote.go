@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/dotts-h/twiceshy/internal/doctor"
 	"github.com/dotts-h/twiceshy/internal/judge"
@@ -110,6 +111,31 @@ func skip(reason string) (Outcome, error) { return Outcome{Reason: reason}, nil 
 // todayUTC is the default clock for the audit dates (validated_at / valid.until).
 func todayUTC() string { return time.Now().UTC().Format("2006-01-02") }
 
+// HasSubstantiveRootCause reports whether rec states an actual root cause.
+// A record whose root_cause is empty or merely asserts there is none
+// ("None", "N/A", "none - a design convention ...") is advice, not a
+// promotable trap/fix (#0094).
+func HasSubstantiveRootCause(rec *record.Record) bool {
+	if rec.Resolution == nil {
+		return false
+	}
+	// Strip surrounding whitespace and quote characters, then lowercase.
+	s := strings.ToLower(strings.TrimSpace(strings.Trim(strings.TrimSpace(rec.Resolution.RootCause), `"'`)))
+	if s == "" {
+		return false
+	}
+	// Strip leading punctuation or quote characters before the keyword check
+	// (handles variants like `"– None ..."` where dashes precede the keyword).
+	s = strings.TrimLeft(s, `"'`+"–—-.,;: ")
+	// Match "none"/"n/a" as the leading WORD, not as a prefix of a longer word —
+	// "nonexistent", "nonempty", "non-blocking" are real root causes, not "none".
+	word := s
+	if i := strings.IndexFunc(s, func(r rune) bool { return !unicode.IsLetter(r) }); i >= 0 {
+		word = s[:i]
+	}
+	return word != "none" && !strings.HasPrefix(s, "n/a")
+}
+
 // Eligible reports whether a record is in the execution-provable class that can
 // be auto-promoted, and if not, why. It checks only the positive direction's
 // cheap preconditions — quarantined, not an outcome report, not safety-flagged,
@@ -166,6 +192,11 @@ func EligibleProse(rec *record.Record) (bool, string) {
 // Promotable reports whether Promote should attempt this record (proof path, advisory
 // panel, or prose panel).
 func Promotable(rec *record.Record) (bool, string) {
+	// Root-cause pre-gate (#0094): advice without a specific root cause is not
+	// promotable — held cheaply before any eligibility check.
+	if !HasSubstantiveRootCause(rec) {
+		return false, "no substantive root_cause — held (advice, not a trap/fix) (#0094)"
+	}
 	if ok, _ := EligibleAdvisory(rec); ok {
 		return true, ""
 	}
@@ -181,6 +212,12 @@ func Promotable(rec *record.Record) (bool, string) {
 // (attestor/broker failure, an invalid promoted record) is returned distinct
 // from a fail-safe non-promotion, which returns (Outcome{Promoted:false}, nil).
 func (p *Promoter) Promote(ctx context.Context, rec *record.Record) (Outcome, error) {
+	// Root-cause pre-gate (#0094): a record without a specific root cause is
+	// advice, not a trap/fix — held cheaply before ANY attestation or panel call.
+	if !HasSubstantiveRootCause(rec) {
+		return skip("no substantive root_cause — held (advice, not a trap/fix) (#0094)")
+	}
+
 	// Advisory-class panel path (ADR-0016) — before the proof path.
 	if ok, _ := EligibleAdvisory(rec); ok {
 		return p.promoteAdvisory(ctx, rec)
