@@ -34,6 +34,7 @@ func runRetroIntake(ctx context.Context, args []string, out io.Writer, getenv fu
 	limit := fs.Int("limit", 0, "max new records to write this run (0 = unlimited); bounds a scheduled drain")
 	maxTraps := fs.Int("max-traps", 0, "max candidates accepted per transcript (0 = default)")
 	dryRun := fs.Bool("dry-run", false, "analyze and report, but write nothing and dequeue nothing")
+	base := fs.String("base", "", "base git ref for merge-safe id allocation")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -58,6 +59,7 @@ func runRetroIntake(ctx context.Context, args []string, out io.Writer, getenv fu
 		limit:  *limit,
 		dryRun: *dryRun,
 		now:    time.Now().UTC().Format("2006-01-02"),
+		base:   *base,
 	}, out)
 }
 
@@ -90,6 +92,7 @@ type retroOpts struct {
 	limit  int
 	dryRun bool
 	now    string // YYYY-MM-DD stamped on created records
+	base   string // optional base ref for merge-safe id allocation
 }
 
 // drainRetro is the testable core: analyze each spooled transcript and materialize
@@ -98,8 +101,7 @@ type retroOpts struct {
 // transcript queued and stops (a scheduled run retries); a transcript is dequeued
 // only after it is successfully analyzed.
 func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, repo, corpus, queue string, opts retroOpts, out io.Writer) error {
-	recs, err := record.LoadCorpus(corpus)
-	if err != nil {
+	if _, err := record.LoadCorpus(corpus); err != nil {
 		return fmt.Errorf("loading corpus: %w", err)
 	}
 	files, err := spool.List(queue)
@@ -107,7 +109,10 @@ func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, r
 		return fmt.Errorf("listing retro queue: %w", err)
 	}
 
-	next := maxRecordNum(recs)
+	id, err := nextIDForCorpus(ctx, corpus, opts.base)
+	if err != nil {
+		return fmt.Errorf("allocating next id: %w", err)
+	}
 	seen := map[string]bool{} // within-run dedup, keyed like the importer's batch
 	created, dup, skipped := 0, 0, 0
 	for _, f := range files {
@@ -152,7 +157,7 @@ func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, r
 				dup++
 				continue
 			}
-			meta := ingest.Meta{ID: record.FormatID(next + 1), Author: author, Now: opts.now, IncludeQuarantined: true}
+			meta := ingest.Meta{ID: id, Author: author, Now: opts.now, IncludeQuarantined: true}
 			if tr.SessionID != "" {
 				s := tr.SessionID
 				meta.Session = &s
@@ -177,7 +182,7 @@ func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, r
 				_, _ = fmt.Fprintf(out, "  created %s %s (from %s)\n", rec.ID, rec.Path, base)
 			}
 			created++
-			next++
+			id = bumpID(id)
 		}
 
 		// Dequeue the transcript only after it is FULLY processed (dry-run dequeues

@@ -66,6 +66,11 @@ notify() {
 
 cd "$REPO"
 git fetch origin -q && git checkout main -q && git reset --hard origin/main -q && git clean -fdq -- experience/
+git fetch origin main -q || true
+BASE_ARGS=()
+if git rev-parse --verify -q origin/main >/dev/null; then
+  BASE_ARGS=(-base origin/main)
+fi
 
 # Resolve the engine binary: a PATH-installed prebuilt (decoupled corpus — no
 # source in $REPO) or a build from this clone (legacy engine-repo deployment).
@@ -90,7 +95,7 @@ if [ "$SOURCE" = "osv-live" ]; then
   # blip) is logged + alerted but does NOT abort the others — a bulk importer
   # makes partial progress rather than failing the whole batch.
   for eco in $ECOSYSTEMS; do
-    if out="$("$bin" ingest osv-live -ecosystem "$eco" -limit "$LIMIT" -corpus "$REPO" 2>&1)"; then
+    if out="$("$bin" ingest osv-live -ecosystem "$eco" -limit "$LIMIT" -corpus "$REPO" "${BASE_ARGS[@]}" 2>&1)"; then
       echo "[$eco] $out"
     else
       echo "[$eco] FAILED: $out"
@@ -98,7 +103,7 @@ if [ "$SOURCE" = "osv-live" ]; then
     fi
   done
 else
-  if ! out="$("$bin" ingest "$SOURCE" -limit "$LIMIT" -corpus "$REPO" 2>&1)"; then
+  if ! out="$("$bin" ingest "$SOURCE" -limit "$LIMIT" -corpus "$REPO" "${BASE_ARGS[@]}" 2>&1)"; then
     notify "twiceshy import FAILED ($SOURCE): $out"
     git checkout main -q
     git branch -D "$branch" -q

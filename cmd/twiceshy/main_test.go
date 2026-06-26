@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -86,6 +87,46 @@ func packFixture(id, status, license, url string) *record.Record {
 		Body:          "Distilled fact for the pack-builder test.",
 		Path:          "experience/2026/" + id + "-pack-fixture.md",
 	}
+}
+
+func corpusWithLocal2758AndBase2768(t *testing.T) (string, string) {
+	t.Helper()
+	dir := tempCorpus(t)
+	gitCmd(t, dir, "init", "-q")
+	gitCmd(t, dir, "config", "user.email", "test@example.com")
+	gitCmd(t, dir, "config", "user.name", "Test User")
+	writeBaseRecordPath(t, dir, "experience/2026/2768-base.md")
+	gitCmd(t, dir, "add", ".")
+	gitCmd(t, dir, "commit", "-m", "base")
+	base := strings.TrimSpace(gitCmd(t, dir, "rev-parse", "HEAD"))
+
+	if err := os.Remove(filepath.Join(dir, "experience", "2026", "2768-base.md")); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, dir, packFixture("2758", "quarantined", "MIT", ""))
+	return dir, base
+}
+
+func writeBaseRecordPath(t *testing.T, dir, rel string) {
+	t.Helper()
+	dst := filepath.Join(dir, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte("base high-water mark\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func gitCmd(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return string(out)
 }
 
 func TestRunPackCommercialExcludesAndAttributes(t *testing.T) {
@@ -253,6 +294,19 @@ func TestRunIngestGoCreatesQuarantinedRecords(t *testing.T) {
 	}
 	if !strings.Contains(out2.String(), "created 0") {
 		t.Errorf("second run must create nothing (idempotent), output = %q", out2.String())
+	}
+}
+
+func TestRunIngestBaseAllocatesPastBaseMax(t *testing.T) {
+	dir, base := corpusWithLocal2758AndBase2768(t)
+	var out bytes.Buffer
+	err := run(context.Background(), []string{"ingest", "go", "-corpus", dir,
+		"-db", filepath.Join(t.TempDir(), "ix.db"), "-base", base, "-limit", "1"}, &out, noEnv)
+	if err != nil {
+		t.Fatalf("ingest go: %v", err)
+	}
+	if !strings.Contains(out.String(), "created exp-2769") {
+		t.Fatalf("ingest with -base must allocate past base max; output:\n%s", out.String())
 	}
 }
 
