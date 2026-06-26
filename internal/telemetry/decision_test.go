@@ -91,6 +91,23 @@ func TestRecorder_WritesJSONL(t *testing.T) {
 	}
 }
 
+func TestRecorder_CreatesLogOwnerOnly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "decisions.jsonl")
+	r := newRec(t, path, 1<<20)
+	r.Record(telemetry.Decision{Channel: "search", QueryHash: r.Hash("private query"), Count: 1})
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat log: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("telemetry log permissions = %o, want 600", got)
+	}
+}
+
 func TestRecorder_HashRedactsQuery(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.jsonl")
 	r := newRec(t, path, 1<<20)
