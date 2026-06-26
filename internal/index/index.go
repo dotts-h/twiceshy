@@ -425,9 +425,11 @@ func (ix *Index) RetrievePushTraced(ctx context.Context, q Query) (PushDecision,
 	if fp, err := ix.fingerprintHits(ctx, q, MaxK); err != nil {
 		return PushDecision{}, err
 	} else if len(fp) > 0 {
-		q.Floor = pushFloor
-		served, err := ix.Retrieve(ctx, q)
-		return PushDecision{FingerprintBypass: true, Served: served}, err
+		// Serve ONLY the fingerprint-exact hits. The bypass exists because a deterministic
+		// stack signature is real context by construction (ADR-0015); it does NOT license
+		// admitting BM25 fill from the full query (Retrieve->Search would append it to reach k).
+		// Fingerprint hits carry a fixed score above any floor, so no floor step is needed.
+		return PushDecision{FingerprintBypass: true, Served: fp}, nil
 	}
 
 	// 2) discriminative-token precondition.
