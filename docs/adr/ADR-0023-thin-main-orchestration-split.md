@@ -1,8 +1,11 @@
 # ADR-0023: Lift the batch-orchestration core out of `cmd/twiceshy/main.go` into `internal/`
 
-- **Status:** Proposed (2026-06-23) — surfaced by the post-#0086 code-quality /
-  architecture audit; claude proposed and authored. Awaiting **horia**'s decision
-  before any code moves (it changes a package boundary and relocates ~21 tests).
+- **Status:** Accepted (2026-06-26) — horia authorized completing the open
+  code-review findings ("proceed until all is finished"), which is the decision this
+  ADR was awaiting. Surfaced by the post-#0086 code-quality / architecture audit;
+  claude proposed and authored. Executed as a pure, behavior-identical relocation
+  under the gate (the seams are already interfaces; `make ci` + the 80% coverage
+  floor guard it).
 - **Related:** [ADR-0005](ADR-0005-stable-seams.md) (stable seams — this reuses the
   existing `recordPromoter` / `counterRunner` / `pipelineRunner` / `persist` seams);
   [ADR-0008](ADR-0008-record-persistence-is-a-cli-concern.md) /

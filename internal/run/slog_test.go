@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package main
+package run
 
 import (
 	"bufio"
@@ -75,9 +75,9 @@ func TestPromoteCorpus_EmitsStructuredLog(t *testing.T) {
 	var logbuf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logbuf, nil)).With("run_id", "run-test")
 
-	_, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, logger, nil, &bytes.Buffer{}, "")
+	_, _, err := PromoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{}, logger, nil, &bytes.Buffer{}, "")
 	if err != nil {
-		t.Fatalf("promoteCorpus: %v", err)
+		t.Fatalf("PromoteCorpus: %v", err)
 	}
 
 	events := parseLogEvents(t, logbuf.String())
@@ -139,12 +139,12 @@ func TestAdaptCorpus_LogsHeldOutcome(t *testing.T) {
 	var logbuf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logbuf, nil)).With("run_id", "run-test")
 
-	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{}, logger, nil, &bytes.Buffer{}, "")
+	st, _, err := AdaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{}, logger, nil, &bytes.Buffer{}, "")
 	if err != nil {
-		t.Fatalf("adaptCorpus: %v", err)
+		t.Fatalf("AdaptCorpus: %v", err)
 	}
-	if st.held != 1 {
-		t.Fatalf("held = %d, want 1", st.held)
+	if st.Held != 1 {
+		t.Fatalf("held = %d, want 1", st.Held)
 	}
 
 	byOutcome, summary := indexByOutcome(t, parseLogEvents(t, logbuf.String()), "adapt")

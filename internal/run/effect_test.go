@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package main
+package run
 
 import (
 	"bytes"
@@ -19,7 +19,7 @@ func TestPrintEffectPreview(t *testing.T) {
 		{ID: "exp-0101", Outcome: "held", FromStatus: "quarantined", ToStatus: "quarantined"},
 	}
 	var buf bytes.Buffer
-	printEffectPreview(&buf, "promote", actions)
+	PrintEffectPreview(&buf, "promote", actions)
 	out := buf.String()
 	if !strings.Contains(out, "exp-0100: quarantined→validated") {
 		t.Fatalf("missing promoted transition; got %q", out)
@@ -35,7 +35,7 @@ func TestPrintEffectPreview(t *testing.T) {
 	}
 }
 
-// printEffectPreview footer boundaries (main.go:963-972): the "1 of 2" case above
+// PrintEffectPreview footer boundaries (main.go:963-972): the "1 of 2" case above
 // leaves both extremes untested. (a) ALL records change exercises the path where the
 // omit-unchanged branch never fires; (b) an EMPTY actions slice exercises the
 // "0 of 0 … nothing written" footer a fully-ineligible/empty run produces. An
@@ -46,7 +46,7 @@ func TestPrintEffectPreview_AllChanged(t *testing.T) {
 		{ID: "exp-0101", Outcome: "promoted", FromStatus: "quarantined", ToStatus: "validated"},
 	}
 	var buf bytes.Buffer
-	printEffectPreview(&buf, "promote", actions)
+	PrintEffectPreview(&buf, "promote", actions)
 	out := buf.String()
 	if !strings.Contains(out, "exp-0100: quarantined→validated") {
 		t.Fatalf("missing exp-0100 transition; got %q", out)
@@ -61,7 +61,7 @@ func TestPrintEffectPreview_AllChanged(t *testing.T) {
 
 func TestPrintEffectPreview_EmptyActions(t *testing.T) {
 	var buf bytes.Buffer
-	printEffectPreview(&buf, "promote", []promote.RecordAction{})
+	PrintEffectPreview(&buf, "promote", []promote.RecordAction{})
 	out := buf.String()
 	// Exact footer, em-dash included (main.go:971): a fully-ineligible/empty run.
 	const wantFooter = "promote -effect: 0 of 0 record(s) would change status — nothing written"
@@ -85,9 +85,9 @@ func TestPromoteCorpus_NoOpPersist_ProducesTransitionActions(t *testing.T) {
 		return nil
 	}
 
-	_, actions, err := promoteCorpus(context.Background(), ".", recs, fp, noopPersist, guard.Guardrails{}, nil, nil, &bytes.Buffer{}, "")
+	_, actions, err := PromoteCorpus(context.Background(), ".", recs, fp, noopPersist, guard.Guardrails{}, nil, nil, &bytes.Buffer{}, "")
 	if err != nil {
-		t.Fatalf("promoteCorpus: %v", err)
+		t.Fatalf("PromoteCorpus: %v", err)
 	}
 	if len(persistCalls) != 1 || persistCalls[0] != "exp-0100" {
 		t.Fatalf("noop persist calls = %v, want [exp-0100] (promoted record still flows through persist)", persistCalls)

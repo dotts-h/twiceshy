@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package main
+package run
 
 import (
 	"bytes"
@@ -23,12 +23,12 @@ func TestPromoteCorpus_EmergencyStopHalts(t *testing.T) {
 	persist := func(_ string, r *record.Record) error { persisted = append(persisted, r.ID); return nil }
 	var buf bytes.Buffer
 
-	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{Paused: true}, nil, nil, &buf, "")
+	st, _, err := PromoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{Paused: true}, nil, nil, &buf, "")
 	if err != nil {
-		t.Fatalf("promoteCorpus: %v", err)
+		t.Fatalf("PromoteCorpus: %v", err)
 	}
-	if st.promoted != 0 || len(persisted) != 0 || len(fp.calls) != 0 {
-		t.Fatalf("emergency stop must halt all promotions; promoted=%d persisted=%v calls=%v", st.promoted, persisted, fp.calls)
+	if st.Promoted != 0 || len(persisted) != 0 || len(fp.calls) != 0 {
+		t.Fatalf("emergency stop must halt all promotions; promoted=%d persisted=%v calls=%v", st.Promoted, persisted, fp.calls)
 	}
 	if !strings.Contains(buf.String(), "emergency stop") {
 		t.Fatalf("expected an emergency-stop notice; got %q", buf.String())
@@ -41,12 +41,12 @@ func TestPromoteCorpus_BudgetCapStops(t *testing.T) {
 	persist := func(_ string, _ *record.Record) error { return nil }
 	var buf bytes.Buffer
 
-	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxRuns: 1}, nil, nil, &buf, "")
+	st, _, err := PromoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxRuns: 1}, nil, nil, &buf, "")
 	if err != nil {
-		t.Fatalf("promoteCorpus: %v", err)
+		t.Fatalf("PromoteCorpus: %v", err)
 	}
-	if len(fp.calls) != 1 || st.promoted != 1 {
-		t.Fatalf("budget cap of 1 run must process one record; calls=%v promoted=%d", fp.calls, st.promoted)
+	if len(fp.calls) != 1 || st.Promoted != 1 {
+		t.Fatalf("budget cap of 1 run must process one record; calls=%v promoted=%d", fp.calls, st.Promoted)
 	}
 	if !strings.Contains(buf.String(), "budget cap") {
 		t.Fatalf("expected a budget-cap notice; got %q", buf.String())
@@ -60,14 +60,14 @@ func TestPromoteCorpus_ThroughputCapStopsCleanly(t *testing.T) {
 	var buf bytes.Buffer
 
 	// MaxPromotions 1 with MaxActions 25: a normal full batch must stop CLEANLY at
-	// the cap (err == nil, NOT errAnomalyHalt) so the batch PR is mergeable — the
+	// the cap (err == nil, NOT ErrAnomalyHalt) so the batch PR is mergeable — the
 	// #0084 fix for "every batch trips the anomaly halt" (cap doubling as throttle).
-	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxPromotions: 1, MaxActions: 25}, nil, nil, &buf, "")
+	st, _, err := PromoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxPromotions: 1, MaxActions: 25}, nil, nil, &buf, "")
 	if err != nil {
 		t.Fatalf("a throughput-cap stop must be clean (nil), got %v", err)
 	}
-	if st.promoted != 1 {
-		t.Fatalf("throughput cap of 1 must promote exactly one; promoted=%d", st.promoted)
+	if st.Promoted != 1 {
+		t.Fatalf("throughput cap of 1 must promote exactly one; promoted=%d", st.Promoted)
 	}
 	if !strings.Contains(buf.String(), "throughput cap") {
 		t.Fatalf("expected a throughput-cap notice; got %q", buf.String())
@@ -85,14 +85,14 @@ func TestPromoteCorpus_AnomalyOnFinalActionStillHalts(t *testing.T) {
 
 	// MaxActions 1, exactly 2 records: the 2nd promotion trips the threshold but
 	// there is no further record to halt before. The run must STILL report the
-	// anomaly (errAnomalyHalt → non-zero exit) so a spike on the last action can't
+	// anomaly (ErrAnomalyHalt → non-zero exit) so a spike on the last action can't
 	// slip through with exit 0 (#0037, ADR-0013 §D1).
-	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxActions: 1}, nil, nil, &buf, "")
-	if !errors.Is(err, errAnomalyHalt) {
-		t.Fatalf("a threshold-tripping run must return errAnomalyHalt, got %v", err)
+	st, _, err := PromoteCorpus(context.Background(), ".", recs, fp, persist, guard.Guardrails{MaxActions: 1}, nil, nil, &buf, "")
+	if !errors.Is(err, ErrAnomalyHalt) {
+		t.Fatalf("a threshold-tripping run must return ErrAnomalyHalt, got %v", err)
 	}
-	if st.promoted != 2 {
-		t.Fatalf("both promotions persist (nothing after to halt); promoted=%d, want 2", st.promoted)
+	if st.Promoted != 2 {
+		t.Fatalf("both promotions persist (nothing after to halt); promoted=%d, want 2", st.Promoted)
 	}
 }
 
@@ -108,12 +108,12 @@ func TestAdaptCorpus_EmergencyStopHalts(t *testing.T) {
 	persist := func(_ string, r *record.Record) error { persisted = append(persisted, r.ID); return nil }
 	var buf bytes.Buffer
 
-	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{Paused: true}, nil, nil, &buf, "")
+	st, _, err := AdaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{Paused: true}, nil, nil, &buf, "")
 	if err != nil {
-		t.Fatalf("adaptCorpus: %v", err)
+		t.Fatalf("AdaptCorpus: %v", err)
 	}
-	if st.demoted != 0 || len(persisted) != 0 {
-		t.Fatalf("emergency stop must halt all demotions; demoted=%d persisted=%v", st.demoted, persisted)
+	if st.Demoted != 0 || len(persisted) != 0 {
+		t.Fatalf("emergency stop must halt all demotions; demoted=%d persisted=%v", st.Demoted, persisted)
 	}
 	if orig.Status != "validated" {
 		t.Fatalf("the disputed record must be untouched under the emergency stop; status=%q", orig.Status)
@@ -143,12 +143,12 @@ func TestAdaptCorpus_BudgetCapStops(t *testing.T) {
 	persist := func(_ string, _ *record.Record) error { return nil }
 	var buf bytes.Buffer
 
-	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxRuns: 1}, nil, nil, &buf, "")
+	st, _, err := AdaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxRuns: 1}, nil, nil, &buf, "")
 	if err != nil {
-		t.Fatalf("adaptCorpus: %v", err)
+		t.Fatalf("AdaptCorpus: %v", err)
 	}
-	if st.demoted != 1 {
-		t.Fatalf("budget cap of 1 run must demote one; demoted=%d", st.demoted)
+	if st.Demoted != 1 {
+		t.Fatalf("budget cap of 1 run must demote one; demoted=%d", st.Demoted)
 	}
 	if !strings.Contains(buf.String(), "budget cap") {
 		t.Fatalf("expected a budget-cap notice; got %q", buf.String())
@@ -162,13 +162,13 @@ func TestAdaptCorpus_ThroughputCapStopsCleanly(t *testing.T) {
 	var buf bytes.Buffer
 
 	// MaxPromotions 1 with MaxActions 25: the adapt batch stops CLEANLY at the cap
-	// (err == nil, not errAnomalyHalt) — symmetric with promote (#0084).
-	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxPromotions: 1, MaxActions: 25}, nil, nil, &buf, "")
+	// (err == nil, not ErrAnomalyHalt) — symmetric with promote (#0084).
+	st, _, err := AdaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxPromotions: 1, MaxActions: 25}, nil, nil, &buf, "")
 	if err != nil {
 		t.Fatalf("a throughput-cap stop must be clean (nil), got %v", err)
 	}
-	if st.demoted != 1 {
-		t.Fatalf("throughput cap of 1 must demote exactly one; demoted=%d", st.demoted)
+	if st.Demoted != 1 {
+		t.Fatalf("throughput cap of 1 must demote exactly one; demoted=%d", st.Demoted)
 	}
 	if !strings.Contains(buf.String(), "throughput cap") {
 		t.Fatalf("expected a throughput-cap notice; got %q", buf.String())
@@ -182,20 +182,20 @@ func TestAdaptCorpus_AnomalyOnFinalActionStillHalts(t *testing.T) {
 	var buf bytes.Buffer
 
 	// MaxActions 1, 2 demotes: the 2nd trips the threshold with nothing after to
-	// halt — the run must still return errAnomalyHalt (non-zero exit).
-	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxActions: 1}, nil, nil, &buf, "")
-	if !errors.Is(err, errAnomalyHalt) {
-		t.Fatalf("a threshold-tripping adapt run must return errAnomalyHalt, got %v", err)
+	// halt — the run must still return ErrAnomalyHalt (non-zero exit).
+	st, _, err := AdaptCorpus(context.Background(), ".", recs, runner, adapter, persist, guard.Guardrails{MaxActions: 1}, nil, nil, &buf, "")
+	if !errors.Is(err, ErrAnomalyHalt) {
+		t.Fatalf("a threshold-tripping adapt run must return ErrAnomalyHalt, got %v", err)
 	}
-	if st.demoted != 2 {
-		t.Fatalf("both demotions persist (nothing after to halt); demoted=%d, want 2", st.demoted)
+	if st.Demoted != 2 {
+		t.Fatalf("both demotions persist (nothing after to halt); demoted=%d, want 2", st.Demoted)
 	}
 }
 
 // #0085: the approval-RATE anomaly survives a throughput cap. Five eligible records,
 // judge approves ALL, cap 3: the count-anomaly is moot under the cap, but 3/3 promoted
 // = 100% over the 50% baseline (min sample 3) trips the rate anomaly post-loop — the
-// run halts (errAnomalyHalt) even though the cap was the clean stop.
+// run halts (ErrAnomalyHalt) even though the cap was the clean stop.
 func TestPromoteCorpus_RateAnomalyHaltsUnderCap(t *testing.T) {
 	recs := []*record.Record{
 		eligibleRec("exp-0100"), eligibleRec("exp-0101"), eligibleRec("exp-0102"),
@@ -207,13 +207,13 @@ func TestPromoteCorpus_RateAnomalyHaltsUnderCap(t *testing.T) {
 	persist := func(_ string, _ *record.Record) error { return nil }
 	var buf bytes.Buffer
 
-	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist,
+	st, _, err := PromoteCorpus(context.Background(), ".", recs, fp, persist,
 		guard.Guardrails{MaxPromotions: 3, MaxActionRate: 0.5, MinSample: 3}, nil, nil, &buf, "")
-	if !errors.Is(err, errAnomalyHalt) {
-		t.Fatalf("a high approval rate under a cap must return errAnomalyHalt, got %v", err)
+	if !errors.Is(err, ErrAnomalyHalt) {
+		t.Fatalf("a high approval rate under a cap must return ErrAnomalyHalt, got %v", err)
 	}
-	if st.promoted != 3 {
-		t.Fatalf("the cap promotes 3 before the post-loop rate halt; promoted=%d", st.promoted)
+	if st.Promoted != 3 {
+		t.Fatalf("the cap promotes 3 before the post-loop rate halt; promoted=%d", st.Promoted)
 	}
 	// Assert the full numeric body, not just the headline: this pins the denominator
 	// (3/3, the rate is promoted/JUDGED), the rendered percentage, the baseline, and
@@ -234,13 +234,13 @@ func TestPromoteCorpus_RateAnomalyQuietBelowMinSample(t *testing.T) {
 	var buf bytes.Buffer
 
 	// 2 judged, both promoted = 100% rate, but MinSample 5 > 2 → no halt, clean stop.
-	st, _, err := promoteCorpus(context.Background(), ".", recs, fp, persist,
+	st, _, err := PromoteCorpus(context.Background(), ".", recs, fp, persist,
 		guard.Guardrails{MaxPromotions: 5, MaxActionRate: 0.5, MinSample: 5}, nil, nil, &buf, "")
 	if err != nil {
 		t.Fatalf("a run below the minimum sample must be a clean stop, got %v", err)
 	}
-	if st.promoted != 2 {
-		t.Fatalf("both eligible records promote; promoted=%d", st.promoted)
+	if st.Promoted != 2 {
+		t.Fatalf("both eligible records promote; promoted=%d", st.Promoted)
 	}
 	if strings.Contains(buf.String(), "ANOMALY") {
 		t.Fatalf("a run below the minimum sample must not flag an anomaly; got %q", buf.String())
@@ -256,13 +256,13 @@ func TestAdaptCorpus_RateAnomalyHaltsUnderCap(t *testing.T) {
 	persist := func(_ string, _ *record.Record) error { return nil }
 	var buf bytes.Buffer
 
-	st, _, err := adaptCorpus(context.Background(), ".", recs, runner, adapter, persist,
+	st, _, err := AdaptCorpus(context.Background(), ".", recs, runner, adapter, persist,
 		guard.Guardrails{MaxPromotions: 3, MaxActionRate: 0.5, MinSample: 3}, nil, nil, &buf, "")
-	if !errors.Is(err, errAnomalyHalt) {
-		t.Fatalf("a high demote rate under a cap must return errAnomalyHalt, got %v", err)
+	if !errors.Is(err, ErrAnomalyHalt) {
+		t.Fatalf("a high demote rate under a cap must return ErrAnomalyHalt, got %v", err)
 	}
-	if st.demoted != 3 {
-		t.Fatalf("the cap demotes 3 before the post-loop rate halt; demoted=%d", st.demoted)
+	if st.Demoted != 3 {
+		t.Fatalf("the cap demotes 3 before the post-loop rate halt; demoted=%d", st.Demoted)
 	}
 	// Full numeric body — pins the denominator (3/3 = demote-or-dispute/JUDGED), the
 	// percentage, baseline, and min-sample, not just the headline.
