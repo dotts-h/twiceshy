@@ -19,10 +19,13 @@
 - **Write path (Phase 3) — done.** `record_experience` is propose-only: dedup-at-ingest
   (`index.Assess` / `ingest.Prepare`), born `quarantined`, git/PR is the trust boundary
   (ADR-0008). Quarantined records never reach the push channel.
-- **Corpus — thin.** 3 dogfooding records (our own FTS5/MCP traps). No external
-  framework/library/security knowledge yet; no validated (push-eligible) records.
-- **Not built yet:** push channel (Phase 2), doctors (Phase 4), evals (Phase 5),
-  dense retrieval (#6), corpus importer (#7). These are the remaining program.
+- **Corpus — decoupled.** The live corpus is now the separate `twiceshy-corpus`
+  data repo (ADR-0021); this engine repo keeps only a frozen fixture for tests
+  (see `docs/CODEBASE_MAP.md`).
+- **Now ships:** push channel, dense pull retrieval, telemetry, doctors/repro,
+  corpus importer, evals, spools, and autonomous promote/demote. Remaining from
+  that stale phase list: none; derive new work from current issues/ADRs and
+  `docs/CODEBASE_MAP.md`.
 
 ## Tiers / sequencing
 
