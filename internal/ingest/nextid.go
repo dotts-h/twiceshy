@@ -3,8 +3,12 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os/exec"
+	"path/filepath"
+	"strings"
 
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/record"
@@ -22,6 +26,14 @@ import (
 // write path is propose-only — a colliding draft is caught in PR review — so
 // that residual race is acceptable until an unattended write path exists.
 func NextID(ctx context.Context, ix *index.Index, corpusRoot string) (string, error) {
+	return NextIDWithBase(ctx, ix, corpusRoot, "")
+}
+
+// NextIDWithBase is NextID plus a merge-safe base-ref high-water mark. It
+// returns one past the maximum id visible in the index, the local corpus tree,
+// and baseRef (when non-empty), so a branch with stale local files cannot
+// allocate an id already present on the target branch.
+func NextIDWithBase(ctx context.Context, ix *index.Index, corpusRoot, baseRef string) (string, error) {
 	idxNext, err := ix.NextID(ctx)
 	if err != nil {
 		return "", err
@@ -38,6 +50,47 @@ func NextID(ctx context.Context, ix *index.Index, corpusRoot string) (string, er
 		if diskMax+1 > n {
 			n = diskMax + 1
 		}
+		if baseRef != "" {
+			baseMax, err := maxIDAtRef(ctx, corpusRoot, baseRef)
+			if err != nil {
+				return "", fmt.Errorf("scanning base ref for max id: %w", err)
+			}
+			if baseMax+1 > n {
+				n = baseMax + 1
+			}
+		}
 	}
 	return record.FormatID(n), nil
+}
+
+func maxIDAtRef(ctx context.Context, repo, ref string) (int, error) {
+	cmd := exec.CommandContext(ctx, "git", "ls-tree", "-r", "--name-only", ref, "--", "experience")
+	cmd.Dir = repo
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg != "" {
+			return 0, fmt.Errorf("%v: %s", err, msg)
+		}
+		return 0, err
+	}
+	max := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		path := filepath.ToSlash(strings.TrimSpace(line))
+		if path == "" {
+			continue
+		}
+		id := filepath.Base(path)
+		dash := strings.IndexByte(id, '-')
+		if dash < 0 {
+			continue
+		}
+		n, ok := record.Num("exp-" + id[:dash])
+		if ok && n > max {
+			max = n
+		}
+	}
+	return max, nil
 }

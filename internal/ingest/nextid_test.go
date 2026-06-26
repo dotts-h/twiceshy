@@ -5,7 +5,9 @@ package ingest_test
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dotts-h/twiceshy/internal/ingest"
@@ -68,6 +70,30 @@ func TestNextID(t *testing.T) {
 	})
 }
 
+func TestNextID_UsesBaseRefMaxWhenLocalIsStale(t *testing.T) {
+	ctx := context.Background()
+	repo := t.TempDir()
+	gitNextID(t, repo, "init", "-q")
+	gitNextID(t, repo, "config", "user.email", "test@example.com")
+	gitNextID(t, repo, "config", "user.name", "Test User")
+	writeDisk(t, repo, "experience/2026/2768-base.md")
+	gitNextID(t, repo, "add", ".")
+	gitNextID(t, repo, "commit", "-m", "base")
+	base := strings.TrimSpace(gitNextID(t, repo, "rev-parse", "HEAD"))
+
+	if err := os.Remove(filepath.Join(repo, "experience/2026/2768-base.md")); err != nil {
+		t.Fatal(err)
+	}
+	writeDisk(t, repo, "experience/2026/2758-local.md")
+	got, err := ingest.NextIDWithBase(ctx, openIx(t), repo, base)
+	if err != nil {
+		t.Fatalf("NextIDWithBase: %v", err)
+	}
+	if got != "exp-2769" {
+		t.Fatalf("got %q, want exp-2769", got)
+	}
+}
+
 func writeDisk(t *testing.T, root, rel string) {
 	t.Helper()
 	p := filepath.Join(root, filepath.FromSlash(rel))
@@ -77,4 +103,15 @@ func writeDisk(t *testing.T, root, rel string) {
 	if err := os.WriteFile(p, []byte("body\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func gitNextID(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return string(out)
 }
