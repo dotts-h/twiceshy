@@ -93,6 +93,16 @@ func osvLiveFetcher(ecosystem string) func(context.Context) (io.ReadCloser, erro
 
 func (s *OSVLiveSource) Name() string { return "osv-live" }
 
+// osvEcosystemBase returns the ecosystem label without OSV's release suffix:
+// "Alpine:v3.20" -> "Alpine", "npm" -> "npm". OSV stamps distro ecosystems with
+// a ":<release>" suffix per record; the importer matches on the base.
+func osvEcosystemBase(e string) string {
+	if i := strings.IndexByte(e, ':'); i >= 0 {
+		return e[:i]
+	}
+	return e
+}
+
 // Drafts fetches the Go bulk export, maps each OSV record to a trap draft, and
 // returns them sorted by advisory id for deterministic output.
 func (s *OSVLiveSource) Drafts(ctx context.Context) ([]Draft, error) {
@@ -191,7 +201,7 @@ func mapOSVLiveRecord(rec osvLiveRecord, ecosystem string) (Draft, bool) {
 	var applies []record.AppliesTo
 	primaryPkg := ""
 	for _, aff := range rec.Affected {
-		if aff.Package.Ecosystem != ecosystem {
+		if osvEcosystemBase(aff.Package.Ecosystem) != ecosystem {
 			continue
 		}
 		pkgName := normalizePackageName(aff.Package.Name)
