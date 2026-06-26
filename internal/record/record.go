@@ -25,6 +25,9 @@ import (
 // SchemaVersion is the record schema this parser understands.
 const SchemaVersion = 1
 
+// ErrUnsupportedSchemaVersion marks records written for a schema this parser does not understand.
+var ErrUnsupportedSchemaVersion = errors.New("unsupported schema_version")
+
 // ValidID reports whether id is a well-formed record id (exp-NNNN, ≥4 digits) —
 // the shared predicate behind `id`, `superseded_by`, and `disputes`.
 func ValidID(id string) bool { return reID.MatchString(id) }
@@ -292,7 +295,7 @@ func parseRecord(path string, src []byte, knownFields bool) (*Record, error) {
 	rec.Raw = src
 	rec.Path = filepath.ToSlash(path)
 
-	if err := rec.validate(); err != nil {
+	if err := rec.validate(time.Now().UTC()); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return &rec, nil
@@ -393,7 +396,9 @@ func LoadCorpus(root string) ([]*Record, error) {
 // validator's job (index/doctor/CI); a run only acts on independently-eligible
 // records. A missing/unreadable corpus tree is still fatal (nothing to run on).
 func LoadCorpusResilient(root string) (recs []*Record, skipped []string, err error) {
-	return walkCorpusSkipping(root, ParseFile)
+	recs, skipped, critical, err := walkCorpusSkipping(root, ParseFile)
+	skipped = append(skipped, critical...)
+	return recs, skipped, err
 }
 
 // LoadCorpusForServe loads the corpus for the READ/serve path with maximum
@@ -405,7 +410,7 @@ func LoadCorpusResilient(root string) (recs []*Record, skipped []string, err err
 // (dup ids, superseded_by, repro presence) stay the write/CI job (LoadCorpus): a
 // long-running server must serve the 126 good records, not crash-loop on the one it
 // cannot parse. A missing/unreadable corpus tree is still fatal (nothing to serve).
-func LoadCorpusForServe(root string) (recs []*Record, skipped []string, err error) {
+func LoadCorpusForServe(root string) (recs []*Record, skipped, critical []string, err error) {
 	return walkCorpusSkipping(root, ParseFileLenient)
 }
 
@@ -413,7 +418,7 @@ func LoadCorpusForServe(root string) (recs []*Record, skipped []string, err erro
 // and skipping (collecting "path: reason") any that fail, so one bad record never
 // aborts the load. Shared by LoadCorpusResilient (strict parse) and
 // LoadCorpusForServe (lenient parse).
-func walkCorpusSkipping(root string, parseFile func(root, rel string) (*Record, error)) (recs []*Record, skipped []string, err error) {
+func walkCorpusSkipping(root string, parseFile func(root, rel string) (*Record, error)) (recs []*Record, skipped, critical []string, err error) {
 	expDir := filepath.Join(root, "experience")
 	seen := make(map[string]string) // record id -> first file that claimed it
 	werr := filepath.WalkDir(expDir, func(p string, d fs.DirEntry, walkErr error) error {
@@ -433,7 +438,12 @@ func walkCorpusSkipping(root string, parseFile func(root, rel string) (*Record, 
 		}
 		rec, parseErr := parseFile(root, rel)
 		if parseErr != nil {
-			skipped = append(skipped, fmt.Sprintf("%s: %v", rel, parseErr))
+			report := fmt.Sprintf("%s: %v", rel, parseErr)
+			if errors.Is(parseErr, ErrUnsupportedSchemaVersion) {
+				critical = append(critical, report)
+				return nil
+			}
+			skipped = append(skipped, report)
 			return nil // skip the poison record, keep walking
 		}
 		// A duplicate id is the OTHER way a single bad file dark-fails serve: the
@@ -449,10 +459,10 @@ func walkCorpusSkipping(root string, parseFile func(root, rel string) (*Record, 
 		return nil
 	})
 	if werr != nil {
-		return nil, nil, werr
+		return nil, nil, nil, werr
 	}
 	sort.Slice(recs, func(i, j int) bool { return recs[i].ID < recs[j].ID })
-	return recs, skipped, nil
+	return recs, skipped, critical, nil
 }
 
 func splitFrontmatter(src []byte) (front []byte, body string, err error) {
@@ -477,16 +487,16 @@ func splitFrontmatter(src []byte) (front []byte, body string, err error) {
 // Record — the same checks Parse applies after decoding frontmatter. The write
 // path (ingest) builds a Record in memory and validates it before persisting.
 // Path, Body, and the frontmatter fields must already be set.
-func Validate(r *Record) error { return r.validate() }
+func Validate(r *Record) error { return r.validate(time.Now().UTC()) }
 
-func (r *Record) validate() error {
+func (r *Record) validate(now time.Time) error {
 	var errs []error
 	fail := func(format string, args ...any) {
 		errs = append(errs, fmt.Errorf(format, args...))
 	}
 
 	if r.SchemaVersion != SchemaVersion {
-		fail("schema_version %d is not supported (want %d)", r.SchemaVersion, SchemaVersion)
+		errs = append(errs, fmt.Errorf("schema_version %d is not supported (want %d): %w", r.SchemaVersion, SchemaVersion, ErrUnsupportedSchemaVersion))
 	}
 	if !reID.MatchString(r.ID) {
 		fail("id %q does not match %s", r.ID, reID)
@@ -509,7 +519,7 @@ func (r *Record) validate() error {
 	r.validateAppliesTo(fail)
 	r.validateResolution(fail)
 	r.validateGuard(fail)
-	r.validateProvenance(fail)
+	r.validateProvenance(fail, now)
 
 	return errors.Join(errs...)
 }
@@ -662,7 +672,7 @@ func (r *Record) hasPositiveRepro() bool {
 	return false
 }
 
-func (r *Record) validateProvenance(fail func(string, ...any)) {
+func (r *Record) validateProvenance(fail func(string, ...any), now time.Time) {
 	p := &r.Provenance
 	if strings.TrimSpace(p.Source.Author) == "" {
 		fail("provenance.source.author is required")
@@ -708,7 +718,7 @@ func (r *Record) validateProvenance(fail func(string, ...any)) {
 		// time.Now().UTC()). Do NOT truncate to start-of-day "valid through the
 		// until date": that would make the validator disagree with the doctor on
 		// until==today and reintroduce the flip-flop this guard prevents.
-		if !until.IsZero() && until.Before(nowUTC()) {
+		if !until.IsZero() && until.Before(now) {
 			fail("status validated with a past provenance.valid.until %q — promote clears the window or demote it", *p.Valid.Until)
 		}
 		if p.Demotion != nil {
@@ -798,10 +808,6 @@ func (r *Record) validateProvenance(fail func(string, ...any)) {
 		fail("provenance.source_url must be empty when source_license is %q (ADR-0011 §5: re-derived, not distilled from a URL)", SourceLicenseAuthoredInternal)
 	}
 }
-
-// nowUTC is the validator's clock for the past-window guard (#0050); a package
-// var so a future test can pin it. Mirrors the staleness doctor's injected now.
-var nowUTC = func() time.Time { return time.Now().UTC() }
 
 func checkDate(fail func(string, ...any), field, v string) time.Time {
 	if !reDate.MatchString(v) {
