@@ -93,7 +93,7 @@ func NewRecorder(cfg Config) (*Recorder, error) {
 	if err := os.MkdirAll(filepath.Dir(cfg.Path), 0o755); err != nil {
 		return nil, fmt.Errorf("telemetry: mkdir: %w", err)
 	}
-	f, err := os.OpenFile(cfg.Path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(cfg.Path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("telemetry: open %s: %w", cfg.Path, err)
 	}
@@ -194,7 +194,7 @@ func (r *Recorder) rotate() {
 		r.f = nil
 		return
 	}
-	f, err := os.OpenFile(r.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(r.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		r.log.Error("telemetry rotate reopen failed — telemetry stops", slog.String("error", err.Error()))
 		r.f = nil

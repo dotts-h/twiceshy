@@ -12,11 +12,11 @@ See AGENTS.md for onboarding (context, conventions, ADRs, schema).
   test *and* an experience record under `experience/` (we dogfood).
 - **Dependency budget** (CONVENTIONS.md): SQLite/FTS5 driver, MCP/HTTP
   library, YAML parser. Anything else: ask the owner first.
-- **Phase discipline.** Phase 1 (read path: parser/validator, FTS5 index,
-  fingerprint + lexical search, MCP `search_experience` / `get_experience`)
-  and the Phase 3 write path (`record_experience`, propose-only) are done.
-  Dense search, hooks push channel, and doctors are tracked issues — do not
-  implement them early.
+- **Phase discipline.** Do not build ahead of an open tracked issue / ADR. The
+  once-deferred surfaces now ship: dense pull retrieval (ADR-0009), push +
+  discriminative-term gate (ADR-0015), telemetry (#0067), doctors/repro,
+  autonomous promote/demote, and spools. Use `docs/CODEBASE_MAP.md` as the
+  navigational source of truth for what exists before opening new phase work.
 - **Retrieval invariants** (ADR-0001 §3–4): hot path embedding-free; hard
   cap k≤3; relevance floor below which nothing is injected; quarantined
   records never reach the push channel.
