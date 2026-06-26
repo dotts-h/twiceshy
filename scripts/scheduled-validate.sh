@@ -60,6 +60,7 @@ SOAK="${TWICESHY_SOAK_SECONDS:-172800}"
 AUTOMERGE="${TWICESHY_AUTOMERGE:-1}"
 DRYRUN="${TWICESHY_VALIDATE_DRYRUN:-0}"
 NTFY_URL="${NTFY_URL:-}"
+NTFY_TOKEN="${NTFY_TOKEN:-}"
 # Forge repo + prebuilt binary (see scheduled-import.sh). Default = the engine repo +
 # build-from-source; the decoupled deployment sets TWICESHY_FORGEJO_REPO=claude/twiceshy-corpus
 # and TWICESHY_BIN=<prebuilt> so this runs against a data-only corpus clone (ADR-0021).
@@ -69,7 +70,9 @@ API="http://192.168.50.244:3030/api/v1/repos/${FORGEJO_REPO}"
 
 notify() {
 	[ -n "$NTFY_URL" ] || return 0
-	curl -fsS -d "$1" "$NTFY_URL" >/dev/null 2>&1 || true
+	# ntfy.radulescu.app is deny-all + topic-scoped: without the Bearer token (and a
+	# topic in NTFY_URL) the POST 403s and the alert is silently lost.
+	curl -fsS ${NTFY_TOKEN:+-H "Authorization: Bearer $NTFY_TOKEN"} -d "$1" "$NTFY_URL" >/dev/null 2>&1 || true
 }
 
 # §7 emergency stop: short-circuit BEFORE any mutation (no clone reset, no build).

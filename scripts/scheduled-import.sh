@@ -44,6 +44,7 @@ ECOSYSTEMS="${TWICESHY_IMPORT_ECOSYSTEMS:-npm PyPI Go}"
 AUTOMERGE="${TWICESHY_AUTOMERGE:-1}"
 GO="${GO:-/usr/local/go/bin/go}"
 NTFY_URL="${NTFY_URL:-}"
+NTFY_TOKEN="${NTFY_TOKEN:-}"
 # Forge repo the PR is opened + merged against. Default = the engine repo; the
 # decoupled deployment sets TWICESHY_FORGEJO_REPO=claude/twiceshy-corpus (ADR-0021).
 FORGEJO_REPO="${TWICESHY_FORGEJO_REPO:-claude/twiceshy}"
@@ -55,7 +56,13 @@ BIN="${TWICESHY_BIN:-}"
 # corpus guard). Override TWICESHY_PREFLIGHT_CMD for a custom gate.
 PREFLIGHT_CMD="${TWICESHY_PREFLIGHT_CMD:-}"
 
-notify() { [ -n "$NTFY_URL" ] && curl -fsS -d "$1" "$NTFY_URL" >/dev/null 2>&1 || true; }
+notify() {
+  [ -n "$NTFY_URL" ] || return 0
+  # ntfy.radulescu.app is deny-all: an auth token is required, and the URL must
+  # include a topic (e.g. .../infra). Without the Bearer header the POST 403s and
+  # the alert is silently lost (the old `|| true` masked exactly this).
+  curl -fsS ${NTFY_TOKEN:+-H "Authorization: Bearer $NTFY_TOKEN"} -d "$1" "$NTFY_URL" >/dev/null 2>&1 || true
+}
 
 cd "$REPO"
 git fetch origin -q && git checkout main -q && git reset --hard origin/main -q && git clean -fdq -- experience/
