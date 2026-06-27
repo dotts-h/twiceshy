@@ -17,6 +17,7 @@ NAS="${TWICESHY_NAS:-Claude@192.168.50.244}"
 NAS_PORT="${TWICESHY_NAS_PORT:-2222}"
 CONTAINER="${TWICESHY_CONTAINER:-twiceshy}"
 ALERT_URL="${TWICESHY_ALERT_URL:-}"                   # ntfy topic; unset = log-only
+NTFY_TOKEN="${NTFY_TOKEN:-}"
 RUNDIR="${TWICESHY_RUNDIR:-${XDG_RUNTIME_DIR:-/tmp}}" # non-root cannot write /run (see corpus-sync)
 BREAKER_FILE="${TWICESHY_WATCHDOG_BREAKER:-$RUNDIR/twiceshy-watchdog.breaker}"
 BREAKER_COOLDOWN="${TWICESHY_WATCHDOG_COOLDOWN:-600}" # crash-loop guard: don't restart faster than this
@@ -36,7 +37,7 @@ alert() {
 		ALERT_URL="$(ssh_nas "docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' $CONTAINER" 2>/dev/null | sed -n 's/^TWICESHY_ALERT_URL=//p' | head -1)"
 	fi
 	[ -n "$ALERT_URL" ] || return 0
-	curl -fsS -m 10 -d "twiceshy-watchdog: $1" "$ALERT_URL" >/dev/null 2>&1 || true
+	curl -fsS -m 10 ${NTFY_TOKEN:+-H "Authorization: Bearer $NTFY_TOKEN"} -d "twiceshy-watchdog: $1" "$ALERT_URL" >/dev/null 2>&1 || true
 }
 
 # healthz_wait: poll health_probe until success or HEALTH_TIMEOUT elapses.
