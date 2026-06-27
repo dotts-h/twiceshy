@@ -7,9 +7,9 @@ COVER_FLOOR ?= 80
 # override with a corpus checkout (`make eval CORPUS=/path/to/twiceshy-corpus`).
 CORPUS      ?= internal/testcorpus/corpus
 
-.PHONY: ci lint test cover cover-check build tidy doctor sec vuln secret-scan eval test-livecorpus
+.PHONY: ci lint test test-scripts cover cover-check build tidy doctor sec vuln secret-scan eval test-livecorpus
 
-ci: lint cover-check sec
+ci: lint cover-check test-scripts sec
 
 # Security gate — mirrors .forgejo/workflows/security.yml so `make ci` reproduces
 # ALL required CI checks locally (golangci-lint already covers `go vet`). Both
@@ -45,8 +45,12 @@ lint:
 eval: build
 	$(GO) run ./cmd/twiceshy eval -corpus $(CORPUS) -db $${TMPDIR:-/tmp}/twiceshy-eval.db
 
-test:
+test: test-scripts
 	$(GO) test -race ./...
+
+test-scripts:
+	$(GO) test ./internal/ops
+	@for test_script in scripts/*.test.sh; do bash "$$test_script"; done
 
 test-livecorpus:
 	$(GO) test -tags livecorpus ./...

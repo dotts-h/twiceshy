@@ -34,6 +34,7 @@ CONTAINER="${TWICESHY_CONTAINER:-twiceshy}"
 NONROOT_UID="${TWICESHY_UID:-65532}"          # distroless nonroot (DEPLOY.md)
 HEALTH_URL="${TWICESHY_HEALTH_URL:-http://192.168.50.244:8722/healthz}"
 ALERT_URL="${TWICESHY_ALERT_URL:-}"           # ntfy topic; unset = no-op (fail-open)
+NTFY_TOKEN="${NTFY_TOKEN:-}"
 HEALTH_TIMEOUT="${TWICESHY_HEALTH_TIMEOUT:-30}"     # seconds to wait for /healthz after a reload/start
 POLL_SLEEP="${TWICESHY_POLL_SLEEP:-2}"               # seconds between health polls
 # State files default to a per-user-writable dir: the timer runs as a non-root user
@@ -57,7 +58,7 @@ health_probe() { curl -fsS -m 5 "$HEALTH_URL" >/dev/null 2>&1; }
 alert() {
 	echo "ALERT: $1" >&2
 	[ -n "$ALERT_URL" ] || return 0
-	curl -fsS -m 10 -d "twiceshy-corpus-sync: $1" "$ALERT_URL" >/dev/null 2>&1 || true
+	curl -fsS -m 10 ${NTFY_TOKEN:+-H "Authorization: Bearer $NTFY_TOKEN"} -d "twiceshy-corpus-sync: $1" "$ALERT_URL" >/dev/null 2>&1 || true
 }
 
 # --- liveness ---------------------------------------------------------------------

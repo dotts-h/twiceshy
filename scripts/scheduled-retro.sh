@@ -39,8 +39,9 @@ DRYRUN="${TWICESHY_RETRO_DRYRUN:-0}"
 BIN="${TWICESHY_BIN:-/home/ori/.local/bin/twiceshy}"
 FORGEJO_REPO="${TWICESHY_FORGEJO_REPO:-claude/twiceshy-corpus}"
 NTFY_URL="${NTFY_URL:-}"
+NTFY_TOKEN="${NTFY_TOKEN:-}"
 
-notify() { [ -n "$NTFY_URL" ] && curl -fsS -d "$1" "$NTFY_URL" >/dev/null 2>&1 || true; }
+notify() { [ -n "$NTFY_URL" ] && curl -fsS ${NTFY_TOKEN:+-H "Authorization: Bearer $NTFY_TOKEN"} -d "$1" "$NTFY_URL" >/dev/null 2>&1 || true; }
 
 [ -n "${TWICESHY_RETRO_URL:-}" ] || { echo "TWICESHY_RETRO_URL required (the :8729 analyzer shim)"; exit 2; }
 
