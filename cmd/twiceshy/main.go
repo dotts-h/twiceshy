@@ -57,6 +57,7 @@ import (
 	"github.com/dotts-h/twiceshy/internal/promote"
 	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/repro"
+	"github.com/dotts-h/twiceshy/internal/retro"
 	runpkg "github.com/dotts-h/twiceshy/internal/run"
 	"github.com/dotts-h/twiceshy/internal/server"
 	"github.com/dotts-h/twiceshy/internal/spool"
@@ -231,7 +232,7 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	case "doctor":
 		return runDoctor(ctx, args[1:], out)
 	case "eval":
-		return runEval(ctx, args[1:], out)
+		return runEval(ctx, args[1:], out, getenv)
 	case "usage-flush":
 		return runUsageFlush(ctx, args[1:], out)
 	case "gold-add":
@@ -1898,13 +1899,18 @@ func readReproContent(root, rel string) (string, error) {
 // drives the validated-only pull path with queries taken from each behavioral
 // record's error signatures + summary, and reports recall@k / MRR / near-miss.
 // It is the store's evidence gate — does the corpus surface the right trap?
-func runEval(ctx context.Context, args []string, out io.Writer) error {
+func runEval(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	fs := flag.NewFlagSet("eval", flag.ContinueOnError)
 	c := addCommonFlags(fs)
 	asJSON := fs.Bool("json", false, "emit the report as JSON")
 	push := fs.Bool("push", false, "run the push-precision eval (off-domain prompts must inject nothing) instead of pull recall")
+	usage := fs.Bool("usage", false, "run the usage-judge precision/recall eval over the gold set")
+	model := fs.String("analyzer-model", "", "off-pool model id for -usage (default: TWICESHY_RETRO_MODEL, else TWICESHY_JUDGE_MODEL)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
+	}
+	if *usage {
+		return runEvalUsage(ctx, getenv, out, *asJSON, *model)
 	}
 	recs, err := record.LoadCorpus(c.corpus)
 	if err != nil {
@@ -1981,6 +1987,46 @@ func runEvalPush(ctx context.Context, ix *index.Index, out io.Writer, asJSON boo
 	}
 	if rep.FalseInjections > 0 {
 		return fmt.Errorf("push precision regression: %d/%d off-domain prompts injected a card", rep.FalseInjections, rep.Negatives)
+	}
+	return nil
+}
+
+// runEvalUsage reports how accurately the usage judge labels served cards as
+// used vs ignored over the hand-labeled gold set (#0069 acceptance 3).
+func runEvalUsage(ctx context.Context, getenv func(string) string, out io.Writer, asJSON bool, model string) error {
+	cfg, err := modelConfigFromEnv(getenv, model, 0)
+	if err != nil {
+		return err
+	}
+	judge, err := retro.NewModelUsageJudge(cfg)
+	if err != nil {
+		return err
+	}
+	rep, err := eval.RunUsage(ctx, judge, eval.UsageGold())
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		payload := struct {
+			eval.UsageReport
+			Precision float64 `json:"precision"`
+			Recall    float64 `json:"recall"`
+		}{rep, rep.Precision(), rep.Recall()}
+		b, err := json.MarshalIndent(payload, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(out, string(b))
+		return nil
+	}
+	_, _ = fmt.Fprintf(out, "usage eval over the gold set (%d cases)\n", rep.Cases)
+	_, _ = fmt.Fprintf(out, "  precision: %.1f%% (%d/%d judge-positives correct)\n",
+		rep.Precision()*100, rep.TP, rep.TP+rep.FP)
+	_, _ = fmt.Fprintf(out, "  recall:    %.1f%% (%d/%d gold-used found)\n",
+		rep.Recall()*100, rep.TP, rep.TP+rep.FN)
+	_, _ = fmt.Fprintf(out, "  TP/FP/FN:  %d/%d/%d\n", rep.TP, rep.FP, rep.FN)
+	for _, m := range rep.Mismatches {
+		_, _ = fmt.Fprintf(out, "    [MISMATCH] %s\n", m)
 	}
 	return nil
 }

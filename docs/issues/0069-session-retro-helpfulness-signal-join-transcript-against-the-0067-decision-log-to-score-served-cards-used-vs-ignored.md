@@ -75,11 +75,27 @@ applied — closing the loop with no new instrumentation.
       a flaky usage judge or missing decision log logs a warning and never blocks the trap
       drain or the dequeue. Guards: `cmd/twiceshy/retro_test.go` (served-filter, best-effort,
       disabled). Implemented by Composer 2.5, reviewed+gated by Claude.
-- [ ] **Remaining.** Acceptance 3 — the precision/recall reporter on a real-traffic sample
-      (feeds #0005 slice 2). The signal is now live; what's left is measuring it.
+- [~] **Reporter built; real-traffic measurement pending activation (acceptance 3) — PR #416.**
+      `internal/eval` ships the usage-judge precision/recall eval (`UsageCase`/`UsageReport`/
+      `RunUsage`, mirroring the push eval), driven by `twiceshy eval -usage` against the off-pool
+      shim. It micro-averages judge accuracy restricted to SERVED cards (the live join's trust
+      boundary). The gold set (`UsageGold`) is **SYNTHETIC** — unambiguous use/ignore cases that
+      validate the judge before we trust it. Gate: `internal/eval/usage_test.go` (the TP/FP/FN +
+      precision/recall math). The *real-traffic* sample (the literal acceptance) needs the
+      measurement chain ACTIVATED first (see the activation gap below).
+- [ ] **Real-traffic precision/recall** — swap the synthetic gold for hand-labeled real sessions
+      once telemetry is on. Feeds #0005 slice 2.
 
-Issue stays **open**: the verdict→confirm core and the live decision-log attribution now
-ship; only the precision/recall reporter (#3) remains.
+> **Activation gap (found 2026-06-28):** the whole chain is built but DORMANT in production —
+> no `TWICESHY_TELEMETRY_*` is set, so the serve container never writes the #0067 decision log,
+> so the join has nothing to attribute against. Activating it is cross-host: the serve runs in a
+> Docker container on the NAS (`/data` volume), while the retro drain runs on the brain — the
+> decision log must be reachable from both (shared mount, sync, or run the drain on the NAS).
+> Tracked separately as an ops decision; the code is ready (`-telemetry-log` on serve + retro,
+> matching `TWICESHY_TELEMETRY_SALT`).
+
+Issue stays **open**: the verdict→confirm core, the live join, and the judge-accuracy eval ship;
+the real-traffic precision/recall (acceptance 3 proper) is gated on activating telemetry in prod.
 
 ## Notes
 Split out of #0065 (whose Notes bless shipping the extraction half independently).
