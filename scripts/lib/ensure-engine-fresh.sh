@@ -46,6 +46,10 @@ alert() {
 
 ensure_engine_fresh() {
 	local want have
+	# Escape hatch: skip the preflight entirely (hermetic unit tests of the scheduled
+	# scripts; or an operator who deploys the engine out-of-band). Leave UNSET in
+	# production so the staleness guard actually runs.
+	[ -n "${TWICESHY_SKIP_ENGINE_FRESH:-}" ] && return 0
 	want="$(engine_target_commit)" || true
 	[ -n "$want" ] || { alert "cannot resolve engine origin/main at $ENGINE_REPO"; return 1; }
 	have="$(cat "$ENGINE_BUILD_MARKER" 2>/dev/null || true)"

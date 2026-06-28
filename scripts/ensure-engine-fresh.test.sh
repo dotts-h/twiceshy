@@ -66,6 +66,15 @@ check "stale + not-on-main keeps marker" "$(cat "$ENGINE_BUILD_MARKER")" "old999
 if contains "$ALERTS" "not on clean main"; then ok "stale + not-on-main alerts loudly"; else bad "stale + not-on-main must alert: $ALERTS"; fi
 READY=0
 
+# Escape hatch: TWICESHY_SKIP_ENGINE_FRESH short-circuits everything (hermetic tests).
+printf '%s\n' old111 > "$ENGINE_BUILD_MARKER"
+BUILDS=0; ALERTS=""
+export TWICESHY_SKIP_ENGINE_FRESH=1
+ensure_engine_fresh; rc=$?
+unset TWICESHY_SKIP_ENGINE_FRESH
+check "skip hatch returns 0" "$rc" "0"
+check "skip hatch does not build" "$BUILDS" "0"
+
 echo "----"
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]
