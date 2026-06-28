@@ -1,16 +1,16 @@
 ---
 id: 0093
 title: twiceshy ntfy alerting still mute on the Go binary anomaly path and corpus-stall-alarm.sh — missing Bearer token
-status: open
+status: closed
 severity: medium
 group: 
 depends_on: []
 forgejo:
 links:
   adr:
-  prs: []
+  prs: [398]
   issues: [0038, 0072]
-  regression:
+  regression: experience/2026 exp-2868
 assets: []
 ---
 
@@ -56,3 +56,32 @@ Context: real topic is `infra`; bot token in `~/.config/brain/secrets.env`
 (`NTFY_BOT_TOKEN`). Related: #0038 (route guardrail trips → ntfy notify seam), #0072
 (corpus pipeline hardening / ntfy-on-failure + stall-alarm). The shell path was fixed in
 PRs #388 (depletion alert) and #389 (Bearer token) on 2026-06-26.
+
+## Resolution (2026-06-28) — closed
+
+**The code half shipped earlier, in PR #398** (`7724a7e`): `notify.New` takes a token,
+`HTTPNotifier.Alert` sets `Authorization: Bearer` when non-empty, all three callers pass
+`getenv("NTFY_TOKEN")`, `corpus-stall-alarm.sh notify()` gained the token, with tests
+(`internal/notify/notify_test.go`, `internal/ops/scripts_test.go`). The issue was simply
+left open.
+
+**A live deployment defect remained, and was the real reason the stall alarm stayed mute.**
+The Go anomaly path (promote/adapt) was fine — `validate.env` carries a topic-qualified
+`TWICESHY_ALERT_URL=…/infra` + token (live POST → 200). But `/etc/twiceshy/stall-alarm.env`
+still set a **bare-host** `TWICESHY_ALERT_URL=https://ntfy.radulescu.app` (no `/infra`
+topic), and `corpus-stall-alarm.sh` resolves `ALERT_URL="${TWICESHY_ALERT_URL:-${NTFY_URL}}"`
+— so the bare host **shadowed** the topic-qualified `NTFY_URL` the `ntfy.env` drop-in
+supplies. Real signal (with the valid token): POST to the bare host → **400**; POST to
+`…/infra` → **200**; POST to `…/infra` without a token → **403**. So adding the token (the
+original fix) was necessary but not sufficient — a 400 (bad URL) is a different failure mode
+than the 403 (no auth) this issue was filed about.
+
+**Fixes:**
+1. *Deployment* — removed the shadowing bare-host `TWICESHY_ALERT_URL` from
+   `/etc/twiceshy/stall-alarm.env`; `ntfy.env` (drop-in) is now the single source of the
+   topic URL + token. Verified live: the unit runs clean and the resolved URL POSTs **200**.
+2. *Repo guard* — `corpus-stall-alarm.sh notify()` now warns **loudly** (stderr → journald)
+   when the resolved ntfy URL has no topic path, so a "never silent again" alarm can never be
+   silently mis-wired again. Guarding test: `TestCorpusStallAlarmWarnsOnTopiclessURL`.
+3. *Deploy doc* — `docs/DEPLOY.md` notes ntfy URLs must be topic-qualified.
+4. *Dogfood* — experience draft `exp-2868` (the bare-host-ntfy-URL → 400 trap).

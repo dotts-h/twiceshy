@@ -129,6 +129,9 @@ TWICESHY_JUDGE_URL=http://localhost:8723
 TWICESHY_JUDGE_MODEL=gpt-oss:20b
 TWICESHY_DRAFTER_MODEL=qwen2.5-coder
 TWICESHY_REPORT_QUEUE=/home/ori/.local/share/twiceshy/report-queue
+# ntfy URLs MUST be topic-qualified (https://host/<topic>): a POST to a bare host 400s
+# and the alert is silently dropped, even with a valid Bearer token (#0093). The token
+# itself rides in via the shared /etc/twiceshy/ntfy.env drop-in, not here.
 TWICESHY_ALERT_URL=https://ntfy.example/twiceshy-alerts
 NTFY_URL=https://ntfy.example/twiceshy
 # TWICESHY_SOAK_SECONDS=172800   # 48h veto window (default)
