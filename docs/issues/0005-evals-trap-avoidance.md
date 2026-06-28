@@ -43,6 +43,23 @@ exp-0004 (NAS bind-mount perm-denied) above exp-0017 (noexec-TMPDIR perm-denied)
 **Slice 2 (remaining):** the GitChameleon-style agent-task eval — does the
 retrieved card change task success / steps / tokens (memory on vs off).
 
+## Progress (slice 2 — harness foundation, 2026-06-28, PR #419)
+
+`internal/agenteval` ships the agent-task eval **harness**: `AgentRunner` + `Verifier`
+injectable seams, `Run` drives every `TaskCase` through BOTH arms (memory off = no card,
+memory on = the card) and aggregates avoidance + steps + tokens per arm into a `Report`
+(`AvoidanceOff()`/`AvoidanceOn()`), with two `Outcome`s per case. `GoldTasks()` ships 3
+probes tied to **validated, executably-verifiable** traps — `exp-2868` (React 19 `useRef`),
+`exp-2870` (RN `<View>` text style), `exp-0001` (FTS5 `MATCH` raw input) — each a task whose
+naive answer hits the trap, with the card text and the verify key. Gate:
+`internal/agenteval/agenteval_test.go` (the on-vs-off aggregation + card-injection contract).
+
+**Still remaining for the live numbers:** a real `AgentRunner` (an off-pool model attempting
+each task) and an executable `Verifier` (scaffold + `tsc`/`go` per `VerifyID` — the same
+licensing-firewall execution that validated the #0088 traps). Then the harness produces the
+actual memory-on-vs-off avoidance/steps/tokens result. Implemented by Composer 2.5;
+spec+gate+review by Claude.
+
 ## Notes
 **Re-scoped off #0002 (2026-06-19):** the eval measures the PULL path
 (`search_experience`), which IS the injection path — push (#0002) was deferred, so
