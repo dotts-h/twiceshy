@@ -1,14 +1,14 @@
 ---
 id: 0095
 title: Opt-in author-side PII redactor — clear incidental private-IP/email so a draft isn't quarantined
-status: in-progress
+status: closed
 severity: low
 group:
 depends_on: []
 forgejo: 406
 links:
   adr: ADR-0011
-  prs: [405]
+  prs: [405, 407]
   issues: [0090, 0091]
   regression:
 assets: []
