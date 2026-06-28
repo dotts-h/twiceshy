@@ -33,7 +33,15 @@ engine_build_ready() {
 }
 
 # build_engine: fast-forward main to origin/main (safe — no merge commits) and build.
-build_engine() { (cd "$ENGINE_REPO" && git merge --ff-only -q origin/main && go build -o "$BIN" ./cmd/twiceshy); }
+# Resolve `go` explicitly: the scheduled jobs run under a minimal systemd PATH that
+# does NOT include the Go toolchain (a bare `go` is found only on an interactive
+# shell's PATH), so a bare `go build` would fail with "command not found".
+build_engine() {
+	local go
+	go="$(command -v go 2>/dev/null || true)"
+	[ -n "$go" ] || go=/usr/local/go/bin/go
+	(cd "$ENGINE_REPO" && git merge --ff-only -q origin/main && "$go" build -o "$BIN" ./cmd/twiceshy)
+}
 
 log() { logger -t ensure-engine-fresh "$*" 2>/dev/null || true; echo "$*"; }
 alert() {
@@ -57,15 +65,20 @@ ensure_engine_fresh() {
 	if [ "$want" = "$have" ] && [ -e "$BIN" ]; then
 		return 0
 	fi
-	# Stale (or missing) binary. Only self-heal from a clean main checkout; otherwise
-	# fail LOUD — never build unmerged/dirty code, never silently run a stale binary.
+	# Stale (or missing) binary. Self-heal from a clean main checkout; never build
+	# unmerged/dirty code. When we CANNOT self-heal, fail OPEN, not closed: alert loudly
+	# but PROCEED with the existing (last-good) binary — a rebuild failure must not block
+	# the whole capture/promote pipeline (#0096 regression: it once blocked validate when
+	# `go` was off the systemd PATH). If the stale binary is genuinely incompatible the job
+	# fails on the real cause, now with this alert as context. The marker is NOT advanced,
+	# so the alert keeps firing until a human deploys.
 	if ! engine_build_ready; then
-		alert "engine binary stale vs origin/main ($have→$want) but checkout not on clean main — deploy from main manually"
-		return 1
+		alert "engine binary stale vs origin/main ($have→$want); checkout not on clean main — cannot self-heal, running existing binary; deploy from main"
+		return 0
 	fi
 	if ! build_engine; then
-		alert "engine rebuild FAILED $have→$want"
-		return 1
+		alert "engine rebuild FAILED $have→$want — running existing binary; deploy from main"
+		return 0
 	fi
 	mkdir -p "$(dirname "$ENGINE_BUILD_MARKER")"
 	if ! printf '%s\n' "$want" > "$ENGINE_BUILD_MARKER"; then

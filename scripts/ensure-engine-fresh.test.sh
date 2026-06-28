@@ -45,22 +45,25 @@ check "stale engine is rebuilt" "$BUILDS" "1"
 check "marker advances after rebuild" "$(cat "$ENGINE_BUILD_MARKER")" "$HEAD"
 if contains "$ALERTS$LOGS" "rebuilt engine"; then ok "rebuild is announced"; else bad "rebuild must be announced: $ALERTS$LOGS"; fi
 
-# Failed rebuild: return non-zero, alert, and retain the stale marker.
+# Failed rebuild: fail OPEN — alert, proceed (return 0), and retain the stale marker so
+# the alert keeps firing. A rebuild failure must never block the whole pipeline (#0096
+# regression: a missing-go systemd PATH once blocked validate).
 printf '%s\n' old789 > "$ENGINE_BUILD_MARKER"
 BUILD_RC=1; BUILDS=0; ALERTS=""; LOGS=""
 ensure_engine_fresh; rc=$?
-if [ "$rc" -ne 0 ]; then ok "failed rebuild returns non-zero"; else bad "failed rebuild must return non-zero"; fi
+check "failed rebuild fails OPEN (returns 0)" "$rc" "0"
 check "failed rebuild was attempted" "$BUILDS" "1"
 check "failed rebuild does not advance marker" "$(cat "$ENGINE_BUILD_MARKER")" "old789"
 if [ -n "$ALERTS" ]; then ok "failed rebuild alerts"; else bad "failed rebuild must alert"; fi
 
-# Stale binary but checkout NOT on clean main (dev feature branch): refuse loudly,
-# never build unmerged code, keep the marker — the deploy stays the operator's call.
+# Stale binary but checkout NOT on clean main (dev feature branch): alert loudly, never
+# build unmerged code, keep the marker — but fail OPEN (proceed with the existing binary),
+# not block the pipeline.
 printf '%s\n' old999 > "$ENGINE_BUILD_MARKER"
 : > "$BIN"
 READY=1; BUILD_RC=0; BUILDS=0; ALERTS=""; LOGS=""
 ensure_engine_fresh; rc=$?
-if [ "$rc" -ne 0 ]; then ok "stale + not-on-main returns non-zero"; else bad "stale + not-on-main must return non-zero"; fi
+check "stale + not-on-main fails OPEN (returns 0)" "$rc" "0"
 check "stale + not-on-main does not build" "$BUILDS" "0"
 check "stale + not-on-main keeps marker" "$(cat "$ENGINE_BUILD_MARKER")" "old999"
 if contains "$ALERTS" "not on clean main"; then ok "stale + not-on-main alerts loudly"; else bad "stale + not-on-main must alert: $ALERTS"; fi
