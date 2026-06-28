@@ -8,3 +8,6 @@ coverage.out
 scratch_thinkoff/
 __pycache__/
 runs/*.log
+
+# derived SQLite index from a test/build run in the repo root
+/twiceshy.db

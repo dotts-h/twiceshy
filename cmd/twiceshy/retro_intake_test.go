@@ -78,7 +78,7 @@ func TestDrainRetro_MaterializesQuarantinedDraftAndDrains(t *testing.T) {
 	analyzer := &retro.StubAnalyzer{Candidates: []retro.Candidate{aTrapCandidate()}}
 
 	var buf bytes.Buffer
-	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22"}, &buf); err != nil {
+	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22"}, nil, &buf); err != nil {
 		t.Fatalf("drainRetro: %v", err)
 	}
 	if analyzer.Calls != 1 {
@@ -145,7 +145,7 @@ func TestDrainRetro_AnalyzerErrorLeavesQueuedAndWritesNothing(t *testing.T) {
 	analyzer := &retro.StubAnalyzer{Err: errors.New("endpoint down")}
 
 	var buf bytes.Buffer
-	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22"}, &buf); err == nil {
+	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22"}, nil, &buf); err == nil {
 		t.Fatal("want an error when the analyzer is down (fail-safe), got nil")
 	}
 	if paths, _ := spool.List(queue); len(paths) != 1 {
@@ -164,7 +164,7 @@ func TestDrainRetro_DedupsRepeatedCandidateWithinRun(t *testing.T) {
 	analyzer := &retro.StubAnalyzer{Candidates: []retro.Candidate{c, c}}
 
 	var buf bytes.Buffer
-	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22"}, &buf); err != nil {
+	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22"}, nil, &buf); err != nil {
 		t.Fatalf("drainRetro: %v", err)
 	}
 	if recs, _ := record.LoadCorpus(corpus); len(recs) != 1 {
@@ -179,7 +179,7 @@ func TestDrainRetro_DryRunWritesNothingAndKeepsQueue(t *testing.T) {
 	analyzer := &retro.StubAnalyzer{Candidates: []retro.Candidate{aTrapCandidate()}}
 
 	var buf bytes.Buffer
-	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22", dryRun: true}, &buf); err != nil {
+	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22", dryRun: true}, nil, &buf); err != nil {
 		t.Fatalf("drainRetro: %v", err)
 	}
 	if recs, _ := record.LoadCorpus(corpus); len(recs) != 0 {
@@ -209,7 +209,7 @@ func TestDrainRetro_LimitHitStillDequeuesProcessedTranscript(t *testing.T) {
 	}}
 
 	var buf bytes.Buffer
-	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22", limit: 1}, &buf); err != nil {
+	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22", limit: 1}, nil, &buf); err != nil {
 		t.Fatalf("drainRetro: %v", err)
 	}
 	if paths, _ := spool.List(queue); len(paths) != 0 {
@@ -245,7 +245,7 @@ func TestDrainRetro_UnprocessableIsDeadLetteredAndContinues(t *testing.T) {
 	stub := &unprocessableAfterFirst{candidates: []retro.Candidate{aTrapCandidate()}}
 
 	var buf bytes.Buffer
-	if err := drainRetro(context.Background(), stub, ix, "", corpus, queue, retroOpts{now: "2026-06-26"}, &buf); err != nil {
+	if err := drainRetro(context.Background(), stub, ix, "", corpus, queue, retroOpts{now: "2026-06-26"}, nil, &buf); err != nil {
 		t.Fatalf("drainRetro returned error (must continue past unprocessable): %v", err)
 	}
 
