@@ -105,6 +105,39 @@ EOF`, now-10, now-1000, now-1000, now-1000, now-1000))
 	}
 }
 
+// A "never silent again" alarm must not itself be silently mis-wired: ntfy requires a
+// topic path (https://host/<topic>); a bare-host URL 400s and the alert is dropped. So
+// the alarm warns LOUDLY (stderr) when its resolved ALERT_URL has no topic. This is the
+// live #0093 defect — a bare TWICESHY_ALERT_URL in stall-alarm.env shadowed the topic-
+// qualified NTFY_URL from the ntfy.env drop-in, so every stall alert 400'd in silence.
+func TestCorpusStallAlarmWarnsOnTopiclessURL(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		alertURL string
+		wantWarn bool
+	}{
+		{name: "bare host warns", alertURL: "http://ntfy.invalid", wantWarn: true},
+		{name: "trailing slash empty topic warns", alertURL: "http://ntfy.invalid/", wantWarn: true},
+		{name: "topic-qualified is silent", alertURL: "http://ntfy.invalid/infra", wantWarn: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newShellHarness(t)
+			h.fake("python3", "echo '77|validate/run-red|3|failure'")
+			h.set("FORGEJO_TOKEN", "forge-token")
+			h.set("TWICESHY_ALERT_URL", tc.alertURL)
+			h.set("NTFY_TOKEN", "stall-token")
+			h.set("TWICESHY_STALL_STATE", filepath.Join(h.root, "stall.state"))
+			h.set("TWICESHY_STALL_COOLDOWN", "0")
+
+			result := h.run("corpus-stall-alarm.sh")
+			gotWarn := strings.Contains(result.Stderr, "has no ntfy topic")
+			if gotWarn != tc.wantWarn {
+				t.Fatalf("warn=%v, want %v for ALERT_URL %q; stderr: %q", gotWarn, tc.wantWarn, tc.alertURL, result.Stderr)
+			}
+		})
+	}
+}
+
 func TestScheduledImportMergeFailureIsVisible(t *testing.T) {
 	h := newShellHarness(t)
 	h.fake("git", `

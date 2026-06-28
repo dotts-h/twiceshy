@@ -26,6 +26,13 @@ now() { date +%s; }
 notify() {
 	logger -t corpus-stall-alarm "$1" 2>/dev/null || true
 	[ -n "$ALERT_URL" ] || return 0
+	# A "never silent again" alarm must not itself be silently mis-wired: ntfy needs a
+	# topic path (https://host/<topic>); a bare-host URL 400s and the alert is dropped.
+	# Warn LOUDLY (stderr -> journald) rather than POST into the void (#0093).
+	case "$ALERT_URL" in
+		*://*/?*) : ;;  # scheme://host/<topic> — a non-empty topic path is present
+		*) printf 'corpus-stall-alarm: WARN ALERT_URL %s has no ntfy topic — POST will 400 and the alert is silently dropped (#0093); set NTFY_URL/TWICESHY_ALERT_URL to https://host/<topic>\n' "$ALERT_URL" >&2 ;;
+	esac
 	curl -fsS -m 10 ${NTFY_TOKEN:+-H "Authorization: Bearer $NTFY_TOKEN"} -d "corpus-stall-alarm: $1" "$ALERT_URL" >/dev/null 2>&1 || true
 }
 
