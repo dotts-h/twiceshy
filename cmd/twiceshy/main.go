@@ -195,7 +195,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|draft|promote|repromote|adapt|intake-reports|intake-issues|retro-intake|screen|report|pack|doctor|eval|usage-flush|gold-add|judge-eval|corpus-merge-check|corpus-pr-paths|nextid> [flags]")
+		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|learned|draft|promote|repromote|adapt|intake-reports|intake-issues|retro-intake|screen|report|pack|doctor|eval|usage-flush|gold-add|judge-eval|corpus-merge-check|corpus-pr-paths|nextid> [flags]")
 	}
 	switch args[0] {
 	case "index":
@@ -208,6 +208,8 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runPack(args[1:], out)
 	case "ingest":
 		return runIngest(ctx, args[1:], out)
+	case "learned":
+		return runLearned(ctx, args[1:], out, getenv)
 	case "draft":
 		return runDraft(ctx, args[1:], out, getenv)
 	case "promote":
@@ -249,7 +251,7 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	case "nextid":
 		return runNextID(ctx, args[1:], out)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, draft, promote, repromote, adapt, intake-reports, intake-issues, retro-intake, screen, report, pack, doctor, eval, usage-flush, gold-add, judge-eval, self-audit, similarity, author, corpus-merge-check, corpus-pr-paths, or nextid)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, learned, draft, promote, repromote, adapt, intake-reports, intake-issues, retro-intake, screen, report, pack, doctor, eval, usage-flush, gold-add, judge-eval, self-audit, similarity, author, corpus-merge-check, corpus-pr-paths, or nextid)", args[0])
 	}
 }
 

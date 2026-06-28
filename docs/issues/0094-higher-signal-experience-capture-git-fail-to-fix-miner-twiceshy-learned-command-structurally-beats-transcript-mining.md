@@ -60,7 +60,10 @@ prefers validated craft traps over mined drafts. Mine for *candidates*, judge fo
       holds any record whose `root_cause` is empty / "None" / "N/A" (advice, not a trap) cheaply before
       attestation+panel, every path. Calibrated on the first batch: holds exp-2770/2771, passes the 8
       traps. FOLLOW-UP: extend with error_sig-required + hedge-word reject + provenance-aware bar.
-- [ ] `twiceshy learned` command (engine feature; separate PR + tests) — the going-forward capture path
+- [x] `twiceshy learned` command (engine feature; separate PR + tests) — the going-forward capture path
+      (PR #413: write-to-corpus + `-stdout`, repeatable `-error`/`-dead-end`, idempotent capture,
+      permissive bar — symptom-only captures are recorded but HELD by the root-cause pre-gate via a
+      `None …` placeholder. Implemented by Composer 2.5, reviewed+reconciled by Claude.)
 - [ ] defer: transcript chunking + 317-session backfill (only for uncommitted dead-ends)
 
 ## Notes
