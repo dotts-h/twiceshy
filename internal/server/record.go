@@ -12,6 +12,7 @@ import (
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/ingest"
 	"github.com/dotts-h/twiceshy/internal/record"
+	"github.com/dotts-h/twiceshy/internal/screen"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -26,7 +27,9 @@ const recordDescription = "Propose a new engineering-experience record after sol
 	"The result's `novelty` is one of: `known` — an existing record already covers this (its id is in " +
 	"`candidates`); nothing is created. `similar`/`novel` — a quarantined draft is returned in `markdown` " +
 	"with an allocated `record_id`; open it as a pull request to validate it. " +
-	"A record is NEVER stored as validated here — human review on the PR is the trust boundary."
+	"A record is NEVER stored as validated here — human review on the PR is the trust boundary. " +
+	"Set `redact_pii: true` to replace incidental low-severity PII (private IPs, emails) with placeholders " +
+	"before recording so an incidental IP/email does not quarantine the draft; secrets are never redacted."
 
 // RecordArgs is the input to the record_experience tool.
 type RecordArgs struct {
@@ -42,6 +45,7 @@ type RecordArgs struct {
 	Body            string   `json:"body" jsonschema:"markdown narrative"`
 	Author          string   `json:"author" jsonschema:"who is proposing this"`
 	Session         string   `json:"session,omitempty"`
+	RedactPII       bool     `json:"redact_pii,omitempty" jsonschema:"opt-in: replace incidental low-severity PII (private IPs, emails) with stable placeholders BEFORE recording, so an incidental IP/email does not quarantine the draft on a pii flag. Secrets are NEVER redacted."`
 }
 
 // RecordResult is the output of the record_experience tool.
@@ -51,6 +55,7 @@ type RecordResult struct {
 	Markdown   string      `json:"markdown,omitempty"`  // the quarantined record to PR (empty when known)
 	Candidates []SearchHit `json:"candidates"`          // existing matches / leads (never nil; empty slice ok)
 	Message    string      `json:"message"`
+	Redacted   []string    `json:"redacted,omitempty"` // deduped "pii:rule" flags redacted (empty/omitted when none)
 }
 
 // Input-size caps for record_experience. The channel is bearer-authed
@@ -83,6 +88,36 @@ func validateRecordSize(args RecordArgs) error {
 	return nil
 }
 
+// redactRecordPII returns a copy of args with incidental low-severity PII
+// (private IPs, emails) replaced by placeholders in every field the ingest gate
+// scans, plus the deduped, sorted "pii:rule" flags it redacted. Secrets and
+// harmful-code are never touched (screen.Redact is pii-only) — redaction cannot
+// launder a secret past the gate. Caller-side on purpose: the detector/ingest
+// stay pure (ADR-0011).
+func redactRecordPII(args RecordArgs) (RecordArgs, []string) {
+	var findings []screen.Finding
+	redact := func(text string) string {
+		redacted, found := screen.Redact(text)
+		findings = append(findings, found...)
+		return redacted
+	}
+
+	args.Title = redact(args.Title)
+	args.Summary = redact(args.Summary)
+	args.ErrorSignatures = append([]string(nil), args.ErrorSignatures...)
+	for i := range args.ErrorSignatures {
+		args.ErrorSignatures[i] = redact(args.ErrorSignatures[i])
+	}
+	args.RootCause = redact(args.RootCause)
+	args.Fix = redact(args.Fix)
+	args.GuardingTest = redact(args.GuardingTest)
+	args.Body = redact(args.Body)
+	args.Ecosystem = redact(args.Ecosystem)
+	args.Package = redact(args.Package)
+
+	return args, screen.Flags(findings)
+}
+
 // record processes a record_experience tool call. It builds a draft from the
 // provided arguments, runs dedup-at-ingest, and returns either a known-duplicate
 // result or a quarantined draft ready to be PR'd. It does NOT write to disk.
@@ -93,6 +128,11 @@ func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args Reco
 	if err := validateRecordSize(args); err != nil {
 		h.logToolError(tool, start, err)
 		return nil, RecordResult{}, err
+	}
+
+	var redactedFlags []string
+	if args.RedactPII {
+		args, redactedFlags = redactRecordPII(args)
 	}
 
 	// Build the draft from args.
@@ -177,6 +217,7 @@ func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args Reco
 			Novelty:    string(out.Novelty),
 			Candidates: cands,
 			Message:    "Already recorded — see the existing record in candidates; nothing was created.",
+			Redacted:   redactedFlags,
 		}
 		h.logRecordOK(tool, start, result)
 		return nil, result, nil
@@ -194,6 +235,9 @@ func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args Reco
 		msg += " SECURITY: the safety gate flagged this draft (" + strings.Join(flags, ", ") +
 			"); it cannot be promoted to validated until the hazard is resolved."
 	}
+	if len(redactedFlags) > 0 {
+		msg += " Redacted incidental PII (" + strings.Join(redactedFlags, ", ") + ") before recording."
+	}
 
 	result := RecordResult{
 		Novelty:    string(out.Novelty),
@@ -201,6 +245,7 @@ func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args Reco
 		Markdown:   string(md),
 		Candidates: cands,
 		Message:    msg,
+		Redacted:   redactedFlags,
 	}
 	h.logRecordOK(tool, start, result)
 	return nil, result, nil
