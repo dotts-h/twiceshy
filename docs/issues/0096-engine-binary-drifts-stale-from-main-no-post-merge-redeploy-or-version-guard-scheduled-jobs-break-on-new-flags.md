@@ -1,14 +1,14 @@
 ---
 id: 0096
 title: Engine binary drifts stale from main — no post-merge redeploy or version guard; scheduled jobs break on new flags
-status: in-progress
+status: closed
 severity: high
 group:
 depends_on: []
 forgejo:
 links:
   adr:
-  prs: []
+  prs: [409]
   issues: [0097]
   regression:
 assets: []

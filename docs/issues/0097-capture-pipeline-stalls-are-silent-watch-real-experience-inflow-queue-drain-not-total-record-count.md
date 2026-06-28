@@ -1,14 +1,14 @@
 ---
 id: 0097
 title: Capture-pipeline stalls are silent — watch real-experience inflow / queue-drain, not total record count
-status: in-progress
+status: closed
 severity: high
 group:
 depends_on: []
 forgejo:
 links:
   adr:
-  prs: []
+  prs: [409]
   issues: [0096]
   regression:
 assets: []
