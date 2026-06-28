@@ -102,6 +102,41 @@ func Scan(texts ...string) []Finding {
 	return out
 }
 
+// Redact replaces low-severity PII matches with stable placeholders. Secrets
+// and harmful-code are deliberately never redacted. It returns the redacted
+// text and the deduped, sorted findings it redacted.
+func Redact(text string) (string, []Finding) {
+	seen := map[string]bool{}
+	var findings []Finding
+	redacted := text
+	for _, r := range patternRules {
+		if r.category != "pii" {
+			continue
+		}
+		match := r.re.FindString(text)
+		if match == "" {
+			continue
+		}
+		key := r.category + ":" + r.name
+		if !seen[key] {
+			seen[key] = true
+			findings = append(findings, Finding{r.category, r.name, mask(match)})
+		}
+		placeholder := "<REDACTED-EMAIL>"
+		if r.name == "private-ip" {
+			placeholder = "<REDACTED-IP>"
+		}
+		redacted = r.re.ReplaceAllString(redacted, placeholder)
+	}
+	sort.Slice(findings, func(i, j int) bool {
+		if findings[i].Category != findings[j].Category {
+			return findings[i].Category < findings[j].Category
+		}
+		return findings[i].Rule < findings[j].Rule
+	})
+	return redacted, findings
+}
+
 // ExecutionHazards returns the subset of findings that make a script unsafe to
 // EXECUTE — embedded secrets and harmful-code sequences. PII findings are
 // excluded on purpose: a repro/test fixture may legitimately contain an email or

@@ -20,6 +20,7 @@ import (
 // machine — without a bash re-implementation that would drift from the rules (#0065).
 func runScreen(args []string, in io.Reader, out io.Writer) error {
 	fs := flag.NewFlagSet("screen", flag.ContinueOnError)
+	redact := fs.Bool("redact", false, "replace private IPs and emails with stable placeholders")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -28,11 +29,19 @@ func runScreen(args []string, in io.Reader, out io.Writer) error {
 		return fmt.Errorf("screen: reading input: %w", err)
 	}
 	findings := screen.Scan(string(data))
+	if screen.HasSecret(findings) {
+		for _, fl := range screen.Flags(findings) {
+			_, _ = fmt.Fprintln(out, fl)
+		}
+		return errors.New("screen: a secret was detected")
+	}
+	if *redact {
+		redacted, _ := screen.Redact(string(data))
+		_, _ = io.WriteString(out, redacted)
+		return nil
+	}
 	for _, fl := range screen.Flags(findings) {
 		_, _ = fmt.Fprintln(out, fl)
-	}
-	if screen.HasSecret(findings) {
-		return errors.New("screen: a secret was detected")
 	}
 	return nil
 }
