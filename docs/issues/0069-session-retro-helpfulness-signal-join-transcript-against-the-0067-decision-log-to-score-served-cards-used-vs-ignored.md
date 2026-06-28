@@ -42,8 +42,8 @@ applied — closing the loop with no new instrumentation.
   only the synthetic positive/negative sets.
 
 ## Acceptance
-- [ ] A captured session yields, per served/pushed card, a used-vs-ignored verdict.
-- [ ] The verdict is attributed via the #0067 decision log and recorded through the
+- [x] A captured session yields, per served/pushed card, a used-vs-ignored verdict.
+- [x] The verdict is attributed via the #0067 decision log and recorded through the
       existing usage seam (no new ranking influence).
 - [ ] Precision/recall reported on a real-traffic sample (feeds #0005).
 
@@ -65,16 +65,21 @@ applied — closing the loop with no new instrumentation.
       (across the active log + its rotated generation), so a verdict can be cross-checked
       against what was actually served rather than trusting the transcript/model. Guards:
       `internal/telemetry/served_test.go`, `internal/server/session_decision_test.go`.
-- [ ] **Remaining (tracked follow-up).** (a) the off-pool `ModelUsageJudge` prompt/edge
-      that produces real verdicts (mirrors `ModelAnalyzer`) + wiring into the
-      `retro-intake` drain; (b) the **join orchestration** that ties it together — hash a
-      captured transcript's session id with the deployment salt, pull its served set via
-      `ServedInSession`, and confirm only Used verdicts in that set (the served-set
-      cross-check, now that the substrate exists); (c) acceptance 3's precision/recall
-      reporter on a real-traffic sample (feeds #0005).
+- [x] **Model edge + join orchestration wired (acceptance 1 + 2) — 2026-06-28, PR #415.**
+      `retro.ModelUsageJudge` (the off-pool verdict edge, mirroring `ModelAnalyzer`) is now
+      wired into the `retro-intake` drain: per captured transcript the drain hashes the
+      session id with the deployment salt (the standalone `telemetry.Hash`, byte-identical
+      to the serve-side `Recorder.Hash` — gated by `internal/telemetry/hash_test.go`), pulls
+      its served set via `ServedInSession`, and confirms only `Used`-and-served verdicts via
+      `RecordHelpfulnessAttributed`. The join is **best-effort** (opt-in via `-telemetry-log`):
+      a flaky usage judge or missing decision log logs a warning and never blocks the trap
+      drain or the dequeue. Guards: `cmd/twiceshy/retro_test.go` (served-filter, best-effort,
+      disabled). Implemented by Composer 2.5, reviewed+gated by Claude.
+- [ ] **Remaining.** Acceptance 3 — the precision/recall reporter on a real-traffic sample
+      (feeds #0005 slice 2). The signal is now live; what's left is measuring it.
 
-Issue stays **open**: this slice lands the deterministic verdict→confirm core; the model
-edge, the decision-log attribution (#2), and the reporter (#3) remain.
+Issue stays **open**: the verdict→confirm core and the live decision-log attribution now
+ship; only the precision/recall reporter (#3) remains.
 
 ## Notes
 Split out of #0065 (whose Notes bless shipping the extraction half independently).

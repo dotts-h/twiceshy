@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/retro"
 	"github.com/dotts-h/twiceshy/internal/spool"
+	"github.com/dotts-h/twiceshy/internal/telemetry"
 )
 
 // runRetroIntake drains the session-retro queue (#0065, ADR-0018): for each
@@ -35,6 +37,7 @@ func runRetroIntake(ctx context.Context, args []string, out io.Writer, getenv fu
 	maxTraps := fs.Int("max-traps", 0, "max candidates accepted per transcript (0 = default)")
 	dryRun := fs.Bool("dry-run", false, "analyze and report, but write nothing and dequeue nothing")
 	base := fs.String("base", "", "base git ref for merge-safe id allocation")
+	telemetryLog := fs.String("telemetry-log", getenv("TWICESHY_TELEMETRY_LOG"), "decision log for served-vs-used helpfulness join (empty = disabled)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -44,7 +47,11 @@ func runRetroIntake(ctx context.Context, args []string, out io.Writer, getenv fu
 
 	// Build the analyzer first: a misconfigured endpoint should fail fast, before
 	// the (slower) index build.
-	analyzer, err := analyzerFromEnv(getenv, *model, *maxTraps)
+	cfg, err := modelConfigFromEnv(getenv, *model, *maxTraps)
+	if err != nil {
+		return err
+	}
+	analyzer, err := retro.NewModelAnalyzer(cfg)
 	if err != nil {
 		return err
 	}
@@ -55,25 +62,40 @@ func runRetroIntake(ctx context.Context, args []string, out io.Writer, getenv fu
 	}
 	defer func() { _ = ix.Close() }()
 
+	var join *helpfulJoin
+	if *telemetryLog != "" {
+		usageJudge, err := retro.NewModelUsageJudge(cfg)
+		if err != nil {
+			return err
+		}
+		salt := getenv("TWICESHY_TELEMETRY_SALT")
+		logPath := *telemetryLog
+		join = &helpfulJoin{
+			judge: usageJudge,
+			rec:   ix,
+			servedFor: func(sid string) (map[string]bool, error) {
+				return telemetry.ServedInSession(logPath, telemetry.Hash([]byte(salt), sid))
+			},
+		}
+	}
+
 	return drainRetro(ctx, analyzer, ix, c.repo, c.corpus, *queue, retroOpts{
 		limit:  *limit,
 		dryRun: *dryRun,
 		now:    time.Now().UTC().Format("2006-01-02"),
 		base:   *base,
-	}, out)
+	}, join, out)
 }
 
-// analyzerFromEnv builds the off-pool analyzer edge. The endpoint and model come
-// from the environment (reusing the judge shim by default) or the -analyzer-model
-// flag; the analyzer is a drafter (quarantined output), so — unlike the judge — no
-// model family is forbidden.
-func analyzerFromEnv(getenv func(string) string, model string, maxTraps int) (retro.Analyzer, error) {
+// modelConfigFromEnv resolves the off-pool endpoint and model from the environment
+// (reusing the judge shim by default) or the -analyzer-model flag.
+func modelConfigFromEnv(getenv func(string) string, model string, maxTraps int) (retro.ModelConfig, error) {
 	url := getenv("TWICESHY_RETRO_URL")
 	if url == "" {
 		url = getenv("TWICESHY_JUDGE_URL")
 	}
 	if url == "" {
-		return nil, errors.New("retro-intake requires TWICESHY_RETRO_URL (or TWICESHY_JUDGE_URL): the off-pool analyzer endpoint")
+		return retro.ModelConfig{}, errors.New("retro-intake requires TWICESHY_RETRO_URL (or TWICESHY_JUDGE_URL): the off-pool analyzer endpoint")
 	}
 	if model == "" {
 		model = getenv("TWICESHY_RETRO_MODEL")
@@ -82,9 +104,16 @@ func analyzerFromEnv(getenv func(string) string, model string, maxTraps int) (re
 		model = getenv("TWICESHY_JUDGE_MODEL")
 	}
 	if model == "" {
-		return nil, errors.New("retro-intake requires -analyzer-model (or TWICESHY_RETRO_MODEL / TWICESHY_JUDGE_MODEL)")
+		return retro.ModelConfig{}, errors.New("retro-intake requires -analyzer-model (or TWICESHY_RETRO_MODEL / TWICESHY_JUDGE_MODEL)")
 	}
-	return retro.NewModelAnalyzer(retro.ModelConfig{Endpoint: url, Model: model, MaxTraps: maxTraps})
+	return retro.ModelConfig{Endpoint: url, Model: model, MaxTraps: maxTraps}, nil
+}
+
+// helpfulJoin bundles the served-vs-used attribution seam (#0069). nil = disabled.
+type helpfulJoin struct {
+	judge     retro.UsageJudge
+	rec       retro.ConfirmHelpfuler
+	servedFor func(sessionID string) (map[string]bool, error)
 }
 
 // retroOpts bounds one drain.
@@ -100,7 +129,7 @@ type retroOpts struct {
 // with a StubAnalyzer (no network). Fail-safe: an analyzer error leaves the
 // transcript queued and stops (a scheduled run retries); a transcript is dequeued
 // only after it is successfully analyzed.
-func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, repo, corpus, queue string, opts retroOpts, out io.Writer) error {
+func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, repo, corpus, queue string, opts retroOpts, join *helpfulJoin, out io.Writer) error {
 	if _, err := record.LoadCorpus(corpus); err != nil {
 		return fmt.Errorf("loading corpus: %w", err)
 	}
@@ -183,6 +212,25 @@ func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, r
 			}
 			created++
 			id = bumpID(id)
+		}
+
+		if join != nil && tr.SessionID != "" && !opts.dryRun {
+			served, err := join.servedFor(tr.SessionID)
+			if err != nil {
+				slog.Warn("retro helpfulness join: served lookup failed", "session", tr.SessionID, "file", base, "error", err)
+			} else {
+				verdicts, err := join.judge.JudgeUsage(ctx, tr.Transcript)
+				if err != nil {
+					slog.Warn("retro helpfulness join: usage judge failed", "session", tr.SessionID, "file", base, "error", err)
+				} else {
+					n, err := retro.RecordHelpfulnessAttributed(ctx, join.rec, verdicts, served)
+					if err != nil {
+						slog.Warn("retro helpfulness join: confirm failed", "session", tr.SessionID, "file", base, "confirmed", n, "error", err)
+					} else {
+						_, _ = fmt.Fprintf(out, "  confirmed %d helpful (from %s)\n", n, base)
+					}
+				}
+			}
 		}
 
 		// Dequeue the transcript only after it is FULLY processed (dry-run dequeues

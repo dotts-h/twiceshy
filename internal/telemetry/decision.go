@@ -110,16 +110,21 @@ func NewRecorder(cfg Config) (*Recorder, error) {
 	return r, nil
 }
 
+// Hash returns hex(sha256(salt+s)[:16]) — the same bytes Recorder.Hash computes.
+func Hash(salt []byte, s string) string {
+	h := sha256.New()
+	h.Write(salt)
+	h.Write([]byte(s))
+	return hex.EncodeToString(h.Sum(nil)[:16])
+}
+
 // Hash returns the salted hash of a query, for correlation without persisting the
 // text. A nil Recorder returns "".
 func (r *Recorder) Hash(query string) string {
 	if r == nil {
 		return ""
 	}
-	h := sha256.New()
-	h.Write(r.salt)
-	h.Write([]byte(query))
-	return hex.EncodeToString(h.Sum(nil)[:16])
+	return Hash(r.salt, query)
 }
 
 // Record enqueues one decision for the async writer. Non-blocking and nil-safe:
