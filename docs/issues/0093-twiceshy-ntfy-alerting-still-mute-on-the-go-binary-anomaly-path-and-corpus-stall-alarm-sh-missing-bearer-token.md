@@ -8,7 +8,7 @@ depends_on: []
 forgejo:
 links:
   adr:
-  prs: [398]
+  prs: [398, 412]
   issues: [0038, 0072]
   regression: experience/2026 exp-2868
 assets: []
