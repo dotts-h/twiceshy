@@ -56,3 +56,19 @@ trigger (prototype live), record_experience robustness (remaining); (3) build th
 harness (#0020) and run a per-domain seeding campaign using the multi-agent +
 execution-validation machinery; (4) extend the #0005 eval into a coverage map per stack
 cell. Under #0015 (corpus growth as a live feed).
+
+## Progress
+
+- **2026-06-28 — first React/RN/TS-frontend seeding (proof batch).** With `twiceshy learned`
+  (#0094) shipped, captured 3 craft traps into the empty cell, each grounded in a REAL executed
+  test on the brain (Node/tsc/npm — the licensing firewall), not research prose
+  (twiceshy-corpus PR #64):
+  - `exp-2868` React 19 dropped the no-arg `useRef()` overload (TS2554)
+  - `exp-2869` npm ERESOLVE after a React 19 bump (dep peer-pinned to React ≤18)
+  - `exp-2870` RN `<View>` rejects text styles (fontWeight): ViewStyle≠TextStyle (TS2769)
+
+  Approach validated end-to-end (author → execute-verify → `learned` → corpus → judge pipeline);
+  a 4th candidate (moduleResolution/zustand) was tested and rejected for not reproducing. Scope is
+  build-time/static traps verifiable on the brain; device-runtime iOS/Android traps need a real
+  toolchain (deferred). Still far from the ~40–80/cell target — this proves the engine; the cell
+  needs a sustained campaign.
