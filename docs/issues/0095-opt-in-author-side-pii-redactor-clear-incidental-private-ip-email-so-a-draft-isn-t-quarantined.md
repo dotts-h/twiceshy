@@ -5,10 +5,10 @@ status: in-progress
 severity: low
 group:
 depends_on: []
-forgejo:
+forgejo: 406
 links:
   adr: ADR-0011
-  prs: []
+  prs: [405]
   issues: [0090, 0091]
   regression:
 assets: []
