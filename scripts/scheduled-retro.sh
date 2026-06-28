@@ -44,6 +44,9 @@ NTFY_TOKEN="${NTFY_TOKEN:-}"
 notify() { [ -n "$NTFY_URL" ] && curl -fsS ${NTFY_TOKEN:+-H "Authorization: Bearer $NTFY_TOKEN"} -d "$1" "$NTFY_URL" >/dev/null 2>&1 || true; }
 
 [ -n "${TWICESHY_RETRO_URL:-}" ] || { echo "TWICESHY_RETRO_URL required (the :8729 analyzer shim)"; exit 2; }
+# shellcheck source=lib/ensure-engine-fresh.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/ensure-engine-fresh.sh"
+ensure_engine_fresh
 
 cd "$REPO"
 git fetch origin -q && git checkout main -q && git reset --hard origin/main -q && git clean -fdq -- experience/
