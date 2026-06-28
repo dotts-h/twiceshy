@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dotts-h/twiceshy/internal/promote"
 	"github.com/dotts-h/twiceshy/internal/record"
 )
 
@@ -172,11 +173,20 @@ func TestLearnedWarnsButRecordsWithoutRootCause(t *testing.T) {
 	if err != nil {
 		t.Fatalf("permissive capture must not error: %v\nout: %s", err, out)
 	}
-	if files := learnedRecordFiles(t, dir); len(files) != 1 {
+	files := learnedRecordFiles(t, dir)
+	if len(files) != 1 {
 		t.Fatalf("permissive capture must still record, got %d files", len(files))
 	}
 	if !strings.Contains(strings.ToLower(out), "warning") {
 		t.Errorf("missing root-cause/fix should emit a warning, got: %s", out)
+	}
+	// Permissive capture must NOT smuggle an un-diagnosed trap past the promote
+	// pre-gate: a record with no real root cause has to be HELD, not treated as
+	// substantive. A placeholder like "unknown" would bypass HasSubstantiveRootCause
+	// (its hold-set is the leading word "none"/"n/a"); the held marker must be "None…".
+	rec := parseLearnedRecord(t, dir, files[0])
+	if promote.HasSubstantiveRootCause(rec) {
+		t.Errorf("a capture missing root-cause must be HELD by the promote pre-gate, but root_cause %q is treated as substantive (it would bypass the gate #0094 built)", rec.Resolution.RootCause)
 	}
 }
 
