@@ -52,6 +52,11 @@ func newShellHarness(t *testing.T) *shellHarness {
 	for _, name := range []string{"git", "curl", "jq", "systemctl", "forgejo-ci-merge"} {
 		h.fake(name, ":")
 	}
+	// The scheduled scripts preflight an engine-freshness check (ensure_engine_fresh,
+	// #0096) that hits the real engine repo / network; it has its own dedicated
+	// ensure-engine-fresh.test.sh and is orthogonal to the script logic under test
+	// here. Skip it so these tests stay hermetic.
+	h.set("TWICESHY_SKIP_ENGINE_FRESH", "1")
 	return h
 }
 

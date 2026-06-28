@@ -75,6 +75,9 @@ fi
 # Resolve the engine binary: a PATH-installed prebuilt (decoupled corpus — no
 # source in $REPO) or a build from this clone (legacy engine-repo deployment).
 if [ -n "$BIN" ]; then
+  # shellcheck source=lib/ensure-engine-fresh.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/lib/ensure-engine-fresh.sh"
+  ensure_engine_fresh
   bin="$BIN"
 else
   bin="$(mktemp -d)/twiceshy"
