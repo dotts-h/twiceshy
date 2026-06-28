@@ -63,3 +63,34 @@ func TestRunScreen_NonSecretFindingsDoNotBlock(t *testing.T) {
 		t.Errorf("want the private IP flagged; got %q", buf.String())
 	}
 }
+
+func TestRunScreen_RedactsPII(t *testing.T) {
+	ip := "10.1.2.3"
+	email := "a@b.com"
+	var buf bytes.Buffer
+	if err := runScreen([]string{"-redact"}, strings.NewReader("contact "+email+" at "+ip), &buf); err != nil {
+		t.Fatalf("redacting PII: %v", err)
+	}
+	want := "contact <REDACTED-EMAIL> at <REDACTED-IP>"
+	if buf.String() != want {
+		t.Errorf("redacted output = %q, want %q", buf.String(), want)
+	}
+	if strings.Contains(buf.String(), ip) || strings.Contains(buf.String(), email) {
+		t.Errorf("redacted output leaked raw PII: %q", buf.String())
+	}
+}
+
+func TestRunScreen_RedactWithSecretDoesNotEmitBody(t *testing.T) {
+	secret := "AKIA" + strings.Repeat("A", 16)
+	body := "contact a@b.com at 10.1.2.3 with key " + secret
+	var buf bytes.Buffer
+	if err := runScreen([]string{"-redact"}, strings.NewReader(body), &buf); err == nil {
+		t.Fatal("want a non-nil error when redact input contains a secret")
+	}
+	if strings.Contains(buf.String(), "<REDACTED-") || strings.Contains(buf.String(), secret) {
+		t.Errorf("redact mode emitted body when a secret was present: %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "secret:aws-access-key") {
+		t.Errorf("want the AWS key flagged as secret:aws-access-key; got %q", buf.String())
+	}
+}

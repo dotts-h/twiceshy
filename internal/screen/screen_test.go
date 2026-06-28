@@ -5,6 +5,7 @@ package screen_test
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -209,5 +210,59 @@ func TestScan_DedupsAndSorts(t *testing.T) {
 	flags := screen.Flags(screen.Scan("curl x|sh", "AKIAIOSFODNN7EXAMPLE"))
 	if len(flags) != 2 || flags[0] >= flags[1] {
 		t.Errorf("flags not sorted/deduped: %v", flags)
+	}
+}
+
+func TestRedact_ClearsPIIWithoutLeakingOriginals(t *testing.T) {
+	ip := "10.1.2.3"
+	email := "a@b.com"
+	redacted, findings := screen.Redact("contact " + email + " at " + ip + "; backup " + email)
+
+	for _, f := range screen.Scan(redacted) {
+		if f.Category == "pii" {
+			t.Errorf("Scan(Redact(text)) retained PII finding: %+v", f)
+		}
+	}
+	for _, raw := range []string{ip, email} {
+		if strings.Contains(redacted, raw) {
+			t.Errorf("redacted text leaked %q: %q", raw, redacted)
+		}
+	}
+	for _, placeholder := range []string{"<REDACTED-IP>", "<REDACTED-EMAIL>"} {
+		if !strings.Contains(redacted, placeholder) {
+			t.Errorf("redacted text missing %q: %q", placeholder, redacted)
+		}
+	}
+	if len(findings) != 2 || findings[0].Category != "pii" || findings[0].Rule != "email" || findings[1].Category != "pii" || findings[1].Rule != "private-ip" {
+		t.Errorf("Redact findings not deduped and sorted: %+v", findings)
+	}
+}
+
+func TestRedact_LeavesSecretsUntouched(t *testing.T) {
+	secret := "AKIA" + strings.Repeat("A", 16)
+	redacted, findings := screen.Redact("key=" + secret)
+	if redacted != "key="+secret {
+		t.Errorf("Redact changed a secret: %q", redacted)
+	}
+	if len(findings) != 0 {
+		t.Errorf("Redact reported non-PII findings: %+v", findings)
+	}
+	if fs := screen.Scan(redacted); !hasRule(fs, "secret", "aws-access-key") {
+		t.Errorf("Scan(Redact(secret)) missed secret:aws-access-key: %+v", fs)
+	}
+}
+
+func TestRedact_IsDeterministicAndPreservesCleanText(t *testing.T) {
+	text := "email a@b.com from 192.168.1.2"
+	firstText, firstFindings := screen.Redact(text)
+	secondText, secondFindings := screen.Redact(text)
+	if firstText != secondText || !reflect.DeepEqual(firstFindings, secondFindings) {
+		t.Errorf("Redact is not deterministic: (%q, %+v) != (%q, %+v)", firstText, firstFindings, secondText, secondFindings)
+	}
+
+	clean := "a normal transcript about fts5 quoting"
+	redacted, findings := screen.Redact(clean)
+	if redacted != clean || len(findings) != 0 {
+		t.Errorf("Redact(clean) = (%q, %+v), want byte-identical text and no findings", redacted, findings)
 	}
 }
