@@ -10,7 +10,7 @@ links:
   adr:
   prs: [398, 412]
   issues: [0038, 0072]
-  regression: experience/2026 exp-2868
+  regression: experience/2026 exp-2871
 assets: []
 ---
 
@@ -84,4 +84,6 @@ than the 403 (no auth) this issue was filed about.
    when the resolved ntfy URL has no topic path, so a "never silent again" alarm can never be
    silently mis-wired again. Guarding test: `TestCorpusStallAlarmWarnsOnTopiclessURL`.
 3. *Deploy doc* — `docs/DEPLOY.md` notes ntfy URLs must be topic-qualified.
-4. *Dogfood* — experience draft `exp-2868` (the bare-host-ntfy-URL → 400 trap).
+4. *Dogfood* — the bare-host-ntfy-URL → 400 trap, captured into the corpus via
+   `twiceshy learned` as `exp-2871` (twiceshy-corpus PR #65); the git fail→fix miner
+   also captured the related token lessons (exp-2772/2773).
