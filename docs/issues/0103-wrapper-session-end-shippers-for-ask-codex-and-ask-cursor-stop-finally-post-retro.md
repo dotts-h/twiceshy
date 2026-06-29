@@ -1,7 +1,7 @@
 ---
 id: 0103
 title: Wrapper session-end shippers for ask-codex and ask-cursor (Stop/finally → POST /retro)
-status: open
+status: closed
 severity: medium
 group: 0101
 depends_on: []
@@ -44,3 +44,32 @@ highest local value of the three adapters.
 - Split-deliverable OK: do `ask-codex` first (named in ADR), then `ask-cursor` (same pattern).
 - Child of #0101; parallelizable with 0102/0104. Establishes the wrapper-finally pattern the
   gateway floor (0104) reuses for non-agentic calls.
+
+## Resolution (closed 2026-06-29)
+
+Implemented in the **brain-config** repo (commit `3818b89`), since the wrappers and the
+receiver live outside this engine repo (the `/retro` receiver was already LIVE):
+- New shared shipper `claude/hooks/twiceshy-wrapper-ship.sh` — mirrors the Claude Code
+  SessionEnd shipper's `spool.Transcript` write to the **brain-local** retro queue
+  (`/home/ori/twiceshy-retro-queue`, no NAS round-trip, no token): atomic temp→rename,
+  bounded, fail-open. Brain-local because our agents run on this box.
+- `ask-cursor` + `ask-codex`: a `_ship_session` in the `EXIT` trap, guarded by a `RAN`
+  flag so it fires only after an actual run, on every post-run path (success/reactive-limit/
+  error), and never touches stdout. Both wrappers brought under version control (were
+  untracked in `/usr/local/bin`); `install.sh` installs the new hook.
+- Decision vs the issue's original framing: ship to the **brain-local queue** (not `POST
+  /retro`), matching the live Claude Code shipper — simpler and tokenless on-box. The
+  transcript is synthetic (`## Task <prompt>` + `## Result <final message>`), which the
+  retro analyzer turns into real drafts.
+
+**Verification:** 7-check self-contained test (`twiceshy-wrapper-ship.test.sh`, all green) +
+a **real `ask-cursor` run that shipped a live `author=ask-cursor` entry** the drain turns
+into a draft, with clean stdout preserved. `ask-codex`'s integration is identical and
+function-verified; its real-run confirmation is pending its 5h rate window (currently at the
+proactive reserve → exit 75, which correctly ships nothing since no run executes). A
+*proactively* rate-gated run does not ship (nothing ran); a *reactive* limit or error after
+the run did execute does ship (RAN set).
+
+Note: served-card attribution for these wrapper sessions (the #0069 join) needs the matching
+pre-call **injection** adapter and session-key coherence — out of scope here (capture only);
+tracked under the epic.
