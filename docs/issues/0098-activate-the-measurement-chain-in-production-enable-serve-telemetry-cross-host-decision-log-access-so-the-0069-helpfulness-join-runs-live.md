@@ -7,8 +7,8 @@ group: 0064
 depends_on: []
 forgejo: 417
 links:
-  adr:
-  prs: []
+  adr: docs/adr/ADR-0026-runtime-enforcement-of-experience-adoption.md
+  prs: [421]
   issues: [0067, 0069]
   regression:
 assets: []
@@ -59,12 +59,33 @@ advances from real traffic; #0069 acceptance 3's "real-traffic precision/recall"
   `scripts/twiceshy-retro.service` (`EnvironmentFile=/home/ori/.config/twiceshy/retro.env`).
 
 ## Acceptance
-- [ ] A brain-side timer pulls the serve's decision log NAS→brain to a path the retro drain reads
-      (chosen: sync, mirroring corpus-sync — `sync-decisions-from-nas.sh` + units).
-- [ ] `retro.env` carries `TWICESHY_TELEMETRY_LOG` (that brain-local path) + `TWICESHY_TELEMETRY_SALT`
-      matching the serve container's salt (currently empty).
-- [ ] Verified end-to-end: the synced log is present on the brain, and a retro drain over a session
-      that searched + used a served card logs `confirmed N helpful` (the join attributes it).
+- [x] A brain-side timer pulls the serve's decision log NAS→brain to a path the retro drain reads
+      (sync, mirroring corpus-sync — `sync-decisions-from-nas.sh` + `twiceshy-decisions-sync.{service,timer}`,
+      PR #421; timer enabled on the brain, log present at `/home/ori/twiceshy-telemetry/gate-decisions.jsonl`).
+- [x] `retro.env` carries `TWICESHY_TELEMETRY_LOG` (the brain-local path) + `TWICESHY_TELEMETRY_SALT`
+      matching the serve container's salt (both empty).
+- [~] Verified end-to-end **on real data, minus a live confirmation**: the synced log is present (350
+      records); the join's reader resolves real logged sessions to their served sets; the hash/salt
+      wiring is proven (the same `Hash(salt+id)[:16]` the drain uses correctly resolves the 11 logged
+      search-sessions). But **0 of 73 queued transcripts share a session with any of the 11 logged
+      searches** — so a live `confirmed N>0` requires correlated search+capture traffic, which is the
+      adoption gap ADR-0026 enforces against. The join LOGIC (confirm-only-Used) is CI-tested in
+      `internal/retro/helpful_test.go`. **Blocked on ADR-0026 enforcement for the live confirmation.**
+
+## Resolution (2026-06-29)
+
+Deployment is complete and the chain is **wired live**; the residual is *traffic*, not *plumbing*.
+
+- **Corrected premise:** #0067 telemetry was never dormant — the prod serve (`twiceshy:v0.2.8`) already
+  ran with `-telemetry-log` (a CLI arg, which is why the original `grep TWICESHY_TELEMETRY <env>` repro
+  found nothing). Gotcha logged: inspect a container's *args*, not just its env, before declaring a
+  flag-configured feature off.
+- **Shipped (PR #421):** the NAS→brain decision-log sync (script + units + DEPLOY.md), the brain
+  `retro.env` wiring (log path + matching empty salt), and the 30-min sync timer.
+- **Verified-on-real-signal finding:** the join is correct but produces ~0 confirmations today because
+  searched-sessions and captured-sessions barely overlap (11 vs 73, 0 intersection). This is direct
+  evidence for ADR-0026's thesis — *activation without enforcement yields no signal*. The first
+  confirmations will flow once ADR-0026's enforcement adapters drive correlated search+capture.
 
 ## Notes
 
