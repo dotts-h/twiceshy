@@ -1,0 +1,10 @@
+[Unit]
+Description=twiceshy decision-log sync heartbeat (pull the serve's #0067 gate-decision log NAS→brain for the #0069 join, issue 0098)
+
+[Timer]
+OnCalendar=*:0/30
+RandomizedDelaySec=2m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

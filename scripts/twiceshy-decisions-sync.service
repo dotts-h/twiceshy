@@ -1,0 +1,10 @@
+[Unit]
+Description=twiceshy decision-log sync — pull the serve's #0067 gate-decision log from the NAS to the brain so the retro drain can run the #0069 served-vs-used join (issue 0098)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ori
+Environment=PATH=/home/ori/.local/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/ori/twiceshy/scripts/sync-decisions-from-nas.sh
