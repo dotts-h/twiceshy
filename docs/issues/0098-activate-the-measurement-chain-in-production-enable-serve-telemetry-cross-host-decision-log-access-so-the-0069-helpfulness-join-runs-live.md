@@ -8,7 +8,7 @@ depends_on: []
 forgejo: 417
 links:
   adr: docs/adr/ADR-0026-runtime-enforcement-of-experience-adoption.md
-  prs: [421]
+  prs: [421, 425]
   issues: [0067, 0069]
   regression:
 assets: []
@@ -62,19 +62,19 @@ advances from real traffic; #0069 acceptance 3's "real-traffic precision/recall"
 - [x] A brain-side timer pulls the serve's decision log NAS→brain to a path the retro drain reads
       (sync, mirroring corpus-sync — `sync-decisions-from-nas.sh` + `twiceshy-decisions-sync.{service,timer}`,
       PR #421; timer enabled on the brain, log present at `/home/ori/twiceshy-telemetry/gate-decisions.jsonl`).
-- [x] `retro.env` carries `TWICESHY_TELEMETRY_LOG` (the brain-local path) + `TWICESHY_TELEMETRY_SALT`
-      matching the serve container's salt (both empty).
-- [~] Verified end-to-end **on real data, minus a live confirmation**: the synced log is present (350
-      records); the join's reader resolves real logged sessions to their served sets; the hash/salt
-      wiring is proven (the same `Hash(salt+id)[:16]` the drain uses correctly resolves the 11 logged
-      search-sessions). But **0 of 73 queued transcripts share a session with any of the 11 logged
-      searches** — so a live `confirmed N>0` requires correlated search+capture traffic, which is the
-      adoption gap ADR-0026 enforces against. The join LOGIC (confirm-only-Used) is CI-tested in
-      `internal/retro/helpful_test.go`. **Blocked on ADR-0026 enforcement for the live confirmation.**
+- [x] `retro.env` carries `TWICESHY_TELEMETRY_LOG` (the brain-local path) + a salt that matches the
+      serve's — which falls back to the **bearer token** (telemetrySalt), NOT empty. Fixed in PR #425;
+      retro-intake now applies the same token fallback (`scheduled-retro.sh` sources `TWICESHY_TOKEN`).
+- [x] Verified end-to-end: with the matching salt the drain's `ServedInSession` resolves correlated
+      sessions to their served sets (proven: `Hash(token, known-session)` reproduces the logged hash
+      exactly, and **6 of 77 transcripts** correlate with served-card sessions — was 0 under the wrong
+      salt). The join LOGIC (confirm-only-Used) is CI-tested in `internal/retro/helpful_test.go`;
+      `confirmed N` flows from the next scheduled drain (timer live).
 
 ## Resolution (2026-06-29)
 
-Deployment is complete and the chain is **wired live**; the residual is *traffic*, not *plumbing*.
+The chain is **wired live and now correlates** (after the PR #425 salt fix); the residual is neither
+plumbing nor traffic — `confirmed N` flows from the next scheduled drain.
 
 - **Corrected premise:** #0067 telemetry was never dormant — the prod serve (`twiceshy:v0.2.8`) already
   ran with `-telemetry-log` (a CLI arg, which is why the original `grep TWICESHY_TELEMETRY <env>` repro
@@ -82,10 +82,16 @@ Deployment is complete and the chain is **wired live**; the residual is *traffic
   flag-configured feature off.
 - **Shipped (PR #421):** the NAS→brain decision-log sync (script + units + DEPLOY.md), the brain
   `retro.env` wiring (log path + matching empty salt), and the 30-min sync timer.
-- **Verified-on-real-signal finding:** the join is correct but produces ~0 confirmations today because
-  searched-sessions and captured-sessions barely overlap (11 vs 73, 0 intersection). This is direct
-  evidence for ADR-0026's thesis — *activation without enforcement yields no signal*. The first
-  confirmations will flow once ADR-0026's enforcement adapters drive correlated search+capture.
+- **Correction (2026-06-29, PR #425): the "0 correlation" was a SALT BUG, not adoption.** The first
+  resolution concluded the join produced ~0 confirmations because searched- and captured-sessions don't
+  overlap, and read that as evidence for ADR-0026's thesis. **That was wrong.** The serve salts session
+  hashes with the **bearer token** (`TWICESHY_TELEMETRY_SALT` empty → token, main.go); the brain
+  `retro.env` (PR #421) set the salt **empty**, so every session hash diverged and the join matched
+  nothing — *by construction*, regardless of traffic. Re-correlating with `salt=token` finds **6**
+  matches. Root-caused by reading the serve's salt-resolution CODE (its env has no salt var, which is
+  what misled me). Fixed via `telemetrySalt` (serve + retro now share the rule) + sourcing
+  `TWICESHY_TOKEN` into the drain. ADR-0026 enforcement is still valid for *pull adoption* and *fleet
+  coverage*, but it was never the blocker for the feedback join — this salt fix is.
 
 ## Notes
 
