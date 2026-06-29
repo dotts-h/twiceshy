@@ -47,11 +47,12 @@ Actual: the log is stranded on the NAS; the join is a silent no-op; `confirmed_h
 advances from real traffic; #0069 acceptance 3's "real-traffic precision/recall" is unmeasurable.
 
 ## Evidence
-- No engine change needed. The serve writes the log (live, verified). `retro-intake` activates the
-  join when `-telemetry-log` (default `getenv("TWICESHY_TELEMETRY_LOG")`) is non-empty (retro.go:40,66)
-  and hashes sessions with `TWICESHY_TELEMETRY_SALT` (retro.go:71). The serve runs with **no salt env
-  set ⇒ empty salt ⇒ unsalted `sha256`**, so the brain drain must also use an empty salt or
-  `ServedInSession` returns empty (`internal/telemetry/hash_test.go` guards the divergence).
+- The serve writes the log (live, verified). `retro-intake` activates the join when `-telemetry-log`
+  (default `getenv("TWICESHY_TELEMETRY_LOG")`) is non-empty (retro.go:40,66) and hashes sessions with
+  the same salt the serve used. **The serve salts with the bearer TOKEN** (`TWICESHY_TELEMETRY_SALT`
+  empty ⇒ token fallback, main.go) — NOT an empty salt — so the drain must use that token salt or
+  `ServedInSession` returns empty. Aligned in PR #425 (`telemetrySalt` shared by serve + drain;
+  `scheduled-retro.sh` sources `TWICESHY_TOKEN`).
 - The pull: `scripts/sync-decisions-from-nas.sh` + `twiceshy-decisions-sync.{service,timer}` mirror
   `corpus-sync`, reading the log via the uid-65532-safe `docker run --rm -v twiceshy-data:/data
   alpine cat` idiom to `/home/ori/twiceshy-telemetry/gate-decisions.jsonl`.
