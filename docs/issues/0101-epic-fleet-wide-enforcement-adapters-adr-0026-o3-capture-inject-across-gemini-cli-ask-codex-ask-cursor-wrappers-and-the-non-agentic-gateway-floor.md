@@ -1,7 +1,7 @@
 ---
 id: 0101
 title: 'Epic: Fleet-wide enforcement adapters (ADR-0026 O3) — capture & inject across Gemini CLI, ask-codex/ask-cursor wrappers, and the non-agentic gateway floor'
-status: open
+status: closed
 severity: medium
 group:
 depends_on: []
@@ -56,7 +56,29 @@ These are independent (no hard ordering) now that the measurement chain works; b
 > **All three adapter children (0102, 0103, 0104) are CLOSED** as of 2026-06-29 — the capture
 > spine spans Claude Code + ask-codex/ask-cursor + the Gemini surfaces + non-agentic code-exec.
 > The epic's build work is complete; the only open item is the emergent 4th acceptance, which is
-> #0005's domain. (Epic-close pending owner confirmation — see #0005.)
+> #0005's domain.
+
+## Resolution (closed 2026-06-29)
+
+All three O3 enforcement adapters are built, verified, and merged — the fleet-wide capture spine
+is complete:
+- **0102** — Gemini surface: wrapper-finally shippers for `ask-agy`/`ask-gemini` (agy has no
+  native hook) **+** a native SessionEnd hook for the now-installed `@google/gemini-cli`.
+- **0103** — `ask-codex` + `ask-cursor` wrapper-exit shippers (this env's default researcher +
+  implementer).
+- **0104** — non-agentic `code-exec` gateway floor: pre-call injection (pre-existing) + an
+  attributable synthetic session-end record (minted session threaded through `/push` + the spool).
+
+A key cross-cutting finding: **no engine change was needed for any of them** — the `/retro`
+receiver, the brain-local spool/`retro-intake` drain, and the #0069 served→used join
+(`/push` `session` → salted-hash decision log → hashed-`session_id` join, ADR-0025) were all
+already live. Every adapter ships to the **brain-local retro queue** (tokenless on-box), the
+pattern established in 0103.
+
+The 4th acceptance — served→used helpfulness *reported on real traffic from ≥2 non-Claude-Code
+surfaces* — is now **enabled** (the adapters provide the traffic) but its empirical proof is the
+**prove-or-kill eval #0005**, which this epic exists to unblock. Closing per owner confirmation
+(2026-06-29); the served→used reporting milestone is carried by #0005.
 
 ## Notes
 - Receiver is built; the per-surface transcript shape must satisfy `internal/server/retro.go`'s
