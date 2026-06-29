@@ -24,6 +24,8 @@
 
 | usage-judge 502 (#0099) | the retro helpfulness join (#0069) logged `confirmed 0 helpful` on every session — the usage judge POSTed to the shared analyzer shim and got `502 analyzer returned no candidates array` | one shim served extraction (`candidates`) AND usage judgement (`verdicts`) but hard-validated only the candidates schema, so a valid verdicts reply was rejected; the fail-safe 502 turned a permanent contract mismatch into a silently-zero metric. Fix: shim accepts either array; brought in-repo under a hermetic contract test | `scripts/retro-analyzer-shim.test.sh` (verdicts→200, candidates→200, neither→502) · dogfood exp-3222 |
 
+| retro dead-letter no-retry (#0100) | a retro transcript was permanently dead-lettered on the FIRST analyzer `ErrUnprocessable` (comment: "deterministic content failure"); 40 transcripts lost | the local analyzer (`gpt-oss:20b`) is stochastically flaky (empty content / mis-shaped JSON) — a single bad inference is not a property of the transcript. Treating a one-shot stochastic failure as deterministic dropped recoverable work. Fix: `drainRetro` retries up to `analyzeAttempts` (3) on `ErrUnprocessable` before dead-lettering; transport errors still stop the drain; a poison pill is still dead-lettered after the bound. Reprocessing recovered 26/40, only 2 genuine poison pills | `cmd/twiceshy` · `TestDrainRetro_TransientUnprocessableIsRetriedNotDeadLettered`, `TestDrainRetro_PoisonPillDeadLetteredAfterBoundedRetries` · dogfood exp-3249 |
+
 ## Dead-ends (tried and rejected)
 
 | what we tried | why it can't work |
