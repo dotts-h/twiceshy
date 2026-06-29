@@ -232,13 +232,13 @@ func (u *unprocessableAfterFirst) Analyze(_ context.Context, _ string) ([]retro.
 	return u.candidates, nil
 }
 
-// drainRetro must dead-letter an ErrUnprocessable entry (not retry it forever)
-// while continuing to process subsequent entries normally.
-func TestDrainRetro_UnprocessableIsDeadLetteredAndContinues(t *testing.T) {
+// A transient ErrUnprocessable (model flakiness) must be retried and recovered,
+// not dead-lettered on the first failure.
+func TestDrainRetro_TransientUnprocessableIsRetriedNotDeadLettered(t *testing.T) {
 	corpus, ix := retroTestCorpus(t)
 	queue := filepath.Join(t.TempDir(), "retro")
 
-	// Enqueue two transcripts. The first will hit ErrUnprocessable; the second succeeds.
+	// Enqueue two transcripts. The first fails once then succeeds; the second succeeds.
 	spoolOne(t, queue, "transcript that confuses the model")
 	spoolOne(t, queue, "agent hit fts5: syntax error and recovered")
 
@@ -246,32 +246,72 @@ func TestDrainRetro_UnprocessableIsDeadLetteredAndContinues(t *testing.T) {
 
 	var buf bytes.Buffer
 	if err := drainRetro(context.Background(), stub, ix, "", corpus, queue, retroOpts{now: "2026-06-26"}, nil, &buf); err != nil {
-		t.Fatalf("drainRetro returned error (must continue past unprocessable): %v", err)
+		t.Fatalf("drainRetro returned error (must continue past transient unprocessable): %v", err)
 	}
 
-	// The first entry must be dead-lettered (no longer listed by spool.List).
 	remaining, _ := spool.List(queue)
 	if len(remaining) != 0 {
 		t.Errorf("queue must be empty after processing both entries; %d left", len(remaining))
 	}
 
-	// The dead-letter dir must contain the first entry.
 	dead := filepath.Join(queue, "dead")
-	deadFiles, _ := spool.List(dead) // spool.List only picks *.json files
-	if len(deadFiles) != 1 {
-		t.Errorf("dead-letter dir must hold exactly 1 file; got %d", len(deadFiles))
+	deadFiles, _ := spool.List(dead)
+	if len(deadFiles) != 0 {
+		t.Errorf("transient failure must not dead-letter; dead/ has %d file(s)", len(deadFiles))
 	}
 
-	// The second entry must have produced a quarantined draft.
 	recs, err := record.LoadCorpus(corpus)
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
 	}
 	if len(recs) != 1 {
-		t.Fatalf("want 1 quarantined draft (from second transcript), got %d", len(recs))
+		t.Fatalf("want 1 quarantined draft (both transcripts recovered; same candidate deduped), got %d", len(recs))
+	}
+	if !strings.Contains(buf.String(), "1 known/duplicate") {
+		t.Errorf("second transcript must dedup against first; got: %q", buf.String())
 	}
 
-	// The output must mention the skip.
+	if stub.calls < 2 {
+		t.Errorf("transient failure must retry Analyze; calls = %d, want >= 2", stub.calls)
+	}
+}
+
+type alwaysUnprocessable struct{ calls int }
+
+func (a *alwaysUnprocessable) Analyze(_ context.Context, _ string) ([]retro.Candidate, error) {
+	a.calls++
+	return nil, fmt.Errorf("model keeps returning garbage: %w", retro.ErrUnprocessable)
+}
+
+// drainRetro must dead-letter a persistently unprocessable entry after bounded
+// retries (poison pill), not retry forever.
+func TestDrainRetro_PoisonPillDeadLetteredAfterBoundedRetries(t *testing.T) {
+	corpus, ix := retroTestCorpus(t)
+	queue := filepath.Join(t.TempDir(), "retro")
+	spoolOne(t, queue, "transcript that always confuses the model")
+
+	stub := &alwaysUnprocessable{}
+
+	var buf bytes.Buffer
+	if err := drainRetro(context.Background(), stub, ix, "", corpus, queue, retroOpts{now: "2026-06-26"}, nil, &buf); err != nil {
+		t.Fatalf("drainRetro returned error (must dead-letter poison pill): %v", err)
+	}
+
+	remaining, _ := spool.List(queue)
+	if len(remaining) != 0 {
+		t.Errorf("queue must be empty after dead-lettering poison pill; %d left", len(remaining))
+	}
+
+	dead := filepath.Join(queue, "dead")
+	deadFiles, _ := spool.List(dead)
+	if len(deadFiles) != 1 {
+		t.Errorf("dead-letter dir must hold exactly 1 file; got %d", len(deadFiles))
+	}
+
+	if stub.calls != analyzeAttempts {
+		t.Errorf("poison pill must retry exactly analyzeAttempts times; calls = %d, want %d", stub.calls, analyzeAttempts)
+	}
+
 	if !strings.Contains(buf.String(), "skip") || !strings.Contains(buf.String(), "unprocessable") {
 		t.Errorf("output must report the skip; got: %q", buf.String())
 	}

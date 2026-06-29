@@ -129,6 +129,8 @@ type retroOpts struct {
 	base   string // optional base ref for merge-safe id allocation
 }
 
+const analyzeAttempts = 3
+
 // drainRetro is the testable core: analyze each spooled transcript and materialize
 // its candidates as quarantined drafts. The Analyzer is injected so tests drive it
 // with a StubAnalyzer (no network). Fail-safe: an analyzer error leaves the
@@ -160,23 +162,28 @@ func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, r
 			continue
 		}
 
-		candidates, err := analyzer.Analyze(ctx, tr.Transcript)
-		if err != nil {
-			if errors.Is(err, retro.ErrUnprocessable) {
-				// Deterministic content failure — dead-letter this entry so it is
-				// not retried forever (poison pill). The endpoint was reachable; the
-				// model just cannot process this specific transcript.
-				dead := filepath.Join(queue, "dead")
-				if mkErr := os.MkdirAll(dead, 0o755); mkErr == nil {
-					_ = os.Rename(f, filepath.Join(dead, base))
-				}
-				_, _ = fmt.Fprintf(out, "  skip %s: unprocessable (%v)\n", base, err)
-				skipped++
-				continue
+		var candidates []retro.Candidate
+		var analyzeErr error
+		for attempt := 0; attempt < analyzeAttempts; attempt++ {
+			if err := ctx.Err(); err != nil {
+				return err
 			}
-			// Transient (the off-pool endpoint is down): leave this and the rest
-			// queued and stop so a scheduled run alerts and retries — never drop.
-			return fmt.Errorf("retro-intake: analyze %s: %w", base, err)
+			candidates, analyzeErr = analyzer.Analyze(ctx, tr.Transcript)
+			if analyzeErr == nil {
+				break
+			}
+			if !errors.Is(analyzeErr, retro.ErrUnprocessable) {
+				return fmt.Errorf("retro-intake: analyze %s: %w", base, analyzeErr)
+			}
+		}
+		if analyzeErr != nil {
+			dead := filepath.Join(queue, "dead")
+			if mkErr := os.MkdirAll(dead, 0o755); mkErr == nil {
+				_ = os.Rename(f, filepath.Join(dead, base))
+			}
+			_, _ = fmt.Fprintf(out, "  skip %s: unprocessable after %d attempts (%v)\n", base, analyzeAttempts, analyzeErr)
+			skipped++
+			continue
 		}
 
 		author := tr.Author
