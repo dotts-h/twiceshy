@@ -1,16 +1,16 @@
 ---
 id: 0100
 title: Retro transcripts dead-lettered on the first transient analyzer failure (no retry) — flaky gpt-oss empty/mis-shaped output permanently loses recoverable learning
-status: in-progress
+status: closed
 severity: high
 group: 0064
 depends_on: []
 forgejo:
 links:
   adr: docs/adr/ADR-0018-session-retro-capture.md
-  prs: []
+  prs: [430]
   issues: [0099, 0065]
-  regression:
+  regression: docs/REGRESSIONS.md#retro-deadletter-no-retry-0100
 assets: []
 ---
 
@@ -73,3 +73,21 @@ first-failure dead-letter discarded recoverable transcripts.
   is the heavier alternative — deferred unless shim re-roll proves insufficient.
 - Continues the #0099 / measurement-chain robustness work under epic 0064;
   ADR-0018 (session retro capture), #0065 (the drain).
+
+## Resolution (closed 2026-06-29, PR #430)
+
+`drainRetro` now retries the analyze step up to `analyzeAttempts` (3) on
+`ErrUnprocessable` before dead-lettering; transport errors still stop the drain
+unchanged, and a genuine poison pill is still dead-lettered after the bounded
+retries. Guarded by the transient-recovery + poison-pill tests in
+`cmd/twiceshy/retro_intake_test.go`.
+
+**Verified on real data.** The 40 dead-letters were requeued and re-drained with
+the fixed binary: **26 drafts recovered, only 2 re-dead-lettered** (genuine poison
+pills after 3 retries); the dead-letter dir dropped 40 → 2. Dogfood record
+exp-3249 (corpus PR #76); regression row in `docs/REGRESSIONS.md`.
+
+**Follow-up surfaced:** the usage-judge join (`JudgeUsage`) has no retry of its own
+— one transient `empty model content` 502 skipped one session's attribution this
+run (non-fatal). Worth applying the same bounded re-roll to the join call; tracked
+informally here for a future pass.
