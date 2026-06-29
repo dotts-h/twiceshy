@@ -414,10 +414,7 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 	// so a hash can't be dictionary-attacked. Off the hot path; closed on shutdown.
 	var tele *telemetry.Recorder
 	if *telemetryLog != "" {
-		salt := getenv("TWICESHY_TELEMETRY_SALT")
-		if salt == "" {
-			salt = token
-		}
+		salt := telemetrySalt(getenv("TWICESHY_TELEMETRY_SALT"), token)
 		tele, err = telemetry.NewRecorder(telemetry.Config{Path: *telemetryLog, MaxBytes: telemetryMaxBytes, Salt: []byte(salt), Log: logger})
 		if err != nil {
 			alerter.Alert(ctx, "serve-fatal", fmt.Sprintf("telemetry init failed: %v", err))

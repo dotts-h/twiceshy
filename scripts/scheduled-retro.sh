@@ -31,6 +31,14 @@
 #   TWICESHY_FORGEJO_REPO  forge repo PRs target (default claude/twiceshy-corpus).
 set -euo pipefail
 
+# Telemetry salt coherence (#0098): the served->used helpfulness join must hash sessions
+# with the SAME salt the serve used — which falls back to the bearer token. Load the brain
+# secret store so TWICESHY_TOKEN is in retro-intake's env and its salt matches the serve's;
+# without it the join silently correlates nothing. Guarded + exported for the child process.
+SECRETS_ENV="${TWICESHY_SECRETS_ENV:-$HOME/.config/brain/secrets.env}"
+# shellcheck source=/dev/null
+if [ -f "$SECRETS_ENV" ]; then set -a; . "$SECRETS_ENV"; set +a; fi
+
 REPO="${TWICESHY_REPO:-/home/ori/twiceshy-retro}"          # dedicated clone; never a working checkout
 QUEUE="${TWICESHY_RETRO_QUEUE:-/home/ori/twiceshy-retro-queue}"
 LIMIT="${TWICESHY_RETRO_LIMIT:-25}"

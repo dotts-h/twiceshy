@@ -68,7 +68,12 @@ func runRetroIntake(ctx context.Context, args []string, out io.Writer, getenv fu
 		if err != nil {
 			return err
 		}
-		salt := getenv("TWICESHY_TELEMETRY_SALT")
+		// Mirror the serve's salt resolution EXACTLY (telemetrySalt): explicit salt,
+		// else the bearer token. The serve writes the log salted this way; if the drain
+		// used a different salt the session hashes diverge and the join matches nothing
+		// (#0098). Requires TWICESHY_TOKEN in the drain's env (scheduled-retro.sh sources
+		// the brain secret store) — the same token the serve runs with.
+		salt := telemetrySalt(getenv("TWICESHY_TELEMETRY_SALT"), getenv("TWICESHY_TOKEN"))
 		logPath := *telemetryLog
 		join = &helpfulJoin{
 			judge: usageJudge,
