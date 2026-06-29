@@ -51,6 +51,24 @@ docker run -d --name twiceshy --restart unless-stopped \
   http://192.168.50.150:11434` to point at the Ollama VM. Empty → dense off,
   server falls back to fingerprint + BM25 (ADR-0009). The server never hard-fails
   if Ollama is down.
+- **Decision-log telemetry (#0067, live in prod):** append
+  `-telemetry-log /data/gate-decisions.jsonl` to the `serve` command to record the
+  per-query gate decisions the #0069 helpfulness join reads (write-only, off the hot
+  path, query text hashed not stored). The hash salt is `TWICESHY_TELEMETRY_SALT`
+  (empty ⇒ unsalted `sha256`); it **must** match the brain's retro-drain salt or the
+  session hashes diverge and the join attributes nothing.
+
+## Measurement chain — cross-host decision-log sync (#0098)
+
+The serve writes the decision log onto the NAS volume (`/data/gate-decisions.jsonl`),
+but the **#0069 served-vs-used join runs in the retro drain on the brain**. So the brain
+pulls the log NAS→brain on a timer — `scripts/sync-decisions-from-nas.sh` +
+`twiceshy-decisions-sync.{service,timer}` (mirrors corpus-sync) — via the uid-65532-safe
+volume-cat idiom, writing it to `TWICESHY_DECISIONS_LOCAL`
+(`/home/ori/twiceshy-telemetry/gate-decisions.jsonl`). The brain's `retro.env` then sets
+`TWICESHY_TELEMETRY_LOG` to that path and `TWICESHY_TELEMETRY_SALT` to match the serve's,
+which auto-activates the join (`retro-intake` defaults `-telemetry-log` to that env). No
+shared mount and no drain relocation — pull-only, the same topology as corpus-sync.
 
 ## Seed the corpus
 
