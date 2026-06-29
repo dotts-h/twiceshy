@@ -41,13 +41,22 @@ spools transcripts, and `retro-intake` drains them. The adapter work is per-surf
 These are independent (no hard ordering) now that the measurement chain works; build by value.
 
 ## Acceptance
-- [ ] A Gemini CLI session that solves a trap ships a transcript to `/retro` and yields a
-      quarantined draft (0102).
-- [ ] An `ask-codex` and an `ask-cursor` run ship their transcript on wrapper exit (0103).
-- [ ] A non-agentic `code-exec` call injects matched cards and emits a session-end record
-      attributable in the #0069 join (0104).
+- [x] A Gemini CLI session that solves a trap ships a transcript to `/retro` and yields a
+      quarantined draft (0102). *(Closed: agy has no native hook → wrapper-finally for ask-agy/
+      ask-gemini + a native hook for the now-installed gemini-cli; ships to the brain-local queue.)*
+- [x] An `ask-codex` and an `ask-cursor` run ship their transcript on wrapper exit (0103).
+- [x] A non-agentic `code-exec` call injects matched cards and emits a session-end record
+      attributable in the #0069 join (0104). *(Injection pre-existed; added the attributable
+      session-end via a minted session threaded through `/push` + the spool entry.)*
 - [ ] Served→used helpfulness is reported on real traffic from ≥2 non-Claude-Code surfaces
-      (feeds #0005).
+      (feeds #0005). *(Adapters now in place across the fleet → the measurement chain is enabled;
+      empirically PROVING this on real traffic is the prove-or-kill eval #0005, which this epic
+      unblocks.)*
+
+> **All three adapter children (0102, 0103, 0104) are CLOSED** as of 2026-06-29 — the capture
+> spine spans Claude Code + ask-codex/ask-cursor + the Gemini surfaces + non-agentic code-exec.
+> The epic's build work is complete; the only open item is the emergent 4th acceptance, which is
+> #0005's domain. (Epic-close pending owner confirmation — see #0005.)
 
 ## Notes
 - Receiver is built; the per-surface transcript shape must satisfy `internal/server/retro.go`'s
