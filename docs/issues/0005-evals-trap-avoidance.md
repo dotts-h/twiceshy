@@ -9,7 +9,7 @@ forgejo: 95
 links:
   adr: docs/adr/ADR-0001-architecture.md
   prs: [419, 423]
-  issues: [0064, 0067]
+  issues: [0064, 0067, 0105]
   regression:
 assets: []
 ---
