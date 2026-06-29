@@ -1,9 +1,11 @@
 # ADR-0026: Runtime enforcement of experience adoption across a heterogeneous agent fleet
 
-- **Status:** Proposed (2026-06-24) — claude drafted; horia ratifies. DRAFT for review,
-  not yet ratified or implemented.
+- **Status:** Accepted (2026-06-29) — claude drafted; horia ratified ("proceed per your
+  recommendation"). Adopt **O3 (hybrid)**. Implementation follows under #0005 / the
+  enforcement adapters; to reverse, supersede — do not edit.
 - **Related:** [ADR-0018](ADR-0018-session-retro-capture.md) (session-retro capture spine);
-  #0067 (`internal/telemetry` per-query gate-decision log, now enabled in prod v0.2.7);
+  #0067 (`internal/telemetry` per-query gate-decision log, live in prod v0.2.8); #0098
+  (cross-host log access so the brain's retro drain can run the #0069 join);
   #0069 / [ADR-0025](ADR-0025-session-correlation-key-on-gate-decision-telemetry.md) (the
   served→used attribution key); #0005 (the prove-or-kill trap-avoidance eval, still open);
   the "adoption is the real problem" thesis (pull-only adoption empirically fails).

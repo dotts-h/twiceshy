@@ -32,4 +32,6 @@ accepted ADR's decision — supersede it (`Status: superseded-by-NNNN`).
 | [0022](ADR-0022-promote-throughput-and-hold-cooldown.md) | Promote throughput — a clean cap (`-max-promotions`) decoupled from the anomaly halt, plus a per-record hold cooldown | Accepted |
 | [0023](ADR-0023-thin-main-orchestration-split.md) | Lift the batch-orchestration core out of `cmd/twiceshy/main.go` into `internal/` (thin main; reuse the existing seams) | Proposed |
 | [0024](ADR-0024-validator-clock-injection.md) | Inject the record validator's clock instead of a package-level mutable global (convention compliance + a testable #0050 boundary) | Proposed |
+| [0025](ADR-0025-session-correlation-key-on-gate-decision-telemetry.md) | A salted session-correlation key on the gate-decision telemetry — the attribution half of the #0069 helpfulness signal | Accepted |
+| [0026](ADR-0026-runtime-enforcement-of-experience-adoption.md) | Runtime enforcement of experience adoption across a heterogeneous agent fleet — hybrid per-runner hooks + a gateway floor; usefulness is observed, not self-reported | Accepted |
 | [0027](ADR-0027-runner-local-operational-run-state.md) | Runner-local operational run-state (resume journals + hold-cooldown ledger) is not corpus data — untrack it so validate PRs stop colliding on fixed paths | Accepted |
