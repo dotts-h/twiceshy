@@ -1,16 +1,16 @@
 ---
 id: 0099
 title: Usage-judge 502: retro analyzer shim rejects the verdicts schema, zeroing the #0069 confirmed-helpful signal
-status: in-progress
+status: closed
 severity: high
 group: 0064
 depends_on: []
 forgejo:
 links:
   adr: docs/adr/ADR-0018-session-retro-capture.md
-  prs: []
+  prs: [428]
   issues: [0098, 0069, 0067]
-  regression:
+  regression: docs/REGRESSIONS.md#usage-judge-502-0099
 assets: []
 ---
 
@@ -68,3 +68,15 @@ WARN retro helpfulness join: usage judge failed session=git-twiceshy-… \
   `test-scripts`), then deploys from the committed copy (exp-2840: stale binary
   silently breaks a scheduled drain).
 - Continues #0098 (the salt coherence fix that surfaced this) under epic 0064.
+
+## Resolution (closed 2026-06-29, PR #428)
+
+Shim now passes the model's strict-JSON through when it carries a `candidates`
+**or** `verdicts` list; 502 fail-safe only when neither is present. The
+previously-untracked shim is now `scripts/retro-analyzer-shim.py` under the
+hermetic contract test `scripts/retro-analyzer-shim.test.sh` (run by `make ci`).
+
+Verified on real signal — the deployed `:8729` shim against the live `gpt-oss:20b`
+now returns `HTTP 200 {"verdicts":[{"id":"exp-0149","used":true}]}` (was `502 "no
+candidates array"`). Dogfood record exp-3222 (corpus PR #73); regression row in
+`docs/REGRESSIONS.md`.

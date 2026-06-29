@@ -22,6 +22,8 @@
 
 | judge-hang (freeze) | a promote run wedged on the gpt-oss judge socket (Ollama accepted the TCP connection but never responded); the batch made no progress until the 1h systemd SIGTERM, then crash-looped — the 2-week "corpus does nothing" | NOT a missing timeout — `NewModelJudge`'s default client already had a 60s `http.Client.Timeout` (a TOTAL deadline covering a connected-but-silent upstream). Real failure: the bound was a hardcoded const, and when the upstream hangs every record burns the full bound, so a large backlog exceeds the systemd window → killed before commit. Fix: per-call timeout is now env-tunable (`TWICESHY_JUDGE_TIMEOUT` seconds, default 60) so a wedged upstream fails fast → panel no-verdict → record HELD → batch continues | `internal/judge` · `TestJudgeTimeout_EnvOverride`, `TestJudge_HungUpstreamTimesOutInsteadOfHanging` · `internal/promote` · `TestPromote_HungJudgeUpstream_HeldNotHung` |
 
+| usage-judge 502 (#0099) | the retro helpfulness join (#0069) logged `confirmed 0 helpful` on every session — the usage judge POSTed to the shared analyzer shim and got `502 analyzer returned no candidates array` | one shim served extraction (`candidates`) AND usage judgement (`verdicts`) but hard-validated only the candidates schema, so a valid verdicts reply was rejected; the fail-safe 502 turned a permanent contract mismatch into a silently-zero metric. Fix: shim accepts either array; brought in-repo under a hermetic contract test | `scripts/retro-analyzer-shim.test.sh` (verdicts→200, candidates→200, neither→502) · dogfood exp-3222 |
+
 ## Dead-ends (tried and rejected)
 
 | what we tried | why it can't work |
