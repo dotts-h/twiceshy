@@ -1,0 +1,148 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+// verifier.go implements BrokerVerifier, which scaffolds agent output into a
+// language-appropriate toolchain job and delegates execution to a repro.Broker.
+// Exit 0 from the toolchain means the trap was avoided; non-zero means it bit.
+package agenteval
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/dotts-h/twiceshy/internal/repro"
+)
+
+const (
+	// pinnedNodeImage is the digest-pinned Node repro-base used for TypeScript
+	// type-check jobs (the React/RN traps are tsc type errors).
+	pinnedNodeImage = "node:20-bookworm@sha256:8f693eaa7e0a8e71560c9a82b55fd54c2ae920a2ba5d2cde28bac7d1c01c9ba5"
+
+	verifyTimeout = 5 * time.Minute
+
+	// sandboxWorkDir mirrors repro's (unexported) in-container mount point. Jobs MUST
+	// point HOME/TMPDIR here: the sandbox user's home is /nonexistent, so npm/go would
+	// fail to write their caches there; and /tmp is mounted noexec (exp-0017).
+	sandboxWorkDir = "/work"
+)
+
+// sandboxEnv is the writable HOME/TMPDIR every toolchain job needs (npm cache, GOCACHE,
+// and an exec-able TMPDIR). Without it the prepare phase fails silently in /nonexistent.
+func sandboxEnv() map[string]string {
+	return map[string]string{"HOME": sandboxWorkDir, "TMPDIR": sandboxWorkDir}
+}
+
+// BrokerVerifier scaffolds agent output into toolchain jobs and runs them via
+// a repro.Broker. It satisfies the Verifier interface.
+type BrokerVerifier struct {
+	broker    repro.Broker
+	goImage   string
+	nodeImage string
+}
+
+// NewBrokerVerifier returns a BrokerVerifier backed by broker. Go jobs use
+// repro.PinnedGoImage; Node/TypeScript jobs use the pinned Node image.
+func NewBrokerVerifier(broker repro.Broker) *BrokerVerifier {
+	return &BrokerVerifier{
+		broker:    broker,
+		goImage:   repro.PinnedGoImage,
+		nodeImage: pinnedNodeImage,
+	}
+}
+
+// Avoided extracts code from output, builds a toolchain job for c.VerifyID,
+// runs it via the broker, and returns true when the job exits 0 (trap avoided).
+func (v *BrokerVerifier) Avoided(ctx context.Context, c TaskCase, output string) (bool, error) {
+	code := extractCode(output)
+	job, err := v.buildJob(c.VerifyID, code)
+	if err != nil {
+		return false, err
+	}
+	res, err := v.broker.Run(ctx, job)
+	if err != nil {
+		return false, err
+	}
+	// A failed prepare (e.g. npm install couldn't run) means the toolchain never set
+	// up — the verdict is UNKNOWN, not "avoided". Surface it instead of scoring a
+	// vacuous pass (the bug the discrimination control caught).
+	if len(job.Prepare) > 0 && res.Prepare.ExitCode != 0 {
+		return false, fmt.Errorf("agenteval: %s prepare failed (exit %d): %s",
+			c.VerifyID, res.Prepare.ExitCode, strings.TrimSpace(res.Prepare.Stderr))
+	}
+	return res.Execute.ExitCode == 0, nil
+}
+
+// buildJob constructs a repro.Job for the given verifyID and extracted code.
+func (v *BrokerVerifier) buildJob(verifyID, code string) (repro.Job, error) {
+	switch verifyID {
+	case "fts5-match":
+		// NOTE: `go build` only proves the model's code COMPILES. The FTS5 MATCH trap
+		// is a RUNTIME parse error (dots/dashes in a bareword), which compiles fine —
+		// so a faithful fts5 check must EXECUTE the query against an FTS5 table, not
+		// just build it. This compile gate is a placeholder; the runtime check is the
+		// follow-up. The TS traps below ARE compile-time type errors, so tsc checks
+		// them exactly.
+		return repro.Job{
+			Image: v.goImage,
+			Files: map[string][]byte{
+				"go.mod":  []byte("module agenteval-verify\n\ngo 1.25\n"),
+				"main.go": []byte(code),
+			},
+			Env:     sandboxEnv(),
+			Execute: []string{"go", "build", "-o", "/dev/null", "."},
+			Timeout: verifyTimeout,
+		}, nil
+
+	case "react19-useref":
+		return v.tscJob(code, "typescript @types/react@19 react@19"), nil
+	case "rn-viewstyle":
+		return v.tscJob(code, "typescript @types/react@19 react@19 react-native@0.76"), nil
+
+	default:
+		return repro.Job{}, fmt.Errorf("unknown VerifyID %q", verifyID)
+	}
+}
+
+// tscJob scaffolds the model's code as trap.tsx and type-checks it with tsc, after
+// npm-installing the trap's exact type dependencies in the (networked) prepare phase.
+// The React/RN traps are type errors (TS2554 / TS2769): tsc exit 0 = avoided, non-zero
+// = hit. skipLibCheck keeps the verdict about the model's code, not the libraries' .d.ts.
+func (v *BrokerVerifier) tscJob(code, deps string) repro.Job {
+	return repro.Job{
+		Image: v.nodeImage,
+		Files: map[string][]byte{
+			// Drive tsc through tsconfig (NOT a file arg, which makes tsc ignore the
+			// config and run under defaults that flag clean code). tsc 6 errors on the
+			// deprecated moduleResolution:node, so use "bundler"; skipLibCheck keeps the
+			// verdict about the model's code, not the libraries' .d.ts.
+			"tsconfig.json": []byte(`{"compilerOptions":{"strict":true,"jsx":"react-jsx","esModuleInterop":true,"skipLibCheck":true,"lib":["ES2020","DOM"],"moduleResolution":"bundler","module":"esnext","noEmit":true}}`),
+			"trap.tsx":      []byte(code),
+		},
+		Env:     sandboxEnv(),
+		Prepare: []string{"sh", "-lc", "npm install --no-audit --no-fund --no-progress " + deps},
+		Execute: []string{"./node_modules/.bin/tsc"},
+		Timeout: verifyTimeout,
+	}
+}
+
+// extractCode returns the content of the first triple-backtick fenced block in
+// output, or strings.TrimSpace(output) when no fence is present.
+func extractCode(output string) string {
+	start := strings.Index(output, "```")
+	if start == -1 {
+		return strings.TrimSpace(output)
+	}
+	// Advance past the opening fence line (``` + optional lang + newline).
+	rest := output[start+3:]
+	nl := strings.Index(rest, "\n")
+	if nl == -1 {
+		return strings.TrimSpace(output)
+	}
+	inner := rest[nl+1:]
+	end := strings.Index(inner, "```")
+	if end == -1 {
+		return strings.TrimSpace(output)
+	}
+	return inner[:end]
+}
