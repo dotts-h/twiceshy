@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -23,7 +24,32 @@ import (
 
 const logTestToken = "s3cret-test-token"
 
-func newLoggedTestServer(t *testing.T, buf *bytes.Buffer) *httptest.Server {
+// syncBuffer is a goroutine-safe bytes.Buffer wrapper (#0092). The server logs
+// from its own per-request goroutine, and a client can observe a response
+// before that goroutine reaches its post-response access-log line — so a test
+// reading a plain bytes.Buffer right after the client call returns is a genuine
+// data race (no Go memory-model happens-before exists between a socket
+// write/read and the buffer access), even though the bytes are, in the
+// synchronous logging paths this test exercises, already written by then.
+// Mutex-protecting both sides removes the race without changing timing.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
+func newLoggedTestServer(t *testing.T, buf *syncBuffer) *httptest.Server {
 	t.Helper()
 	recs, err := record.LoadCorpus(testcorpus.Root())
 	if err != nil {
@@ -53,8 +79,8 @@ func newLoggedTestServer(t *testing.T, buf *bytes.Buffer) *httptest.Server {
 }
 
 func TestStructuredLoggingEmitsSafeFields(t *testing.T) {
-	var buf bytes.Buffer
-	ts := newLoggedTestServer(t, &buf)
+	buf := &syncBuffer{}
+	ts := newLoggedTestServer(t, buf)
 	session := connectWithToken(t, ts, logTestToken)
 
 	// A unique sentinel in the query proves query text is never logged.
