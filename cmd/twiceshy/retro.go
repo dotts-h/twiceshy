@@ -193,7 +193,7 @@ func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, r
 
 		for _, cand := range candidates {
 			draft := candidateDraft(cand)
-			key := batchKey(draft)
+			key := ingest.BatchKey(draft)
 			if seen[key] {
 				dup++
 				continue
@@ -223,7 +223,7 @@ func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, r
 				_, _ = fmt.Fprintf(out, "  created %s %s (from %s)\n", rec.ID, rec.Path, base)
 			}
 			created++
-			id = bumpID(id)
+			id = ingest.BumpID(id)
 		}
 
 		if join != nil && tr.SessionID != "" && !opts.dryRun {

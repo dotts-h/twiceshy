@@ -594,72 +594,8 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 	}
 	now := time.Now().UTC().Format("2006-01-02")
 
-	var created, skipped, flagged int
-	seen := map[string]bool{} // within-batch dedup, keyed by the primary signal
-	for _, d := range drafts {
-		key := batchKey(d)
-		if seen[key] {
-			skipped++
-			continue
-		}
-		outcome, err := ingest.Prepare(ctx, ix, c.repo, d,
-			ingest.Meta{ID: id, Author: *author, Now: now, IncludeQuarantined: true})
-		if err != nil {
-			return fmt.Errorf("ingest %q: %w", d.Title, err)
-		}
-		if outcome.Record == nil { // Known — already in the corpus
-			skipped++
-			continue
-		}
-		seen[key] = true
-		rec := outcome.Record
-		flag := ""
-		if len(rec.Provenance.SecurityFlags) > 0 {
-			flagged++
-			flag = fmt.Sprintf("  [FLAGGED: %s]", strings.Join(rec.Provenance.SecurityFlags, ", "))
-		}
-		if *dryRun {
-			_, _ = fmt.Fprintf(out, "  would create %s %s%s\n", rec.ID, rec.Path, flag)
-		} else {
-			if err := writeRecord(c.corpus, rec); err != nil {
-				return err
-			}
-			_, _ = fmt.Fprintf(out, "  created %s %s%s\n", rec.ID, rec.Path, flag)
-		}
-		created++
-		id = bumpID(id)
-		if *limit > 0 && created >= *limit {
-			break // bound a scheduled import so it grows the corpus gradually (0022)
-		}
-	}
-
-	verb := "created"
-	if *dryRun {
-		verb = "would create"
-	}
-	_, _ = fmt.Fprintf(out, "ingest %s: %s %d records, skipped %d (known), flagged %d (quarantined+documented)\n",
-		src.Name(), verb, created, skipped, flagged)
-	return nil
-}
-
-// batchKey is a draft's primary dedup signal for within-batch deduplication:
-// its first error signature, else its title.
-func batchKey(d ingest.Draft) string {
-	if d.Symptom != nil {
-		for _, sig := range d.Symptom.ErrorSignatures {
-			if s := strings.TrimSpace(sig); s != "" {
-				return s
-			}
-		}
-	}
-	return d.Title
-}
-
-// bumpID returns the next sequential exp-NNNN id. The index is not rebuilt
-// mid-batch, so ids are advanced locally as records are created.
-func bumpID(id string) string {
-	n, _ := record.Num(id)
-	return record.FormatID(n + 1)
+	_, err = ingest.ImportBatch(ctx, ix, c.repo, c.corpus, src.Name(), drafts, id, *author, now, *dryRun, *limit, writeRecord, out)
+	return err
 }
 
 // safeJoin joins rel under base and verifies the result stays within base —
@@ -1419,7 +1355,7 @@ func runIntakeReports(args []string, out io.Writer) error {
 			return fmt.Errorf("writing counter-record for %s: %w", rep.RecordID, err)
 		}
 		_ = spool.Remove(f)
-		id = bumpID(id)
+		id = ingest.BumpID(id)
 		intaken++
 		_, _ = fmt.Fprintf(out, "  intake %s -> %s (disputes %s)\n", filepath.Base(f), rec.ID, rep.RecordID)
 	}
@@ -2038,27 +1974,6 @@ func truncate(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
-// judgeEvalConfig is one prompt×reasoning combination the A/B sweeps.
-type judgeEvalConfig struct {
-	name   string
-	system string
-	think  bool
-}
-
-var judgeEvalConfigs = []judgeEvalConfig{
-	{"prose-nothink", judge.ProseSystemV1, false},
-	{"prose-think", judge.ProseSystemV1, true},
-	{"rubric-nothink", judge.RubricSystemV1, false},
-	{"rubric-think", judge.RubricSystemV1, true},
-}
-
-// judgeEvalNamedResult pairs a config name with its scored result (for the report
-// table and the JSON payload).
-type judgeEvalNamedResult struct {
-	Name   string           `json:"config"`
-	Result judgeeval.Result `json:"result"`
-}
-
 // runJudgeEval drives the diverse-model judge against the labelled gold set
 // (internal/judgeeval) and A/Bs the prose vs rubric system prompt at think
 // off/on, scoring the fail-UNSAFE direction (false-approve rate) so the operator
@@ -2071,7 +1986,7 @@ func runJudgeEval(ctx context.Context, args []string, out io.Writer, getenv func
 	repeat := fs.Int("repeat", 1, "samples per case; the majority decision is scored (smooths boundary cases)")
 	confirm := fs.Bool("confirm", false, "adaptive sampling: sample every case -repeat times, then re-sample only the boundary (flipped) cases up to 3×-repeat — same headline at ~3× fewer judge calls (#0057)")
 	timeout := fs.Int("timeout", 90, "per-call HTTP timeout in seconds (raise for think=true)")
-	configs := fs.String("configs", "all", "comma list of configs to run, or all: "+configNames())
+	configs := fs.String("configs", "all", "comma list of configs to run, or all: "+judgeeval.ConfigNames())
 	asJSON := fs.Bool("json", false, "emit the full report as JSON")
 	if err := parseFlags(fs, args); err != nil {
 		return err
@@ -2080,7 +1995,7 @@ func runJudgeEval(ctx context.Context, args []string, out io.Writer, getenv func
 	if url == "" {
 		return errors.New("TWICESHY_JUDGE_URL must be set: judge-eval drives the live judge shim")
 	}
-	selected, err := selectConfigs(*configs)
+	selected, err := judgeeval.SelectConfigs(*configs)
 	if err != nil {
 		return err
 	}
@@ -2090,20 +2005,20 @@ func runJudgeEval(ctx context.Context, args []string, out io.Writer, getenv func
 	}
 	client := &http.Client{Timeout: time.Duration(*timeout) * time.Second}
 
-	var results []judgeEvalNamedResult
+	var results []judgeeval.NamedResult
 	for _, cf := range selected {
 		j, err := judge.NewModelJudge(judge.Config{
 			Endpoint: url, Model: *model, DrafterModel: *drafterModel,
-			System: cf.system, Think: cf.think, Client: client,
+			System: cf.System, Think: cf.Think, Client: client,
 		})
 		if err != nil {
-			return fmt.Errorf("configuring judge for %s: %w", cf.name, err)
+			return fmt.Errorf("configuring judge for %s: %w", cf.Name, err)
 		}
 		if !*asJSON {
 			if *confirm {
-				_, _ = fmt.Fprintf(out, "running %s (%d cases × %d confirm, up to %d) …\n", cf.name, len(cases), *repeat, 3*(*repeat))
+				_, _ = fmt.Fprintf(out, "running %s (%d cases × %d confirm, up to %d) …\n", cf.Name, len(cases), *repeat, 3*(*repeat))
 			} else {
-				_, _ = fmt.Fprintf(out, "running %s (%d cases × %d) …\n", cf.name, len(cases), *repeat)
+				_, _ = fmt.Fprintf(out, "running %s (%d cases × %d) …\n", cf.Name, len(cases), *repeat)
 			}
 		}
 		var rep judgeeval.Result
@@ -2113,23 +2028,23 @@ func runJudgeEval(ctx context.Context, args []string, out io.Writer, getenv func
 			rep, err = judgeeval.Run(ctx, j, cases, *repeat)
 		}
 		if err != nil {
-			return fmt.Errorf("running %s: %w", cf.name, err)
+			return fmt.Errorf("running %s: %w", cf.Name, err)
 		}
-		results = append(results, judgeEvalNamedResult{Name: cf.name, Result: rep})
+		results = append(results, judgeeval.NamedResult{Name: cf.Name, Result: rep})
 	}
 
 	winner := -1
 	for i := range results {
-		if winner < 0 || judgeEvalBetter(results[i].Result, results[winner].Result) {
+		if winner < 0 || judgeeval.Better(results[i].Result, results[winner].Result) {
 			winner = i
 		}
 	}
 
 	if *asJSON {
 		payload := struct {
-			Configs []judgeEvalNamedResult `json:"configs"`
-			Winner  string                 `json:"winner"`
-		}{results, names(results, winner)}
+			Configs []judgeeval.NamedResult `json:"configs"`
+			Winner  string                  `json:"winner"`
+		}{results, judgeeval.ResultName(results, winner)}
 		b, err := json.MarshalIndent(payload, "", "  ")
 		if err != nil {
 			return err
@@ -2158,80 +2073,15 @@ func runJudgeEval(ctx context.Context, args []string, out io.Writer, getenv func
 			r.FalseRejects, r.FalseRejectRate*100,
 			r.Errors, r.Accuracy*100, r.CheckRecall*100, r.Flips)
 	}
-	_, _ = fmt.Fprintf(out, "\nwinner: %s (lowest false-approve, then false-reject, then errors)\n", names(results, winner))
+	_, _ = fmt.Fprintf(out, "\nwinner: %s (lowest false-approve, then false-reject, then errors)\n", judgeeval.ResultName(results, winner))
 
 	// Detail for the winner: which gold cases slipped, so the failure is legible.
 	w := results[winner].Result
-	printJudgeEvalMisses(out, "FALSE-APPROVE (fail-unsafe — would auto-promote)", w.Outcomes, func(o judgeeval.Outcome) bool { return o.FalseApprove })
-	printJudgeEvalMisses(out, "false-reject (over-conservative — good record blocked)", w.Outcomes, func(o judgeeval.Outcome) bool { return o.FalseReject })
-	printJudgeEvalMisses(out, "errors (no verdict)", w.Outcomes, func(o judgeeval.Outcome) bool { return o.Errored })
-	printJudgeEvalMisses(out, "flipped (judge disagreed with itself across samples)", w.Outcomes, func(o judgeeval.Outcome) bool { return o.Flipped })
+	judgeeval.PrintMisses(out, "FALSE-APPROVE (fail-unsafe — would auto-promote)", w.Outcomes, func(o judgeeval.Outcome) bool { return o.FalseApprove })
+	judgeeval.PrintMisses(out, "false-reject (over-conservative — good record blocked)", w.Outcomes, func(o judgeeval.Outcome) bool { return o.FalseReject })
+	judgeeval.PrintMisses(out, "errors (no verdict)", w.Outcomes, func(o judgeeval.Outcome) bool { return o.Errored })
+	judgeeval.PrintMisses(out, "flipped (judge disagreed with itself across samples)", w.Outcomes, func(o judgeeval.Outcome) bool { return o.Flipped })
 	return nil
-}
-
-func configNames() string {
-	ns := make([]string, len(judgeEvalConfigs))
-	for i, c := range judgeEvalConfigs {
-		ns[i] = c.name
-	}
-	return strings.Join(ns, ",")
-}
-
-func selectConfigs(spec string) ([]judgeEvalConfig, error) {
-	if spec == "" || spec == "all" {
-		return judgeEvalConfigs, nil
-	}
-	want := strings.Split(spec, ",")
-	var out []judgeEvalConfig
-	for _, w := range want {
-		w = strings.TrimSpace(w)
-		found := false
-		for _, c := range judgeEvalConfigs {
-			if c.name == w {
-				out = append(out, c)
-				found = true
-				break
-			}
-		}
-		if !found {
-			return nil, fmt.Errorf("unknown config %q (want one of %s, or all)", w, configNames())
-		}
-	}
-	return out, nil
-}
-
-// judgeEvalBetter ranks results: fewest false-approves (fail-unsafe) first, then
-// fewest false-rejects, then fewest errors, then highest accuracy.
-func judgeEvalBetter(a, b judgeeval.Result) bool {
-	if a.FalseApproves != b.FalseApproves {
-		return a.FalseApproves < b.FalseApproves
-	}
-	if a.FalseRejects != b.FalseRejects {
-		return a.FalseRejects < b.FalseRejects
-	}
-	if a.Errors != b.Errors {
-		return a.Errors < b.Errors
-	}
-	return a.Accuracy > b.Accuracy
-}
-
-func names(results []judgeEvalNamedResult, i int) string {
-	if i < 0 || i >= len(results) {
-		return "(none)"
-	}
-	return results[i].Name
-}
-
-func printJudgeEvalMisses(out io.Writer, title string, outcomes []judgeeval.Outcome, pred func(judgeeval.Outcome) bool) {
-	var ids []string
-	for _, o := range outcomes {
-		if pred(o) {
-			ids = append(ids, fmt.Sprintf("%s(%s)", o.CaseID, o.Mode))
-		}
-	}
-	if len(ids) > 0 {
-		_, _ = fmt.Fprintf(out, "  %s: %s\n", title, strings.Join(ids, " "))
-	}
 }
 
 func printReport(out io.Writer, rep doctor.Report) {
