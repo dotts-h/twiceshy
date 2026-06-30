@@ -91,6 +91,13 @@ The repro IS the proof for execution-validated records (ADR-0011, Doctor 3), so 
 satisfies the requirement on its own — a record proven by the harness need not
 also carry a named Go unit test.
 
+**Exemption:** a record validated by a no-repro judge **panel** — the advisory
+class ([ADR-0016](adr/ADR-0016-advisory-class-panel-promotion.md)) or the prose
+class ([ADR-0020](adr/ADR-0020-prose-class-panel-promotion.md)) — carries no
+executable proof at all; the panel's verdict (`provenance.promotion.panel`) is its
+proof instead, and `validateGuard` exempts it by class (advisory) or by promotion
+audit (prose) rather than requiring a `guarding_test`/repro.
+
 ### `provenance`
 
 | field | type | required | notes |
@@ -102,9 +109,10 @@ also carry a named Go unit test.
 | `source_license` | string | no | SPDX id (e.g. `CC-BY-4.0`, `MIT`), `none (facts only)` (a distilled license-clean fact, [ADR-0003](adr/ADR-0003-corpus-bootstrap-source-scope.md) §4), or `none (authored, internal-only)` (a fact re-derived from a public-awareness *topic*, [ADR-0011](adr/ADR-0011-corpus-growth-and-validation-engine.md) §5 — born with no `source_url`, kept out of commercial packs pending a real legal review). The pack builder uses it to mechanically keep commercial packs license-clean |
 | `source_url` | string | no | `http(s)` URL the imported fact was distilled from; recorded alongside `source_license` |
 | `security_flags` | string[] | no | hazards the ingestion safety gate detected (e.g. `secret:aws-access-key`, `harmful-code:pipe-to-shell`); set on ingest (#0011). A record with `security_flags` **cannot be `validated`** — it is documented + quarantined |
+| `consistency_flags` | string[] | no | deterministic advisory-transcription defects the ingest gate caught (e.g. `consistency:null-fixed-fix-text`, the #0061 defect classes). Only the **blocking** subset forbids `validated` (the rest, e.g. `source-url-id-mismatch`, are soft/advisory-only pending an alias-aware detector) |
 | `superseded_by` | string\|null | when `status: superseded` | id of the replacement. **Supersede, never delete** |
 | `disputes` | string\|null | no | id of an existing record this one is **counter-evidence against** — set on an outcome-report counter-record (#0031). Additive, optional, `exp-NNNN`-shaped like `superseded_by`. It is evidence, not a verdict: #0032 follows it to re-run the original repro plus the counter, and a report never mutates its target |
-| `promotion` | object | no | the **audit trail of an autonomous promotion** (#0029, ADR-0013): `{attested_at, reproduced_under?, judge_model, judge_decision}` — the holding attestation and the diverse judge's verdict that flipped this record `quarantined → validated` with no human approver. Additive, optional; set only by the promoter |
+| `promotion` | object | no | the **audit trail of an autonomous promotion** (#0029, ADR-0013): `{attested_at, reproduced_under?, judge_model, judge_decision, panel?}` — the holding attestation and the diverse judge's verdict that flipped this record `quarantined → validated` with no human approver. `panel` (member verdicts) is set instead of an attestation by the no-repro advisory ([ADR-0016](adr/ADR-0016-advisory-class-panel-promotion.md)) and prose ([ADR-0020](adr/ADR-0020-prose-class-panel-promotion.md)) paths. Additive, optional; set only by the promoter |
 | `demotion` | object | no | the **audit trail of an autonomous demotion** (#0032, ADR-0013 §3): `{attested_at, judge_model, judge_decision, report}` — the counter-attestation that reproduced the failure, the judge's verdict, and the outcome-report (`exp-NNNN`) that flipped this record `validated → stale`. Additive, optional; set only by the counter-evidence gate |
 | `usage` | object | no | `{retrieved: int, pushed: int, confirmed_helpful: int, last_hit: date\|null}` — Doctor 4's signal; maintained by tooling, zero-valued at creation. `pushed` counts push-channel impressions (distinct from `retrieved`, a deliberate pull); the closed loop is `pushed` (denominator) vs `confirmed_helpful` (numerator) |
 

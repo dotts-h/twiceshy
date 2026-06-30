@@ -42,7 +42,7 @@ real corpus through the `-corpus <dir>` seam.
 | `internal/drafter/` | Turns a record's structured fact into a *candidate* repro the broker can prove. `Drafter` seam: deterministic Go-deprecation template + a cheap local-model drafter; both feed the same execution gate. | [11](adr/ADR-0011-corpus-growth-and-validation-engine.md) §8 |
 | `internal/judge/` | The keystone of the closed loop: a diverse frontier-model judge (different family from the drafter, never the local LLM) that checks what a green attestation can't — meaning, scope, license, poison. `Judge` seam; `ModelJudge`, `PanelJudge` (advisory), `MajorityJudge`, `TimingJudge`. Fails safe: no verdict = not-approved. | [13](adr/ADR-0013-closed-loop-autonomous-validation.md) §1, §6 |
 | `internal/judgeeval/` | The judge-prompt eval: a labelled gold set + measured A/B of prompt/reasoning settings, scoring the false-approve direction. Replaces hand-tuned guessing. CI runs the deterministic scorer with a stub; the live A/B is endpoint-gated. | [13](adr/ADR-0013-closed-loop-autonomous-validation.md) #0028, [14](adr/ADR-0014-shared-result-aggregation-in-judgeeval.md) |
-| `internal/promote/` | The decision packages of the closed loop. `promote.go` (`Promoter`): holding attestation + judge PASS flips `quarantined → validated` (advisory class via the panel), recording the audit trail in `provenance.promotion`. `adapt.go` (`Adapter`): the demote/dispute direction. `journal.go`: per-run stop journal. | [13](adr/ADR-0013-closed-loop-autonomous-validation.md), [16](adr/ADR-0016-advisory-class-panel-promotion.md) |
+| `internal/promote/` | The decision packages of the closed loop. `promote.go` (`Promoter`): holding attestation + judge PASS flips `quarantined → validated` for the execution-provable class; a no-repro judge **panel** instead promotes the advisory class (`promoteAdvisory`, ADR-0016) and the prose class (`promoteProse`, ADR-0020), recording the audit trail (incl. panel verdicts) in `provenance.promotion`. `adapt.go` (`Adapter`): the demote/dispute direction. `journal.go`: per-run stop journal. | [13](adr/ADR-0013-closed-loop-autonomous-validation.md), [16](adr/ADR-0016-advisory-class-panel-promotion.md), [20](adr/ADR-0020-prose-class-panel-promotion.md) |
 | `internal/guard/` | Safety net the autonomous promote/demote loops consult: emergency stop, anomaly (rate) monitor, budget cap — bounding the residual risks (a compromised judge, a report-flood DoS). | [13](adr/ADR-0013-closed-loop-autonomous-validation.md) §7 |
 | `internal/notify/` | Guardrail alert seam: POSTs to ntfy when a guardrail trips, so an unattended halt is visible off the cron box. Env-gated; a failed post is logged, never returned. | [13](adr/ADR-0013-closed-loop-autonomous-validation.md) §B3 |
 | `internal/lock/` | Single-flight `flock` on a corpus-local lockfile, so an overlapping cron tick can't double-write the mutating loop. Unix-only. | [13](adr/ADR-0013-closed-loop-autonomous-validation.md) §A2 |
@@ -62,11 +62,13 @@ Dispatch is the `switch args[0]` in `cmd/twiceshy/main.go` (~L197).
 | `serve` | Run the MCP pull + push HTTP server (`runServe`). |
 | `healthcheck` | Container HEALTHCHECK / external probe — GETs the health endpoint (`runHealthcheck`). |
 | `ingest` | Import quarantined records from a license-clean source — `go`/`osv`/`py`/`osv-live` (#0007, `runIngest`). |
+| `learned` | Capture one agent-authored lesson into the local corpus via `ingest.Prepare` (#0094, `runLearned`). |
 | `draft` | Run the deterministic drafter pipeline: draft + broker-prove candidate repros over the corpus (`runDraft`). |
 | `promote` | Positive direction of the closed loop (#0029): attestation + judge PASS auto-promotes quarantined records (`runPromote`). |
 | `repromote` | Reversal/recovery (#0048): re-validate one stale or disputed record (`runRepromote`). |
 | `adapt` | Negative direction (#0032): demote/dispute a quarantined record against counter-evidence (`runAdapt`). |
 | `intake-reports` | Drain the report queue (§E1, #0042): each queued outcome → a quarantined dispute counter-record (`runIntakeReports`). |
+| `intake-issues` | Drain the `report_issue` queue (#0066, #0075): materialize each spooled issue into `docs/issues/` via `scripts/new-issue.sh`, triage-flagged, dedup'd on title (`runIntakeIssues`). |
 | `retro-intake` | Drain the session-retro queue (#0065): run the Analyzer per transcript, feed candidates into the ladder (`runRetroIntake`). |
 | `screen` | Read text on stdin, run the ingestion content screen, print findings (`runScreen`). |
 | `report` | Enqueue an outcome dispute into the report queue from the CLI (`runReport`). |
@@ -79,6 +81,9 @@ Dispatch is the `switch args[0]` in `cmd/twiceshy/main.go` (~L197).
 | `self-audit` | Dogfood twiceshy on its own dependencies (#0014, `runSelfAudit`). |
 | `similarity` | Flag an authored record's prose as near-verbatim to a supplied reference — the ADR-0011 §5 net (#0090, `runSimilarity`). Advisory lead, exits 0. |
 | `author` | Pre-stage a §5-clean authored record + repro skeleton(s) under `-corpus`, refusing to overwrite (#0091, `runAuthor`). |
+| `corpus-merge-check` | CI gate over `internal/mergecheck`: verify a corpus PR's base/head diff merges cleanly (`runCorpusMergeCheck`). |
+| `corpus-pr-paths` | Companion to `corpus-merge-check`: print the changed-file paths a corpus PR touches (`runCorpusPRPaths`). |
+| `nextid` | Print the next `exp-NNNN` id the corpus would allocate, honoring `-base` for merge-safe allocation (`runNextID`). |
 
 ## Primary data-flow paths
 
@@ -146,23 +151,33 @@ quarantined record
    │                       + judge.Judge PASS
    │                       → promote.Promoter.Promote → validated   (internal/promote/promote.go:153)
    ├─ advisory class:      judge.PanelJudge (diverse, no repro)     (internal/judge/panel.go)
-   │                       → Promoter.promoteAdvisory               (internal/promote/promote.go:212)
+   │                       → Promoter.promoteAdvisory               (internal/promote/promote.go:286)
    │                         [born-stale gate, ADR-0016 §7, #0071]
+   ├─ prose class:         judge.PanelJudge (cross-family, no repro, Request.Prose) (internal/judge/panel.go)
+   │                       → Promoter.promoteProse                  (internal/promote/promote.go:340)
+   │                         [ADR-0020 — meaning/scope-only verdict, no executable proof]
    └─ stale / disputed:    doctor.Staleness or a report counter-record
                            → promote.Adapter (#0032) / Promoter.Repromote (#0048) → demote
 ```
 
-`Promoter.Promote` (`internal/promote/promote.go:153`) records the attestation +
+`Promoter.Promote` (`internal/promote/promote.go:214`) records the attestation +
 verdict in `provenance.promotion` as the git-committed audit trail; anything short
 of (holding attestation AND judge approve) leaves the record quarantined. The
-advisory path (`Promoter.promoteAdvisory`, `promote.go:212`,
+advisory path (`Promoter.promoteAdvisory`, `promote.go:286`,
 [ADR-0016](adr/ADR-0016-advisory-class-panel-promotion.md)) skips repro and uses
-the panel, gated by a born-stale check (`stalenessGate`, `promote.go:72`, wired to
-`doctor.Staleness.WouldFlag`, `staleness.go:123`) so an EOL/expired advisory is
-never promoted (ADR-0016 §7). `guard.*` bounds the whole loop (emergency stop, anomaly monitor,
-budget cap) and `lock` single-flights it. `eligibility` predicates:
-`promote.Eligible` / `EligibleAdvisory` / `Promotable` / `RepromoteEligible`
-(`promote.go:109–275`).
+the panel, gated by a born-stale check (`stalenessGate` field, `promote.go:45`,
+wired via `WithStalenessGate`, `promote.go:82`, to `doctor.Staleness.WouldFlag`,
+`staleness.go:123`) so an EOL/expired advisory is never promoted (ADR-0016 §7). The
+prose path (`Promoter.promoteProse`, `promote.go:340`,
+[ADR-0020](adr/ADR-0020-prose-class-panel-promotion.md)) likewise skips repro for a
+no-source "prose" record, judged by a cross-family panel via `judge.Request{Prose:
+true}` (`internal/judge/judge.go:129`); both panel paths record their member
+verdicts in `provenance.promotion.panel` and are exempt from the validated-trap
+guard requirement (`(*Record).panelPromoted`, `internal/record/record.go`).
+`guard.*` bounds the whole loop (emergency stop, anomaly monitor, budget cap) and
+`lock` single-flights it. Eligibility predicates: `Eligible` (`promote.go:144`) /
+`EligibleAdvisory` (`promote.go:160`) / `EligibleProse` (`promote.go:178`) /
+`Promotable` (`promote.go:194`) / `RepromoteEligible` (`promote.go:400`).
 
 ## Architectural seams
 
