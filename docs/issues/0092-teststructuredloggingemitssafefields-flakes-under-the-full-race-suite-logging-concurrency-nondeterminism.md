@@ -1,7 +1,7 @@
 ---
 id: 0092
 title: TestStructuredLoggingEmitsSafeFields flakes under the full -race suite (logging-concurrency nondeterminism)
-status: open
+status: closed
 severity: low
 group: 
 depends_on: []
@@ -56,3 +56,29 @@ background goroutine can interleave into. Confirm with `go test -race -count=50 
 TestStructuredLoggingEmitsSafeFields ./internal/server/` (and a few full-suite `-race`
 runs) before closing. Filed **ungrouped**: a self-contained test-determinism fix (no open
 epic is a clean fit — #0009 is security-screening, #0008 is feature phases).
+
+## Resolution (closed 2026-06-30)
+
+The test already used its own per-test `slog.Logger`/`bytes.Buffer` — the actual race
+was confirmed by reading the `-race` detector's own stack trace, not the "shared/global
+logger" guess above: `withRequestLog` (`internal/server/middleware.go`) logs its
+access-log line *after* the inner handler returns, in the HTTP server's own per-request
+goroutine, sequenced after the response is already sent — and a TCP write-then-read
+gives no Go memory-model happens-before edge, so the test's direct, unsynchronized
+`buf.String()` read right after the HTTP client call returned was racing that goroutine
+regardless of how reliably "in order" the bytes arrive in practice. That explains the
+exact reported symptom (passes alone, flakes only under full-suite system contention).
+
+Fix: wrap the buffer in a small mutex-guarded `syncBuffer` (`internal/server/logging_test.go`)
+instead of asserting on access ordering — no timing change, assertions unmodified.
+
+**Dead-end on the way here** (see `docs/REGRESSIONS.md`): a first attempt guessed a
+different, also-genuinely-async writer (`usageRecorder`'s error-path log call) and added
+a test-only flush hook for it. That compiled and even passed one `go test -race ./...`
+run, but re-running independently at `-count=100` reproduced the race immediately — the
+flush hook was reverted, never pushed.
+
+**Verified on real data**, not just one green run: `go test -race -run
+TestStructuredLoggingEmitsSafeFields -count=300 ./internal/server/...`, the whole
+package, and the full module all green. Dogfood record `exp-3405` (the trap + the
+dead-end, so the wrong lead isn't retried); regression row in `docs/REGRESSIONS.md`.
