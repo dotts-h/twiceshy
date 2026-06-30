@@ -16,6 +16,7 @@ import (
 
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/ingest"
+	"github.com/dotts-h/twiceshy/internal/notify"
 	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/retro"
 	"github.com/dotts-h/twiceshy/internal/spool"
@@ -84,12 +85,13 @@ func runRetroIntake(ctx context.Context, args []string, out io.Writer, getenv fu
 		}
 	}
 
+	alerter := notify.New(getenv("TWICESHY_ALERT_URL"), getenv("NTFY_TOKEN"), slog.Default())
 	return drainRetro(ctx, analyzer, ix, c.repo, c.corpus, *queue, retroOpts{
 		limit:  *limit,
 		dryRun: *dryRun,
 		now:    time.Now().UTC().Format("2006-01-02"),
 		base:   *base,
-	}, join, out)
+	}, join, alerter, out)
 }
 
 // modelConfigFromEnv resolves the off-pool endpoint and model from the environment
@@ -129,14 +131,21 @@ type retroOpts struct {
 	base   string // optional base ref for merge-safe id allocation
 }
 
-const analyzeAttempts = 3
+const (
+	analyzeAttempts             = 3
+	unprocessableMinSample      = 5
+	unprocessableAlertThreshold = 0.20
+)
 
 // drainRetro is the testable core: analyze each spooled transcript and materialize
 // its candidates as quarantined drafts. The Analyzer is injected so tests drive it
 // with a StubAnalyzer (no network). Fail-safe: an analyzer error leaves the
 // transcript queued and stops (a scheduled run retries); a transcript is dequeued
 // only after it is successfully analyzed.
-func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, repo, corpus, queue string, opts retroOpts, join *helpfulJoin, out io.Writer) error {
+func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, repo, corpus, queue string, opts retroOpts, join *helpfulJoin, alerter notify.Alerter, out io.Writer) error {
+	if alerter == nil {
+		alerter = notify.NopAlerter{}
+	}
 	if _, err := record.LoadCorpus(corpus); err != nil {
 		return fmt.Errorf("loading corpus: %w", err)
 	}
@@ -150,7 +159,7 @@ func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, r
 		return fmt.Errorf("allocating next id: %w", err)
 	}
 	seen := map[string]bool{} // within-run dedup, keyed like the importer's batch
-	created, dup, skipped := 0, 0, 0
+	created, dup, skipped, attempted, unprocessable := 0, 0, 0, 0, 0
 	for _, f := range files {
 		base := filepath.Base(f)
 		tr, err := spool.ReadTranscript(f)
@@ -161,6 +170,8 @@ func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, r
 			skipped++
 			continue
 		}
+
+		attempted++
 
 		var candidates []retro.Candidate
 		var analyzeErr error
@@ -183,6 +194,7 @@ func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, r
 			}
 			_, _ = fmt.Fprintf(out, "  skip %s: unprocessable after %d attempts (%v)\n", base, analyzeAttempts, analyzeErr)
 			skipped++
+			unprocessable++
 			continue
 		}
 
@@ -260,6 +272,13 @@ func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, r
 		if opts.limit > 0 && created >= opts.limit {
 			_, _ = fmt.Fprintf(out, "retro-intake: record limit %d reached\n", opts.limit)
 			break
+		}
+	}
+
+	if attempted >= unprocessableMinSample {
+		rate := float64(unprocessable) / float64(attempted)
+		if rate > unprocessableAlertThreshold {
+			alerter.Alert(ctx, "retro-analyzer-unreliable", fmt.Sprintf("retro-intake: %d/%d transcripts unprocessable (%.0f%%) this drain — analyzer may be unreliable (see #0105)", unprocessable, attempted, rate*100))
 		}
 	}
 

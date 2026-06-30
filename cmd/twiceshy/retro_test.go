@@ -6,12 +6,38 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 
+	"github.com/dotts-h/twiceshy/internal/notify"
 	"github.com/dotts-h/twiceshy/internal/retro"
 	"github.com/dotts-h/twiceshy/internal/spool"
 )
+
+// recordingAlerter captures alert events for test assertions.
+type recordingAlerter struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func (r *recordingAlerter) Alert(_ context.Context, event, _ string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, event)
+}
+
+func (r *recordingAlerter) has(event string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.events {
+		if e == event {
+			return true
+		}
+	}
+	return false
+}
 
 // countingConfirmHelpfuler records ids passed to ConfirmHelpful for test assertions.
 type countingConfirmHelpfuler struct {
@@ -59,7 +85,7 @@ func TestDrainRetro_HelpfulnessJoin_ServedFilter(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := drainRetro(context.Background(), &retro.StubAnalyzer{}, ix, "", corpus, queue, retroOpts{now: "2026-06-28"}, join, &buf); err != nil {
+	if err := drainRetro(context.Background(), &retro.StubAnalyzer{}, ix, "", corpus, queue, retroOpts{now: "2026-06-28"}, join, notify.NopAlerter{}, &buf); err != nil {
 		t.Fatalf("drainRetro: %v", err)
 	}
 	if len(rec.ids) != 1 || rec.ids[0] != "exp-0001" {
@@ -86,7 +112,7 @@ func TestDrainRetro_HelpfulnessJoin_BestEffortOnJudgeError(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := drainRetro(context.Background(), &retro.StubAnalyzer{}, ix, "", corpus, queue, retroOpts{now: "2026-06-28"}, join, &buf); err != nil {
+	if err := drainRetro(context.Background(), &retro.StubAnalyzer{}, ix, "", corpus, queue, retroOpts{now: "2026-06-28"}, join, notify.NopAlerter{}, &buf); err != nil {
 		t.Fatalf("drainRetro must complete despite judge error: %v", err)
 	}
 	if len(rec.ids) != 0 {
@@ -104,10 +130,54 @@ func TestDrainRetro_HelpfulnessJoin_Disabled(t *testing.T) {
 	enqueueRetroTranscript(t, queue, "s1", "agent session")
 
 	var buf bytes.Buffer
-	if err := drainRetro(context.Background(), &retro.StubAnalyzer{}, ix, "", corpus, queue, retroOpts{now: "2026-06-28"}, nil, &buf); err != nil {
+	if err := drainRetro(context.Background(), &retro.StubAnalyzer{}, ix, "", corpus, queue, retroOpts{now: "2026-06-28"}, nil, notify.NopAlerter{}, &buf); err != nil {
 		t.Fatalf("drainRetro: %v", err)
 	}
 	if paths, _ := spool.List(queue); len(paths) != 0 {
 		t.Errorf("transcript must dequeue; %d left", len(paths))
+	}
+}
+
+func TestDrainRetro_ChronicFailureRate_Alerts(t *testing.T) {
+	corpus, ix := retroTestCorpus(t)
+	queue := filepath.Join(t.TempDir(), "retro")
+	for i := 0; i < 6; i++ {
+		enqueueRetroTranscript(t, queue, fmt.Sprintf("s%d", i), "agent session")
+	}
+	al := &recordingAlerter{}
+	var buf bytes.Buffer
+	if err := drainRetro(context.Background(), &retro.StubAnalyzer{Err: retro.ErrUnprocessable}, ix, "", corpus, queue, retroOpts{now: "2026-06-28"}, nil, al, &buf); err != nil {
+		t.Fatalf("drainRetro: %v", err)
+	}
+	if !al.has("retro-analyzer-unreliable") {
+		t.Fatal("expected retro-analyzer-unreliable alert on high failure rate")
+	}
+}
+
+func TestDrainRetro_ChronicFailureRate_NoAlertOnSuccess(t *testing.T) {
+	corpus, ix := retroTestCorpus(t)
+	queue := filepath.Join(t.TempDir(), "retro")
+	enqueueRetroTranscript(t, queue, "s1", "agent session")
+	al := &recordingAlerter{}
+	var buf bytes.Buffer
+	if err := drainRetro(context.Background(), &retro.StubAnalyzer{}, ix, "", corpus, queue, retroOpts{now: "2026-06-28"}, nil, al, &buf); err != nil {
+		t.Fatalf("drainRetro: %v", err)
+	}
+	if al.has("retro-analyzer-unreliable") {
+		t.Fatal("must not alert when analyzer succeeds")
+	}
+}
+
+func TestDrainRetro_ChronicFailureRate_NoAlertBelowMinSample(t *testing.T) {
+	corpus, ix := retroTestCorpus(t)
+	queue := filepath.Join(t.TempDir(), "retro")
+	enqueueRetroTranscript(t, queue, "s1", "agent session")
+	al := &recordingAlerter{}
+	var buf bytes.Buffer
+	if err := drainRetro(context.Background(), &retro.StubAnalyzer{Err: retro.ErrUnprocessable}, ix, "", corpus, queue, retroOpts{now: "2026-06-28"}, nil, al, &buf); err != nil {
+		t.Fatalf("drainRetro: %v", err)
+	}
+	if al.has("retro-analyzer-unreliable") {
+		t.Fatal("must not alert below unprocessableMinSample even at 100% failure rate")
 	}
 }

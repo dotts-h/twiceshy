@@ -70,3 +70,17 @@ inconclusive on actual helpfulness).
   per-model failure rate** so this can't silently sit at 0.
 - Connected: #0069 (the join), #0067 (decision log), #0005 (the eval it gates), #0099/#0100 (prior
   served→used fixes), ADR-0018 (retro capture). Surfaced during the epic-0101 status review 2026-06-29.
+
+## Progress (2026-06-30)
+
+The alerting half of item (d) is done: `runRetroIntake` now wires a `notify.Alerter`
+(`TWICESHY_ALERT_URL`/`NTFY_TOKEN`, same convention as promote/adapt), and `drainRetro`
+fires a one-shot `retro-analyzer-unreliable` alert when a drain's unprocessable rate
+exceeds 20% over a minimum sample of 5 attempted transcripts — so this can no longer
+silently sit at 0 for weeks before a human-initiated audit notices (exactly how this
+issue itself was surfaced). Guarded by `TestDrainRetro_ChronicFailureRate_Alerts` /
+`_NoAlertOnSuccess` / `_NoAlertBelowMinSample` (`cmd/twiceshy/retro_test.go`).
+
+**Still open:** the retry-budget half of (d), and fixes (a)/(b)/(c) — the analyzer
+itself still drops ~22% of real transcripts. The alert makes the failure visible; it
+does not reduce it.

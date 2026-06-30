@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/dotts-h/twiceshy/internal/index"
+	"github.com/dotts-h/twiceshy/internal/notify"
 	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/retro"
 	"github.com/dotts-h/twiceshy/internal/spool"
@@ -78,7 +79,7 @@ func TestDrainRetro_MaterializesQuarantinedDraftAndDrains(t *testing.T) {
 	analyzer := &retro.StubAnalyzer{Candidates: []retro.Candidate{aTrapCandidate()}}
 
 	var buf bytes.Buffer
-	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22"}, nil, &buf); err != nil {
+	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22"}, nil, notify.NopAlerter{}, &buf); err != nil {
 		t.Fatalf("drainRetro: %v", err)
 	}
 	if analyzer.Calls != 1 {
@@ -145,7 +146,7 @@ func TestDrainRetro_AnalyzerErrorLeavesQueuedAndWritesNothing(t *testing.T) {
 	analyzer := &retro.StubAnalyzer{Err: errors.New("endpoint down")}
 
 	var buf bytes.Buffer
-	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22"}, nil, &buf); err == nil {
+	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22"}, nil, notify.NopAlerter{}, &buf); err == nil {
 		t.Fatal("want an error when the analyzer is down (fail-safe), got nil")
 	}
 	if paths, _ := spool.List(queue); len(paths) != 1 {
@@ -164,7 +165,7 @@ func TestDrainRetro_DedupsRepeatedCandidateWithinRun(t *testing.T) {
 	analyzer := &retro.StubAnalyzer{Candidates: []retro.Candidate{c, c}}
 
 	var buf bytes.Buffer
-	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22"}, nil, &buf); err != nil {
+	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22"}, nil, notify.NopAlerter{}, &buf); err != nil {
 		t.Fatalf("drainRetro: %v", err)
 	}
 	if recs, _ := record.LoadCorpus(corpus); len(recs) != 1 {
@@ -179,7 +180,7 @@ func TestDrainRetro_DryRunWritesNothingAndKeepsQueue(t *testing.T) {
 	analyzer := &retro.StubAnalyzer{Candidates: []retro.Candidate{aTrapCandidate()}}
 
 	var buf bytes.Buffer
-	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22", dryRun: true}, nil, &buf); err != nil {
+	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22", dryRun: true}, nil, notify.NopAlerter{}, &buf); err != nil {
 		t.Fatalf("drainRetro: %v", err)
 	}
 	if recs, _ := record.LoadCorpus(corpus); len(recs) != 0 {
@@ -209,7 +210,7 @@ func TestDrainRetro_LimitHitStillDequeuesProcessedTranscript(t *testing.T) {
 	}}
 
 	var buf bytes.Buffer
-	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22", limit: 1}, nil, &buf); err != nil {
+	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-22", limit: 1}, nil, notify.NopAlerter{}, &buf); err != nil {
 		t.Fatalf("drainRetro: %v", err)
 	}
 	if paths, _ := spool.List(queue); len(paths) != 0 {
@@ -245,7 +246,7 @@ func TestDrainRetro_TransientUnprocessableIsRetriedNotDeadLettered(t *testing.T)
 	stub := &unprocessableAfterFirst{candidates: []retro.Candidate{aTrapCandidate()}}
 
 	var buf bytes.Buffer
-	if err := drainRetro(context.Background(), stub, ix, "", corpus, queue, retroOpts{now: "2026-06-26"}, nil, &buf); err != nil {
+	if err := drainRetro(context.Background(), stub, ix, "", corpus, queue, retroOpts{now: "2026-06-26"}, nil, notify.NopAlerter{}, &buf); err != nil {
 		t.Fatalf("drainRetro returned error (must continue past transient unprocessable): %v", err)
 	}
 
@@ -293,7 +294,7 @@ func TestDrainRetro_PoisonPillDeadLetteredAfterBoundedRetries(t *testing.T) {
 	stub := &alwaysUnprocessable{}
 
 	var buf bytes.Buffer
-	if err := drainRetro(context.Background(), stub, ix, "", corpus, queue, retroOpts{now: "2026-06-26"}, nil, &buf); err != nil {
+	if err := drainRetro(context.Background(), stub, ix, "", corpus, queue, retroOpts{now: "2026-06-26"}, nil, notify.NopAlerter{}, &buf); err != nil {
 		t.Fatalf("drainRetro returned error (must dead-letter poison pill): %v", err)
 	}
 
