@@ -123,6 +123,79 @@ func TestOpenMigratesLegacyUsageSchema(t *testing.T) {
 	}
 }
 
+// TestOpenMigratesLegacyRecordsSchemaOriginColumn guards the additive
+// `records.origin` migration (#0107): an index file created before that column
+// (the live /data volume, pre this change) must gain it in place on Open, and
+// the ALREADY-ACCUMULATED usage table — never dropped, unlike records/fts which
+// Rebuild wipes and reloads — must survive both the migration and a subsequent
+// Rebuild. Push retrieval must also work post-migration: the eligibility
+// predicate reads r.origin, so a stale/missing column must not resurface as a
+// runtime SQL error the first time push queries it.
+func TestOpenMigratesLegacyRecordsSchemaOriginColumn(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy-records.db")
+	raw, err := sql.Open("sqlite", "file:"+dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE records (
+		id      TEXT PRIMARY KEY,
+		kind    TEXT NOT NULL,
+		status  TEXT NOT NULL,
+		title   TEXT NOT NULL,
+		summary TEXT NOT NULL,
+		path    TEXT NOT NULL,
+		raw     TEXT NOT NULL
+	)`); err != nil {
+		t.Fatalf("create legacy records table: %v", err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE usage (
+		record_id         TEXT PRIMARY KEY,
+		retrieved         INTEGER NOT NULL DEFAULT 0,
+		pushed            INTEGER NOT NULL DEFAULT 0,
+		confirmed_helpful INTEGER NOT NULL DEFAULT 0,
+		last_hit          TEXT
+	)`); err != nil {
+		t.Fatalf("create usage table: %v", err)
+	}
+	if _, err := raw.Exec(`INSERT INTO usage (record_id, retrieved) VALUES ('exp-0100', 5)`); err != nil {
+		t.Fatal(err)
+	}
+	_ = raw.Close()
+
+	ix, err := index.Open(dbPath) // must ADD COLUMN origin, preserving usage
+	if err != nil {
+		t.Fatalf("Open legacy db: %v", err)
+	}
+	t.Cleanup(func() { _ = ix.Close() })
+	ctx := context.Background()
+
+	recs := []*record.Record{mkRecord(t, 100, "Wobblegax retry storm during shutdown",
+		"the wobblegax subsystem wobblegax wobblegax retries in a storm during shutdown", nil, "Go", "wob")}
+	for i := 0; i < 10; i++ {
+		recs = append(recs, mkRecord(t, 110+i, "unrelated filler", "cache eviction retry budget notes", nil, "Go", "wob"))
+	}
+	if err := ix.Rebuild(ctx, recs, "github.com/dotts-h/twiceshy"); err != nil {
+		t.Fatalf("Rebuild after migration: %v", err)
+	}
+
+	u, err := ix.Usage(ctx, "exp-0100")
+	if err != nil {
+		t.Fatalf("Usage: %v", err)
+	}
+	if u.Retrieved != 5 {
+		t.Fatalf("retrieved = %d, want 5 (usage must survive the origin-column migration + Rebuild)", u.Retrieved)
+	}
+
+	// Push retrieval must work: the origin column is now populated and queryable.
+	dec, err := ix.RetrievePushTraced(ctx, index.Query{Text: "wobblegax", ErrorTrigger: true})
+	if err != nil {
+		t.Fatalf("RetrievePushTraced after migration: %v", err)
+	}
+	if len(dec.Served) != 1 || dec.Served[0].ID != "exp-0100" {
+		t.Fatalf("post-migration push = %+v, want exp-0100 served", dec.Served)
+	}
+}
+
 func TestRecordHitsIncrementsAndSetsLastHit(t *testing.T) {
 	ix := usageIndex(t, usageRec("exp-0100"))
 	ctx := context.Background()

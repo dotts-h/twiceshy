@@ -80,6 +80,19 @@ const (
 	pushMaxDF = 3
 )
 
+// pushEligibleKinds are the kinds an agent can act on mid-prompt (#0107): a trap
+// to avoid or a fix to apply. convention/dead-end/workflow records are narrative
+// or self-audit material, never decision-relevant at push time — they stay
+// reachable via pull (Retrieve/Search), never via push.
+var pushEligibleKinds = []string{"trap", "fix"}
+
+// importerOrigins are provenance.source.author values (lowercased) naming a bulk
+// import pipeline rather than an agent/human (#0107). ~940/990 validated records
+// are importer-origin OSV/deprecation advisories — topical-but-generic self-audit
+// material that is never mid-prompt material, so a token living only there must
+// never open the push gate.
+var importerOrigins = []string{"twiceshy-importer"}
+
 // pushStopwords are common English words and common dev/web/ops/data vocabulary
 // that must never count as a discriminative token. The principle (validated by the
 // #0005 push-precision eval): a genuine error query is carried by RARE identifiers
@@ -192,6 +205,18 @@ type Query struct {
 	// IncludeQuarantined surfaces quarantined records, labeled by Status.
 	// Push-channel callers must never set this (ADR-0001 §6).
 	IncludeQuarantined bool
+	// ErrorTrigger is set by the /push edge when the client's trigger field is
+	// "error" — a verbatim error/log line the error-pull hook (#0087) already
+	// singled out, not a raw prompt. It relaxes the two-token corroboration rule
+	// (#0108) back to the single-token gate: the text itself is already
+	// high-precision, unlike an arbitrary prompt.
+	ErrorTrigger bool
+	// PushEligibleOnly restricts lexical/fingerprint matching to the push-eligible
+	// subset (#0107): validated records of an agent-actionable kind (trap/fix)
+	// whose provenance is not a bulk-import pipeline. Set only by the push
+	// channel's discriminative-subset retrieval; pull (Retrieve/RetrieveFused)
+	// never sets it.
+	PushEligibleOnly bool
 }
 
 // Hit is one search result. Score is positive, higher-is-better: the
@@ -227,7 +252,8 @@ CREATE TABLE IF NOT EXISTS records (
   title   TEXT NOT NULL,
   summary TEXT NOT NULL,
   path    TEXT NOT NULL,
-  raw     TEXT NOT NULL
+  raw     TEXT NOT NULL,
+  origin  TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS fingerprints (
   fp        TEXT NOT NULL,
@@ -266,8 +292,14 @@ CREATE TABLE IF NOT EXISTS usage (
 // flush to provenance periodically — so a live db must gain a new usage column
 // in place rather than be dropped. ADD COLUMN is the one safe SQLite migration;
 // the "duplicate column" error on an already-migrated db is expected and ignored.
+//
+// `records.origin` (#0107) is different: records IS dropped and reloaded by
+// Rebuild, so a fresh Rebuild alone would add the column for free — but Open
+// runs before the caller's first Rebuild, and a live deploy may read `records`
+// (e.g. via NextID) before that happens, so the column must exist immediately.
 var migrations = []string{
 	`ALTER TABLE usage ADD COLUMN pushed INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE records ADD COLUMN origin TEXT NOT NULL DEFAULT ''`,
 }
 
 // maxOpenConns bounds the SQLite connection pool to the documented
@@ -332,9 +364,10 @@ func insertRecord(ctx context.Context, tx *sql.Tx, r *record.Record, repo string
 		summary = r.Symptom.Summary
 		sigs = r.Symptom.ErrorSignatures
 	}
+	origin := strings.ToLower(r.Provenance.Source.Author)
 	if _, err := tx.ExecContext(ctx,
-		"INSERT INTO records (id, kind, status, title, summary, path, raw) VALUES (?,?,?,?,?,?,?)",
-		r.ID, r.Kind, r.Status, r.Title, summary, r.Path, string(r.Raw)); err != nil {
+		"INSERT INTO records (id, kind, status, title, summary, path, raw, origin) VALUES (?,?,?,?,?,?,?,?)",
+		r.ID, r.Kind, r.Status, r.Title, summary, r.Path, string(r.Raw), origin); err != nil {
 		return err
 	}
 
@@ -432,7 +465,9 @@ func (ix *Index) RetrievePushTraced(ctx context.Context, q Query) (PushDecision,
 		return PushDecision{FingerprintBypass: true, Served: fp}, nil
 	}
 
-	// 2) discriminative-token precondition.
+	// 2) discriminative-token precondition, computed over the ELIGIBLE subset
+	// (#0107): a token whose df is nonzero only among importer-origin advisories
+	// or a non-trap/fix kind must never open the gate.
 	disc, err := ix.discriminativeTokens(ctx, q.Text)
 	if err != nil {
 		return PushDecision{}, err
@@ -441,20 +476,89 @@ func (ix *Index) RetrievePushTraced(ctx context.Context, q Query) (PushDecision,
 		return PushDecision{}, nil // generic / off-topic -> inject nothing ("empty is an answer")
 	}
 
-	// 3) retrieve + floor on the discriminative subset only.
+	// 2b) corroboration precondition (#0108): a prompt-triggered query needs TWO
+	// independent discriminative tokens. A single rare token is exactly the
+	// false-positive class the specimen prompt reproduced ("llm" alone served an
+	// unrelated card). An error-triggered query — a verbatim stack/log line the
+	// error-pull hook already singled out — keeps the single-token gate: the text
+	// itself is already high-precision. The gate decision still records disc for
+	// telemetry (#0067) even though nothing is served.
+	if !q.ErrorTrigger && len(disc) < 2 {
+		return PushDecision{Discriminative: disc}, nil
+	}
+
+	// 3) retrieve + floor on the discriminative subset, restricted to eligible
+	// records only (#0107) — an OR-joined disc token can still lexically match an
+	// ineligible record; the eligibility predicate must apply here too, not just
+	// at the df stage.
 	pq := q
 	pq.Text = strings.Join(disc, " ")
 	pq.Floor = pushFloor
+	pq.PushEligibleOnly = true
 	served, err := ix.Retrieve(ctx, pq)
-	return PushDecision{Discriminative: disc, Served: served}, err
+	if err != nil {
+		return PushDecision{}, err
+	}
+
+	// 4) per-record corroboration (#0108), prompt trigger only: drop any served
+	// hit that does not lexically carry >=2 DISTINCT discriminative tokens. Two
+	// tokens that each live in a DIFFERENT record (the "application"+"llm"
+	// specimen) pass the OR-joined search above; corroboration is what actually
+	// rejects both — neither record carries both tokens.
+	if !q.ErrorTrigger {
+		served, err = ix.corroborated(ctx, served, disc)
+		if err != nil {
+			return PushDecision{}, err
+		}
+	}
+
+	return PushDecision{Discriminative: disc, Served: served}, nil
 }
 
 // discriminativeTokens returns the query's content tokens (lowercased, alnum,
-// not a stopword, not a corpus ecosystem name) whose validated document frequency
-// is in [1, pushMaxDF]. It reuses the ftsQuery tokenization and quoting so df
-// counts agree with what the lexical search later matches (exp-0001).
+// not a stopword, not a corpus ecosystem name) whose ELIGIBLE document frequency
+// (#0107: validated, kind trap/fix, non-importer origin) is in [1, pushMaxDF]. It
+// reuses the ftsQuery tokenization and quoting so df counts agree with what the
+// lexical search later matches (exp-0001).
 func (ix *Index) discriminativeTokens(ctx context.Context, text string) ([]string, error) {
-	return ix.discriminativeTokensVia(ctx, text, ix.validatedDF)
+	return ix.discriminativeTokensVia(ctx, text, ix.eligibleDF)
+}
+
+// corroborated is the per-hit specificity check for prompt-triggered push
+// (#0108): a served hit must lexically MATCH at least two of the query's
+// DISTINCT discriminative tokens. Cheap: at most MaxK hits x maxQueryTokens
+// tokens, one indexed MATCH+id lookup each (sub-ms).
+func (ix *Index) corroborated(ctx context.Context, hits []Hit, disc []string) ([]Hit, error) {
+	var out []Hit
+	for _, h := range hits {
+		n, err := ix.tokenMatchCount(ctx, h.ID, disc)
+		if err != nil {
+			return nil, err
+		}
+		if n >= 2 {
+			out = append(out, h)
+		}
+	}
+	return out, nil
+}
+
+// tokenMatchCount counts how many of tokens lexically MATCH record id, via the
+// same FTS5 phrase quoting the df counts use (ftsPhrase, exp-0001).
+func (ix *Index) tokenMatchCount(ctx context.Context, id string, tokens []string) (int, error) {
+	n := 0
+	for _, tok := range tokens {
+		var count int
+		err := ix.db.QueryRowContext(ctx,
+			`SELECT count(*) FROM records_fts WHERE records_fts MATCH ? AND id = ?`,
+			ftsPhrase(tok), id).Scan(&count)
+		if err != nil {
+			return 0, fmt.Errorf("corroboration match: %w", err)
+		}
+		if count > 0 {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // discriminativeTokensVia is discriminativeTokens with the per-token validated-DF
@@ -507,6 +611,46 @@ func (ix *Index) validatedDF(ctx context.Context, tok string) (int, error) {
 		return 0, fmt.Errorf("validated df: %w", err)
 	}
 	return n, nil
+}
+
+// eligibleDF is validatedDF further restricted to the push-eligible subset
+// (#0107): kind IN pushEligibleKinds AND origin NOT IN importerOrigins. The
+// push gate's discriminative-token precondition is computed over THIS df, not
+// validatedDF, so a token that lives only in importer-origin advisories or a
+// convention/dead-end/workflow record never opens the gate — the query still
+// finds those records via pull (Retrieve), just never via push.
+func (ix *Index) eligibleDF(ctx context.Context, tok string) (int, error) {
+	var sb strings.Builder
+	sb.WriteString(`SELECT count(*) FROM records_fts m JOIN records r ON r.id = m.id
+		 WHERE records_fts MATCH ? AND r.status = 'validated'`)
+	args := appendEligibleFilter(&sb, []any{ftsPhrase(tok)})
+	var n int
+	if err := ix.db.QueryRowContext(ctx, sb.String(), args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("eligible df: %w", err)
+	}
+	return n, nil
+}
+
+// appendEligibleFilter adds the push-eligibility predicate (kind + origin) to a
+// WHERE clause already scoped to validated records. Shared by eligibleDF and the
+// Query.PushEligibleOnly path in fingerprintHits/lexicalHits so both agree on
+// exactly what "eligible" means (origin is stored lowercased at index time, see
+// insertRecord).
+func appendEligibleFilter(sb *strings.Builder, args []any) []any {
+	sb.WriteString(" AND r.kind IN (" + placeholders(len(pushEligibleKinds)) + ")")
+	for _, k := range pushEligibleKinds {
+		args = append(args, k)
+	}
+	sb.WriteString(" AND r.origin NOT IN (" + placeholders(len(importerOrigins)) + ")")
+	for _, o := range importerOrigins {
+		args = append(args, o)
+	}
+	return args
+}
+
+// placeholders renders n "?" SQL parameter placeholders, comma-joined.
+func placeholders(n int) string {
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
 
 // ecosystemNames is the lowercased set of ecosystem labels on validated records.
@@ -579,6 +723,9 @@ func (ix *Index) fingerprintHits(ctx context.Context, q Query, k int) ([]Hit, er
 		WHERE f.fp IN (?` + strings.Repeat(",?", len(fps)-1) + `)`)
 	args = appendStatusFilter(&sb, args, q)
 	args = appendStackFilter(&sb, args, q)
+	if q.PushEligibleOnly {
+		args = appendEligibleFilter(&sb, args)
+	}
 	sb.WriteString(" ORDER BY r.id LIMIT ?")
 	args = append(args, k)
 
@@ -620,6 +767,9 @@ func (ix *Index) lexicalHits(ctx context.Context, q Query, k int) ([]Hit, error)
 	}
 	args = appendStatusFilter(&sb, args, q)
 	args = appendStackFilter(&sb, args, q)
+	if q.PushEligibleOnly {
+		args = appendEligibleFilter(&sb, args)
+	}
 	sb.WriteString(" ORDER BY m.s ASC, r.id LIMIT ?")
 	args = append(args, k)
 
