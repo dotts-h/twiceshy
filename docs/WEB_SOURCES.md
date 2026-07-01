@@ -37,6 +37,13 @@ Map lint name and warning template to `error_signatures`, “why” text to `roo
 Compile examples with `cargo clippy` to produce guards and verify the warning disappears after correction.  
 All imports are born `quarantined`; the panel promotes them later.
 
+### 4. Node.js SEMVER-MAJOR changelog
+
+Fetch `nodejs/node`'s per-major-line changelog files (`doc/changelogs/CHANGELOG_V<N>.md`) for the current + active-LTS majors — MIT, Node-authored changelog text only (row 14; the GitHub-issues no-go does not apply, this is repo-authored documentation, not issue prose).  
+Parse each release section (`## <date>, Version <version>...`) for commit lines carrying the literal `(SEMVER-MAJOR)` marker; map subsystem + subject to `error_signatures`/`title`, the linked PR to `fix`, and the changelog file (+ version anchor) to `source_url`.  
+Only the factual subsystem/subject naming the change is used; no changelog prose beyond that short factual line is reproduced.  
+All imports are born `quarantined`; the panel promotes them later — implemented as `node-breaking` (#0115).
+
 ## Explicit no-gos
 
 - Do not build a generic GitHub issue/comment text importer. API accessibility is not a redistribution license.
