@@ -93,6 +93,57 @@ func TestCorpusMergeCheckPassesForFreshIDs(t *testing.T) {
 	}
 }
 
+// A record introduced (or already on base) that fails to parse must surface a
+// wrapped, path-named error — not a panic or a silently skipped check.
+func TestCorpusMergeCheckRejectsUnparsableIntroducedRecord(t *testing.T) {
+	repo := initRepo(t)
+	writeRecord(t, repo, "experience/2026/2758-base-record.md", "exp-2758")
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "base")
+	base := rev(t, repo, "HEAD")
+
+	writeFile(t, repo, "experience/2026/2759-broken.md", "not a valid record at all\n")
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "head")
+	head := rev(t, repo, "HEAD")
+
+	err := mergecheck.CorpusMergeCheck(context.Background(), mergecheck.MergeParams{
+		Corpus: repo,
+		Base:   base,
+		Head:   head,
+	})
+	if err == nil {
+		t.Fatal("an unparsable introduced record must fail the check")
+	}
+	if !strings.Contains(err.Error(), "2759-broken.md") {
+		t.Fatalf("error must name the unparsable path, got %v", err)
+	}
+}
+
+// Every required MergeParams field is checked independently — a caller that
+// forgets to wire one up (e.g. leaves Base empty) must get a clear error, not a
+// git invocation against an empty/implicit ref.
+func TestMergeParams_RequiresAllFields(t *testing.T) {
+	full := mergecheck.MergeParams{Corpus: "/tmp/x", Base: "main", Head: "HEAD"}
+	cases := []struct {
+		name   string
+		params mergecheck.MergeParams
+		want   string
+	}{
+		{"missing corpus", mergecheck.MergeParams{Base: full.Base, Head: full.Head}, "corpus is required"},
+		{"missing base", mergecheck.MergeParams{Corpus: full.Corpus, Head: full.Head}, "base ref is required"},
+		{"missing head", mergecheck.MergeParams{Corpus: full.Corpus, Base: full.Base}, "head ref is required"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := mergecheck.CorpusPRPaths(context.Background(), tc.params)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("CorpusPRPaths(%+v) = %v, want it to mention %q", tc.params, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestCorpusPRPathsRejectsFixedRunsFiles(t *testing.T) {
 	repo := initRepo(t)
 	writeRecord(t, repo, "experience/2026/0001-base.md", "exp-0001")

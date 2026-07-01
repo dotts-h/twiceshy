@@ -22,8 +22,10 @@ func TestExitCode_AnomalyHaltIsDistinct(t *testing.T) {
 		{"other", errors.New("broker exploded"), 1},
 	}
 	for _, c := range cases {
-		if got := exitCode(c.err); got != c.want {
-			t.Errorf("exitCode(%s) = %d, want %d", c.name, got, c.want)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			if got := exitCode(c.err); got != c.want {
+				t.Errorf("exitCode = %d, want %d", got, c.want)
+			}
+		})
 	}
 }

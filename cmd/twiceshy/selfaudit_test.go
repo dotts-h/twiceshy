@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,8 +44,8 @@ func TestSelfAudit(t *testing.T) {
 	t.Run("a missing go.mod is a clear error", func(t *testing.T) {
 		var buf bytes.Buffer
 		err := runSelfAudit([]string{"-corpus", corpus, "-gomod", filepath.Join(t.TempDir(), "nope.mod")}, &buf)
-		if err == nil || !strings.Contains(err.Error(), "go.mod") {
-			t.Fatalf("missing go.mod should error clearly; got %v", err)
+		if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("missing go.mod should surface os.ErrNotExist; got %v", err)
 		}
 	})
 }

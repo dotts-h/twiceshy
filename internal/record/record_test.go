@@ -3,6 +3,7 @@
 package record_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -524,19 +525,16 @@ func TestSchemaVersionContractRejected(t *testing.T) {
 
 	src := render(t, front)
 
-	// Single-record parse must fail and mention schema_version.
+	// Single-record parse must fail with the schema-version sentinel.
 	_, err := record.Parse(fmPath, src)
-	if err == nil {
-		t.Fatal("Parse: want schema_version error, got nil")
-	}
-	if !strings.Contains(err.Error(), "schema_version") {
-		t.Errorf("Parse error %q does not mention schema_version", err)
+	if !errors.Is(err, record.ErrUnsupportedSchemaVersion) {
+		t.Fatalf("Parse: want ErrUnsupportedSchemaVersion, got %v", err)
 	}
 
-	// LoadCorpus must also reject it.
+	// LoadCorpus must also reject it, with the same sentinel.
 	root := writeCorpus(t, map[string][]byte{fmPath: src})
-	if _, err := record.LoadCorpus(root); err == nil || !strings.Contains(err.Error(), "schema_version") {
-		t.Errorf("LoadCorpus: want schema_version error, got %v", err)
+	if _, err := record.LoadCorpus(root); !errors.Is(err, record.ErrUnsupportedSchemaVersion) {
+		t.Errorf("LoadCorpus: want ErrUnsupportedSchemaVersion, got %v", err)
 	}
 }
 

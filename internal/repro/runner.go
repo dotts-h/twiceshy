@@ -33,8 +33,10 @@ func (w *capWriter) Write(p []byte) (int, error) {
 		}
 		w.buf.Write(p[:take])
 		w.remaining -= take
-	}
-	if len(p) > 0 && w.remaining == 0 {
+		if take < len(p) {
+			w.truncated = true
+		}
+	} else if len(p) > 0 {
 		w.truncated = true
 	}
 	return len(p), nil // always report full consumption so the child never blocks

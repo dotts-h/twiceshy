@@ -44,14 +44,20 @@ func TestClassify(t *testing.T) {
 		{"proprietary", false, false},                        //
 	}
 	for _, tt := range tests {
-		e := pack.Classify(tt.license)
-		if e.Commercial != tt.commercial || e.NeedsAttribution != tt.attribution {
-			t.Errorf("Classify(%q) = {commercial:%v attribution:%v}, want {%v %v} (reason: %s)",
-				tt.license, e.Commercial, e.NeedsAttribution, tt.commercial, tt.attribution, e.Reason)
+		name := tt.license
+		if name == "" {
+			name = "empty"
 		}
-		if e.Reason == "" {
-			t.Errorf("Classify(%q): empty reason", tt.license)
-		}
+		t.Run(name, func(t *testing.T) {
+			e := pack.Classify(tt.license)
+			if e.Commercial != tt.commercial || e.NeedsAttribution != tt.attribution {
+				t.Errorf("Classify(%q) = {commercial:%v attribution:%v}, want {%v %v} (reason: %s)",
+					tt.license, e.Commercial, e.NeedsAttribution, tt.commercial, tt.attribution, e.Reason)
+			}
+			if e.Reason == "" {
+				t.Errorf("Classify(%q): empty reason", tt.license)
+			}
+		})
 	}
 }
 

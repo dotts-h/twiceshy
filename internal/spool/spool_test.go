@@ -3,6 +3,9 @@
 package spool_test
 
 import (
+	"encoding/json"
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -86,5 +89,30 @@ func TestEnqueue_SanitizesPrefixForFilesystemSafety(t *testing.T) {
 	}
 	if got, err := spool.Read(paths[0]); err != nil || got != r {
 		t.Fatalf("round-trip after sanitize: got %+v err %v want %+v", got, err, r)
+	}
+}
+
+// A corrupt queue entry must surface a decode error, not a silently zeroed
+// Report — the intake drivers rely on this to skip-and-log rather than
+// misprocess a malformed file (#0042).
+func TestRead_MalformedJSONErrors(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	_, err := spool.Read(path)
+	var syn *json.SyntaxError
+	if !errors.As(err, &syn) {
+		t.Fatalf("Read of malformed JSON: got %v, want *json.SyntaxError", err)
+	}
+}
+
+// A missing queue entry (already drained, or a bad path) surfaces the
+// filesystem error rather than a zero-value Report.
+func TestRead_MissingFileErrors(t *testing.T) {
+	_, err := spool.Read(filepath.Join(t.TempDir(), "nope.json"))
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Read of a missing file: got %v, want os.ErrNotExist", err)
 	}
 }
