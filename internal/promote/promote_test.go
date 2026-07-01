@@ -622,105 +622,66 @@ func TestPromote_NonAdvisory_UnchangedProofPath(t *testing.T) {
 // product code, exercising each promotion path's guarded revert.
 func badClock() promote.Option { return promote.WithClock(func() string { return "not-a-date" }) }
 
-// The proof path mutates the record to validated, then validates; if the promoted
-// record is invalid it MUST revert every mutated field and return a hard error so
-// the caller never persists a half-promoted record (promote.go:242-245). A regression
-// that dropped the revert (leaving status=validated with a bad validated_at) or
-// returned Promoted:true on an invalid record would otherwise pass the whole suite.
+// Every promotion path (proof, advisory panel, prose panel) shares the same
+// guarded revert: if the post-mutation record fails validation, Promote must
+// return a hard error, report Promoted:false, and revert every field it
+// mutated — never persist a half-promoted record (promote.go:242-245, 281-284,
+// 322-325). A regression that dropped the revert (leaving status=validated with
+// a bad validated_at) or returned Promoted:true on an invalid record would
+// otherwise pass the whole suite.
 func TestPromote_InvalidPromotedRecord_HardErrorAndReverts(t *testing.T) {
-	j := &captureJudge{verdict: judge.ApproveVerdict("gemini-2.5-pro")}
-	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, j, badClock())
-	rec := provableRecord()
-	origStatus := rec.Status
-	origValidatedAt := rec.Provenance.ValidatedAt
-	origPromotion := rec.Provenance.Promotion
+	cases := []struct {
+		name  string
+		build func(t *testing.T) (*promote.Promoter, *record.Record)
+	}{
+		{"proof", func(t *testing.T) (*promote.Promoter, *record.Record) {
+			j := &captureJudge{verdict: judge.ApproveVerdict("gemini-2.5-pro")}
+			return newPromoter(t, &stubAttestor{att: holdingAtt()}, j, badClock()), provableRecord()
+		}},
+		{"advisory", func(t *testing.T) (*promote.Promoter, *record.Record) {
+			panel, err := judge.NewPanel(
+				judge.PanelMember{Model: "gpt-oss:20b", Judge: &judge.StubJudge{Verdict: judge.ApproveVerdict("gpt-oss:20b")}},
+				judge.PanelMember{Model: "gemini-2.5-pro", Judge: &judge.StubJudge{Verdict: judge.ApproveVerdict("gemini-2.5-pro")}},
+			)
+			if err != nil {
+				t.Fatalf("NewPanel: %v", err)
+			}
+			return newPromoter(t, &stubAttestor{att: holdingAtt()}, &judge.StubJudge{},
+				promote.WithAdvisoryPanel(panel), badClock()), advisoryRecord()
+		}},
+		{"prose", func(t *testing.T) (*promote.Promoter, *record.Record) {
+			panel := prosePanel(t, judge.ApproveVerdict("gpt-oss:20b"), judge.ApproveVerdict("agy-pro"))
+			return newPromoter(t, &stubAttestor{att: holdingAtt()}, &judge.StubJudge{},
+				promote.WithProsePanel(panel), badClock()), proseRecord()
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, rec := tc.build(t)
+			origStatus := rec.Status
+			origValidatedAt := rec.Provenance.ValidatedAt
+			origPromotion := rec.Provenance.Promotion
 
-	out, err := p.Promote(context.Background(), rec)
-	if err == nil {
-		t.Fatal("an invalid promoted record must be a hard error, not a silent skip")
-	}
-	if !strings.Contains(err.Error(), "promoted record is invalid (not persisted)") {
-		t.Fatalf("error must explain the not-persisted revert, got %q", err.Error())
-	}
-	if out.Promoted {
-		t.Fatal("an invalid promoted record must not report Promoted")
-	}
-	if rec.Status != origStatus {
-		t.Fatalf("status not reverted: %q, want %q", rec.Status, origStatus)
-	}
-	if rec.Provenance.ValidatedAt != origValidatedAt {
-		t.Fatalf("validated_at not reverted: %v, want %v", rec.Provenance.ValidatedAt, origValidatedAt)
-	}
-	if rec.Provenance.Promotion != origPromotion {
-		t.Fatalf("promotion block not reverted: %+v, want %+v", rec.Provenance.Promotion, origPromotion)
-	}
-}
-
-// The advisory panel path has the same guarded revert (promote.go:281-284).
-func TestPromote_AdvisoryInvalidPromotedRecord_HardErrorAndReverts(t *testing.T) {
-	panel, err := judge.NewPanel(
-		judge.PanelMember{Model: "gpt-oss:20b", Judge: &judge.StubJudge{Verdict: judge.ApproveVerdict("gpt-oss:20b")}},
-		judge.PanelMember{Model: "gemini-2.5-pro", Judge: &judge.StubJudge{Verdict: judge.ApproveVerdict("gemini-2.5-pro")}},
-	)
-	if err != nil {
-		t.Fatalf("NewPanel: %v", err)
-	}
-	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, &judge.StubJudge{},
-		promote.WithAdvisoryPanel(panel), badClock())
-	rec := advisoryRecord()
-	origStatus := rec.Status
-	origValidatedAt := rec.Provenance.ValidatedAt
-	origPromotion := rec.Provenance.Promotion
-
-	out, err := p.Promote(context.Background(), rec)
-	if err == nil {
-		t.Fatal("an invalid promoted advisory must be a hard error, not a silent skip")
-	}
-	if !strings.Contains(err.Error(), "promoted record is invalid (not persisted)") {
-		t.Fatalf("error must explain the not-persisted revert, got %q", err.Error())
-	}
-	if out.Promoted {
-		t.Fatal("an invalid promoted advisory must not report Promoted")
-	}
-	if rec.Status != origStatus {
-		t.Fatalf("status not reverted: %q, want %q", rec.Status, origStatus)
-	}
-	if rec.Provenance.ValidatedAt != origValidatedAt {
-		t.Fatalf("validated_at not reverted: %v, want %v", rec.Provenance.ValidatedAt, origValidatedAt)
-	}
-	if rec.Provenance.Promotion != origPromotion {
-		t.Fatalf("promotion block not reverted: %+v, want %+v", rec.Provenance.Promotion, origPromotion)
-	}
-}
-
-// The prose panel path has the same guarded revert (promote.go:322-325).
-func TestPromote_ProseInvalidPromotedRecord_HardErrorAndReverts(t *testing.T) {
-	panel := prosePanel(t, judge.ApproveVerdict("gpt-oss:20b"), judge.ApproveVerdict("agy-pro"))
-	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, &judge.StubJudge{},
-		promote.WithProsePanel(panel), badClock())
-	rec := proseRecord()
-	origStatus := rec.Status
-	origValidatedAt := rec.Provenance.ValidatedAt
-	origPromotion := rec.Provenance.Promotion
-
-	out, err := p.Promote(context.Background(), rec)
-	if err == nil {
-		t.Fatal("an invalid promoted prose record must be a hard error, not a silent skip")
-	}
-	if !strings.Contains(err.Error(), "promoted record is invalid (not persisted)") {
-		t.Fatalf("error must explain the not-persisted revert, got %q", err.Error())
-	}
-	if out.Promoted {
-		t.Fatal("an invalid promoted prose record must not report Promoted")
-	}
-	if rec.Status != origStatus {
-		t.Fatalf("status not reverted: %q, want %q", rec.Status, origStatus)
-	}
-	if rec.Provenance.ValidatedAt != origValidatedAt {
-		t.Fatalf("validated_at not reverted: %v, want %v", rec.Provenance.ValidatedAt, origValidatedAt)
-	}
-	if rec.Provenance.Promotion != origPromotion {
-		t.Fatalf("promotion block not reverted: %+v, want %+v", rec.Provenance.Promotion, origPromotion)
+			out, err := p.Promote(context.Background(), rec)
+			if err == nil {
+				t.Fatal("an invalid promoted record must be a hard error, not a silent skip")
+			}
+			if !strings.Contains(err.Error(), "promoted record is invalid (not persisted)") {
+				t.Fatalf("error must explain the not-persisted revert, got %q", err.Error())
+			}
+			if out.Promoted {
+				t.Fatal("an invalid promoted record must not report Promoted")
+			}
+			if rec.Status != origStatus {
+				t.Fatalf("status not reverted: %q, want %q", rec.Status, origStatus)
+			}
+			if rec.Provenance.ValidatedAt != origValidatedAt {
+				t.Fatalf("validated_at not reverted: %v, want %v", rec.Provenance.ValidatedAt, origValidatedAt)
+			}
+			if rec.Provenance.Promotion != origPromotion {
+				t.Fatalf("promotion block not reverted: %+v, want %+v", rec.Provenance.Promotion, origPromotion)
+			}
+		})
 	}
 }
 
