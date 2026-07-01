@@ -42,10 +42,12 @@ func TestScan_DetectsSecrets(t *testing.T) {
 		{beginGeneric, "private-key"},
 	}
 	for _, c := range cases {
-		fs := screen.Scan(c.text)
-		if !hasRule(fs, "secret", c.rule) {
-			t.Errorf("Scan(%q) missed secret:%s; got %+v", c.text, c.rule, fs)
-		}
+		t.Run(c.rule, func(t *testing.T) {
+			fs := screen.Scan(c.text)
+			if !hasRule(fs, "secret", c.rule) {
+				t.Errorf("Scan(%q) missed secret:%s; got %+v", c.text, c.rule, fs)
+			}
+		})
 	}
 }
 
@@ -76,10 +78,12 @@ func TestScan_DetectsHarmfulCode(t *testing.T) {
 		{":(){ :|:& };:", "fork-bomb"},
 	}
 	for _, c := range cases {
-		fs := screen.Scan(c.text)
-		if !hasRule(fs, "harmful-code", c.rule) {
-			t.Errorf("Scan(%q) missed harmful-code:%s; got %+v", c.text, c.rule, fs)
-		}
+		t.Run(c.rule, func(t *testing.T) {
+			fs := screen.Scan(c.text)
+			if !hasRule(fs, "harmful-code", c.rule) {
+				t.Errorf("Scan(%q) missed harmful-code:%s; got %+v", c.text, c.rule, fs)
+			}
+		})
 	}
 }
 
