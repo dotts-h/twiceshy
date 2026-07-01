@@ -36,3 +36,4 @@ accepted ADR's decision — supersede it (`Status: superseded-by-NNNN`).
 | [0026](ADR-0026-runtime-enforcement-of-experience-adoption.md) | Runtime enforcement of experience adoption across a heterogeneous agent fleet — hybrid per-runner hooks + a gateway floor; usefulness is observed, not self-reported | Accepted |
 | [0027](ADR-0027-runner-local-operational-run-state.md) | Runner-local operational run-state (resume journals + hold-cooldown ledger) is not corpus data — untrack it so validate PRs stop colliding on fixed paths | Accepted |
 | [0028](ADR-0028-push-eligibility-and-corroborating-specificity.md) | Push eligibility (kind + non-importer origin) and per-record two-token corroboration restore push precision — refines ADR-0015's df gate | Accepted |
+| [0029](ADR-0029-model-hard-trap-prospector.md) | Model-hard trap prospector — measure per-record value by running the base model without the card | Accepted |
