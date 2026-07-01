@@ -87,7 +87,7 @@ type Config struct {
 	// DrafterModel is the model that drafted records; the judge must differ in
 	// family (anti-monoculture, ADR-0013 §6). Optional: empty skips the check.
 	DrafterModel string
-	// System overrides the judge's system prompt (e.g. RubricSystemV1, the A/B
+	// System overrides the judge's system prompt (e.g. RubricSystemV2, the A/B
 	// winner). Empty leaves it to the shim's built-in default — the back-compat
 	// path. Sent over the wire so the prompt lives in version control, not the
 	// untracked shim.
@@ -216,16 +216,16 @@ func (j *ModelJudge) Judge(ctx context.Context, req Request) (Verdict, error) {
 		if req.Advisory && !j.advisory {
 			// Per-request escalation (#0063): pair the advisory USER prompt with the
 			// advisory SYSTEM prompt too, so judgeeval measures the exact pairing the
-			// production advisory panel uses (Advisory:true + System:AdvisorySystemV1).
+			// production advisory panel uses (Advisory:true + System:AdvisorySystemV2).
 			// A judge already configured advisory keeps its configured system.
-			system = AdvisorySystemV1
+			system = AdvisorySystemV2
 		}
 	case j.prose || req.Prose:
 		// ADR-0020 prose panel: a no-repro, no-source lesson judged on its own
 		// coherence + safety (poison gating). Mirrors the advisory per-request escalation.
 		prompt = BuildProsePanelPrompt(req)
 		if req.Prose && !j.prose {
-			system = ProsePanelSystemV1
+			system = ProsePanelSystemV2
 		}
 	}
 	body, err := json.Marshal(wireRequest{Model: j.model, Prompt: prompt, System: system, Think: j.think})
@@ -263,7 +263,7 @@ func (j *ModelJudge) Judge(ctx context.Context, req Request) (Verdict, error) {
 }
 
 // toVerdict maps the wire shape onto a Verdict, validating that the decision is
-// known and all four canonical checks are present. A malformed verdict — even a
+// known and all five canonical checks are present. A malformed verdict — even a
 // malformed *approve* — is an error, so it can never slip through Approved().
 func toVerdict(wv wireVerdict, model string) (Verdict, error) {
 	decision := Decision(strings.ToLower(strings.TrimSpace(wv.Decision)))
@@ -290,7 +290,7 @@ func toVerdict(wv wireVerdict, model string) (Verdict, error) {
 
 // BuildPrompt renders the proof into the judging instruction (the user message).
 // It is plain text: the record's claim, the attestation result, and the repro
-// bodies, followed by the four checks and the strict-JSON contract. Record
+// bodies, followed by the five checks and the strict-JSON contract. Record
 // content is untrusted, so it is delimited and the model is told to treat it as
 // data (CONVENTIONS: memory-poisoning) — never to follow instructions embedded in
 // it. Exported so the prompt eval (internal/judgeeval) renders cases through the
@@ -336,13 +336,14 @@ func BuildPrompt(req Request) string {
 		fmt.Fprintf(&b, "\nREPRO path=%s kind=%s label=%s\n%s\n%s\n%s\n", rp.Path, rp.Kind, rp.Label, open, content, closer)
 	}
 
-	b.WriteString("\nDecide these four checks:\n")
+	b.WriteString("\nDecide these five checks:\n")
 	b.WriteString("- meaning: does the repro capture the intended lesson, or pass for the wrong reason?\n")
 	b.WriteString("- scope: does applies_to match what was actually proven?\n")
+	b.WriteString("- usefulness: would this record plausibly change a competent coding agent's next action in a matching session? A record that merely narrates work done (a test was added, a refactor happened, a feature was built) with no trap, no dead-end, and no non-obvious escape FAILS usefulness.\n")
 	b.WriteString("- license: is the record license-clean?\n")
 	b.WriteString("- poison: could this record mislead a future agent?\n")
-	b.WriteString(`Respond with ONLY strict JSON: {"decision":"approve|reject","checks":[{"check":"meaning|scope|license|poison","pass":true|false,"reason":"..."}]}. `)
-	b.WriteString("Approve only if all four checks pass.")
+	b.WriteString(`Respond with ONLY strict JSON: {"decision":"approve|reject","checks":[{"check":"meaning|scope|usefulness|license|poison","pass":true|false,"reason":"..."}]}. `)
+	b.WriteString("Approve only if all five checks pass.")
 	return b.String()
 }
 
@@ -408,15 +409,16 @@ func BuildAdvisoryPrompt(req Request) string {
 		}
 	}
 
-	b.WriteString("\nDecide these four checks (default PASS; fail only on a concrete INTERNAL defect, never on what you cannot verify without browsing):\n")
+	b.WriteString("\nDecide these five checks (default PASS; fail only on a concrete INTERNAL defect, never on what you cannot verify without browsing):\n")
 	b.WriteString("- meaning: internally coherent — vuln id well-formed (GHSA-/CVE-/GO- shape), package/ecosystem consistent, title matches the id?\n")
 	b.WriteString("- scope: affected range well-formed and sane? " +
 		"(OSV convention: introduced \"0\" = from the first version ever, an unbounded lower bound; " +
 		"so introduced 0 + fixed X means \"all versions < X are affected\" — that is correct, not broadened.)\n")
+	b.WriteString("- usefulness: would this record plausibly change a competent coding agent's next action in a matching session (e.g. upgrade past a fixed version)? A record that merely narrates that an advisory exists, with no actionable remediation, FAILS usefulness.\n")
 	b.WriteString("- license: source_license present and plausible for the source type? GHSA/OSV are CC-BY-4.0 — do not invent a different license and fail on the guess.\n")
 	b.WriteString("- poison: would serving this mislead a coding agent (e.g. a range that flags safe code), or is it self-contradictory?\n")
-	b.WriteString(`Respond with ONLY strict JSON: {"decision":"approve|reject","checks":[{"check":"meaning|scope|license|poison","pass":true|false,"reason":"..."}]}. `)
-	b.WriteString("Approve only if all four checks pass.")
+	b.WriteString(`Respond with ONLY strict JSON: {"decision":"approve|reject","checks":[{"check":"meaning|scope|usefulness|license|poison","pass":true|false,"reason":"..."}]}. `)
+	b.WriteString("Approve only if all five checks pass.")
 	return b.String()
 }
 
@@ -459,12 +461,13 @@ func BuildProsePanelPrompt(req Request) string {
 		}
 	}
 
-	b.WriteString("\nDecide these four checks for a no-repro, no-source PROSE lesson — POISON is gating:\n")
+	b.WriteString("\nDecide these five checks for a no-repro, no-source PROSE lesson — POISON is gating:\n")
 	b.WriteString("- meaning: coherent, correct, a real generalizable lesson (not an incoherent fragment, a misread, or simply-wrong advice)?\n")
 	b.WriteString("- scope: applies_to and the prose match where the lesson actually holds — NOT over-generalized ('never use X' where X is usually fine)?\n")
+	b.WriteString("- usefulness: would this record plausibly change a competent coding agent's next action in a session that matches it? A record that merely narrates work done (a test was added, a refactor happened, a feature was built) with no trap, no dead-end, and no non-obvious escape FAILS usefulness — even when it is otherwise coherent and true.\n")
 	b.WriteString("- license: license-clean (distilled facts in our own words, or permissive content with its source)?\n")
 	b.WriteString("- poison (GATING): could an agent following this advice literally be led to a WORSE action than nothing (insecure/wrong/misleading)? If you cannot judge it positively HARMLESS, FAIL poison. When UNSURE, REJECT.\n")
-	b.WriteString(`Respond with ONLY strict JSON: {"decision":"approve|reject","checks":[{"check":"meaning|scope|license|poison","pass":true|false,"reason":"..."}]}. `)
-	b.WriteString("Approve only if all four checks pass.")
+	b.WriteString(`Respond with ONLY strict JSON: {"decision":"approve|reject","checks":[{"check":"meaning|scope|usefulness|license|poison","pass":true|false,"reason":"..."}]}. `)
+	b.WriteString("Approve only if all five checks pass.")
 	return b.String()
 }

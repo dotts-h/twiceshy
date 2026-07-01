@@ -4,10 +4,12 @@
 // what a green broker attestation cannot. A holding attestation proves a
 // record's repro ran fail-pre / pass-post — that the claim *behaves* as stated.
 // It cannot tell whether the proof captures the *intended, correctly-scoped*
-// lesson, whether the record is license-clean, or whether it could mislead a
-// future agent. A diverse frontier model — different family from the drafter,
+// lesson, whether the record is actually USEFUL to a future agent (#0110 —
+// content-shaped non-lessons that merely narrate work done can pass a green
+// proof too), whether the record is license-clean, or whether it could mislead
+// a future agent. A diverse frontier model — different family from the drafter,
 // never the cheap local LLM (standing rule) — is the secondary filter that
-// checks those four things ("a gate is a lead, not a verdict").
+// checks those five things ("a gate is a lead, not a verdict").
 //
 // The judge is an injectable seam (stubbed in tests, no network in CI), like the
 // embedder and endoflife seams. A judge that errors, times out, or returns a
@@ -33,7 +35,7 @@ const (
 	Reject Decision = "reject"
 )
 
-// CheckName identifies one of the four things the judge inspects that a green
+// CheckName identifies one of the five things the judge inspects that a green
 // attestation cannot (ADR-0013 §1).
 type CheckName string
 
@@ -43,6 +45,13 @@ const (
 	Meaning CheckName = "meaning"
 	// Scope: does applies_to match what was actually proven?
 	Scope CheckName = "scope"
+	// Usefulness (#0110): would this record plausibly change a competent coding
+	// agent's next action in a session that matches it? A record that only
+	// narrates work done — a test was added, a refactor happened — with no
+	// trap, no dead-end, and no non-obvious escape FAILS usefulness even when
+	// meaning/scope/license/poison all pass; a green proof cannot catch this,
+	// since it is about the record's VALUE, not its correctness.
+	Usefulness CheckName = "usefulness"
 	// License: is the record license-clean per ADR-0003?
 	License CheckName = "license"
 	// Poison: could this record mislead a future agent? (best-effort —
@@ -50,8 +59,9 @@ const (
 	Poison CheckName = "poison"
 )
 
-// Checks is the canonical, ordered set every complete verdict must cover.
-var Checks = []CheckName{Meaning, Scope, License, Poison}
+// Checks is the canonical, ordered set every complete verdict must cover. Order:
+// meaning/scope/usefulness judge the content, license/poison judge admissibility.
+var Checks = []CheckName{Meaning, Scope, Usefulness, License, Poison}
 
 // Check is one check's structured outcome.
 type Check struct {
@@ -69,7 +79,7 @@ type Verdict struct {
 	Model    string   `json:"model"`
 }
 
-// Approved reports a clean PASS: Decision is Approve AND every one of the four
+// Approved reports a clean PASS: Decision is Approve AND every one of the five
 // canonical checks is present and passing, AND no check (canonical or extra)
 // failed. Anything else — a Reject, a missing check, any failing check, the
 // zero Verdict — is NOT approved. The promotion path treats !Approved() (and

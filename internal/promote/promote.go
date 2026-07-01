@@ -334,7 +334,7 @@ func (p *Promoter) promoteAdvisory(ctx context.Context, rec *record.Record) (Out
 
 // promoteProse promotes a prose-class record (ADR-0020) via the cross-family panel —
 // no attestation, no cited source: the panel judges the advice on its own coherence +
-// safety (poison gating, ProsePanelSystemV1). Fail-safe in every direction, exactly like
+// safety (poison gating, ProsePanelSystemV2). Fail-safe in every direction, exactly like
 // the advisory path: a nil panel, any member error/timeout, or any dissent leaves the
 // record quarantined. The content-screen is already enforced by EligibleProse.
 func (p *Promoter) promoteProse(ctx context.Context, rec *record.Record) (Outcome, error) {

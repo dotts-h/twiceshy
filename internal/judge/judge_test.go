@@ -46,22 +46,24 @@ func sampleRequest() judge.Request {
 	}
 }
 
-// approveBody is a well-formed approving verdict the four checks all pass.
+// approveBody is a well-formed approving verdict the five checks all pass.
 func approveBody() string {
 	return `{"decision":"approve","checks":[
 		{"check":"meaning","pass":true,"reason":"repro exercises the deprecation"},
 		{"check":"scope","pass":true,"reason":"applies_to matches"},
+		{"check":"usefulness","pass":true,"reason":"a competent agent would act on this"},
 		{"check":"license","pass":true,"reason":"facts only"},
 		{"check":"poison","pass":true,"reason":"accurate, not misleading"}]}`
 }
 
 func TestVerdictApproved(t *testing.T) {
-	all := func(p1, p2, p3, p4 bool) []judge.Check {
+	all := func(p1, p2, p3, p4, p5 bool) []judge.Check {
 		return []judge.Check{
 			{Name: judge.Meaning, Pass: p1},
 			{Name: judge.Scope, Pass: p2},
-			{Name: judge.License, Pass: p3},
-			{Name: judge.Poison, Pass: p4},
+			{Name: judge.Usefulness, Pass: p3},
+			{Name: judge.License, Pass: p4},
+			{Name: judge.Poison, Pass: p5},
 		}
 	}
 	cases := []struct {
@@ -69,18 +71,28 @@ func TestVerdictApproved(t *testing.T) {
 		v    judge.Verdict
 		want bool
 	}{
-		{"approve all four pass", judge.Verdict{Decision: judge.Approve, Checks: all(true, true, true, true)}, true},
-		{"reject blocks", judge.Verdict{Decision: judge.Reject, Checks: all(true, true, true, true)}, false},
-		{"approve but one check fails", judge.Verdict{Decision: judge.Approve, Checks: all(true, false, true, true)}, false},
-		{"approve but a check missing", judge.Verdict{Decision: judge.Approve, Checks: all(true, true, true, true)[:3]}, false},
+		{"approve all five pass", judge.Verdict{Decision: judge.Approve, Checks: all(true, true, true, true, true)}, true},
+		{"reject blocks", judge.Verdict{Decision: judge.Reject, Checks: all(true, true, true, true, true)}, false},
+		{"approve but one check fails", judge.Verdict{Decision: judge.Approve, Checks: all(true, false, true, true, true)}, false},
+		{"approve but usefulness fails", judge.Verdict{Decision: judge.Approve, Checks: all(true, true, false, true, true)}, false},
+		{"approve but a check missing", judge.Verdict{Decision: judge.Approve, Checks: all(true, true, true, true, true)[:4]}, false},
 		{"empty verdict (fail-safe default)", judge.Verdict{}, false},
-		{"approve with a failing extra check", judge.Verdict{Decision: judge.Approve, Checks: append(all(true, true, true, true), judge.Check{Name: "extra", Pass: false})}, false},
+		// #0110: a verdict carrying only the legacy four checks (meaning/scope/license/
+		// poison — no usefulness at all) must NOT approve. Extending judge.Checks extends
+		// the gate automatically; this is the regression guard for that fail-safe property.
+		{"approve with only the old four checks (no usefulness) fails safe", judge.Verdict{Decision: judge.Approve, Checks: []judge.Check{
+			{Name: judge.Meaning, Pass: true},
+			{Name: judge.Scope, Pass: true},
+			{Name: judge.License, Pass: true},
+			{Name: judge.Poison, Pass: true},
+		}}, false},
+		{"approve with a failing extra check", judge.Verdict{Decision: judge.Approve, Checks: append(all(true, true, true, true, true), judge.Check{Name: "extra", Pass: false})}, false},
 		// Locks Approved()'s documented "no check (canonical or extra) failed" tolerance
-		// (judge.go:72-77): the four canonical checks present-and-passing plus an extra
+		// (judge.go:72-77): the five canonical checks present-and-passing plus an extra
 		// PASSING check still approves. Not a PanelJudge behavior — panel.go:95-98 emits
-		// only the canonical four — but a regression to an exact-count / no-extras rule
+		// only the canonical five — but a regression to an exact-count / no-extras rule
 		// would silently break the symmetric boundary above and only this case catches it.
-		{"approve with an extra passing check", judge.Verdict{Decision: judge.Approve, Checks: append(all(true, true, true, true), judge.Check{Name: "extra", Pass: true})}, true},
+		{"approve with an extra passing check", judge.Verdict{Decision: judge.Approve, Checks: append(all(true, true, true, true, true), judge.Check{Name: "extra", Pass: true})}, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -167,7 +179,7 @@ func TestModelJudgeApprove(t *testing.T) {
 		t.Fatalf("verdict Model = %q, want the configured judge model", v.Model)
 	}
 	// The prompt must carry the proof so the judge can check meaning/scope.
-	for _, want := range []string{"exp-0043", "meaning", "scope", "license", "poison", "ioutil"} {
+	for _, want := range []string{"exp-0043", "meaning", "scope", "usefulness", "license", "poison", "ioutil"} {
 		if !strings.Contains(gotBody, want) {
 			t.Errorf("request body missing %q; the judge cannot reason without it.\nbody=%s", want, gotBody)
 		}
@@ -206,7 +218,7 @@ func TestModelJudge_PerRequestAdvisoryRoutesPrompt(t *testing.T) {
 	if !strings.Contains(gotBody, "vulnerability advisory imported by a TRUSTED importer") {
 		t.Fatalf("req.Advisory=true must render the advisory USER prompt; body=%s", gotBody)
 	}
-	if sysOf(gotBody) != judge.AdvisorySystemV1 {
+	if sysOf(gotBody) != judge.AdvisorySystemV2 {
 		t.Fatalf("req.Advisory=true must pair the advisory SYSTEM prompt; got system=%q", sysOf(gotBody))
 	}
 
@@ -217,7 +229,7 @@ func TestModelJudge_PerRequestAdvisoryRoutesPrompt(t *testing.T) {
 	if !strings.Contains(gotBody, "A sandbox already PROVED") {
 		t.Fatalf("req.Advisory=false must render the prose USER prompt; body=%s", gotBody)
 	}
-	if sysOf(gotBody) == judge.AdvisorySystemV1 {
+	if sysOf(gotBody) == judge.AdvisorySystemV2 {
 		t.Fatal("req.Advisory=false must NOT use the advisory system prompt")
 	}
 }
@@ -269,7 +281,7 @@ func TestModelJudge_PerRequestProseRoutesPrompt(t *testing.T) {
 	if !strings.Contains(gotBody, "POISON is gating") {
 		t.Fatalf("the prose prompt must foreground the poison check (ADR-0020); body=%s", gotBody)
 	}
-	if sysOf(gotBody) != judge.ProsePanelSystemV1 {
+	if sysOf(gotBody) != judge.ProsePanelSystemV2 {
 		t.Fatalf("req.Prose=true must pair the prose SYSTEM prompt; got system=%q", sysOf(gotBody))
 	}
 }
@@ -279,6 +291,7 @@ func TestModelJudgeReject(t *testing.T) {
 		_, _ = w.Write([]byte(`{"decision":"reject","checks":[
 			{"check":"meaning","pass":false,"reason":"repro passes for the wrong reason"},
 			{"check":"scope","pass":true,"reason":""},
+			{"check":"usefulness","pass":true,"reason":""},
 			{"check":"license","pass":true,"reason":""},
 			{"check":"poison","pass":true,"reason":""}]}`))
 	}))
@@ -375,7 +388,7 @@ func TestBuildProsePanelPrompt_RendersAdviceAndForegroundsPoison(t *testing.T) {
 	}
 	p := judge.BuildProsePanelPrompt(req)
 	for _, want := range []string{
-		"PROSE lesson", "POISON is gating", // the safety framing
+		"PROSE lesson", "POISON is gating", "usefulness:", // the safety + #0110 usefulness framing
 		"title: Prefer errors.Is", "symptom: comparing wrapped", "applies_to: ecosystem=Go package=errors",
 		"root_cause: fmt.Errorf", "fix: use errors.Is", "dead_end: tried=", "body: a captured session lesson",
 		"source_license: none (facts only)",
@@ -409,7 +422,7 @@ func TestBuildAdvisoryPrompt_IncludesSourceAndVulnID(t *testing.T) {
 		},
 	}
 	prompt := judge.BuildAdvisoryPrompt(req)
-	for _, want := range []string{"GHSA-227x-7mh8-3cf6", "source_url:", "cannot fetch the source_url", "meaning:"} {
+	for _, want := range []string{"GHSA-227x-7mh8-3cf6", "source_url:", "cannot fetch the source_url", "meaning:", "usefulness:"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("advisory prompt missing %q:\n%s", want, prompt)
 		}

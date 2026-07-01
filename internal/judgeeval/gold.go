@@ -199,8 +199,11 @@ func LoadGold() ([]Case, error) {
 }
 
 // Modes are the failure modes the gold set spans. "approve" is the clean control;
-// the rest each name the check a reject case is expected to fail on.
-var Modes = []string{"approve", "poison", "scope", "meaning", "license"}
+// the rest each name the check a reject case is expected to fail on. "usefulness"
+// (#0110) is the content-shaped-non-lesson mode: a record that is meaning-correct,
+// in-scope, license-clean, and harmless, but narrates work done with nothing a
+// matching future agent would do differently.
+var Modes = []string{"approve", "poison", "scope", "meaning", "usefulness", "license"}
 
 func validMode(m string) bool {
 	for _, v := range Modes {
