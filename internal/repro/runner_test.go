@@ -36,3 +36,27 @@ func TestCapWriter_UnderCapNotTruncated(t *testing.T) {
 		t.Errorf("got %q, want %q (no truncation marker under the cap)", got, "short output")
 	}
 }
+
+// Writing exactly the cap's worth of bytes drops nothing, so it must not be
+// marked truncated — the boundary between "fits exactly" and "one byte over".
+func TestCapWriter_ExactCapNotTruncated(t *testing.T) {
+	w := newCapWriter(10)
+	_, _ = w.Write([]byte("0123456789")) // exactly 10 bytes
+	if got := w.String(); got != "0123456789" {
+		t.Errorf("got %q, want %q (nothing was dropped at the exact cap)", got, "0123456789")
+	}
+}
+
+// One byte over the cap is the boundary's other side: exactly one byte is
+// dropped, so it must be marked truncated.
+func TestCapWriter_OneByteOverCapIsTruncated(t *testing.T) {
+	w := newCapWriter(10)
+	_, _ = w.Write([]byte("01234567891")) // 11 bytes, 1 over
+	got := w.String()
+	if !strings.HasSuffix(got, "truncated by twiceshy broker...]") {
+		t.Errorf("got %q, want a truncation marker (1 byte was dropped)", got)
+	}
+	if !strings.HasPrefix(got, "0123456789") {
+		t.Errorf("got %q, want the first 10 bytes retained", got)
+	}
+}
