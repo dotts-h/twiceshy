@@ -5,7 +5,7 @@ status: closed
 severity: medium
 group: 0076
 depends_on: []
-forgejo:
+forgejo: 451
 links:
   adr: ADR-0021
   prs: []

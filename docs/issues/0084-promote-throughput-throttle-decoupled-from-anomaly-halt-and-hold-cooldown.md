@@ -5,7 +5,7 @@ status: closed
 severity: high
 group: 0034
 depends_on: []
-forgejo:
+forgejo: 457
 links:
   adr: docs/adr/ADR-0022-promote-throughput-and-hold-cooldown.md
   prs: []

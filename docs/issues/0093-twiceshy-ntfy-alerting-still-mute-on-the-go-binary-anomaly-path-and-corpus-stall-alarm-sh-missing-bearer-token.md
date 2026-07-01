@@ -5,7 +5,7 @@ status: closed
 severity: medium
 group: 
 depends_on: []
-forgejo:
+forgejo: 462
 links:
   adr:
   prs: [398, 412]

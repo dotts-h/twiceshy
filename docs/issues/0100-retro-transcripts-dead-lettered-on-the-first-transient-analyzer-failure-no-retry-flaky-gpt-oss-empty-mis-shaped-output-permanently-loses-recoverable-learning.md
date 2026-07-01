@@ -5,7 +5,7 @@ status: closed
 severity: high
 group: 0064
 depends_on: []
-forgejo:
+forgejo: 467
 links:
   adr: docs/adr/ADR-0018-session-retro-capture.md
   prs: [430]
