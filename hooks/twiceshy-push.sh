@@ -16,7 +16,12 @@ input="$(cat)" || fail_open
 prompt="$(printf '%s' "$input" | jq -r '.prompt // empty' 2>/dev/null)" || fail_open
 [ -n "$prompt" ] || fail_open
 
-payload="$(jq -n --arg q "$prompt" '{query: $q, trigger: "prompt"}')" || fail_open
+# Forward the session id so the gate-decision log attributes pushed cards to this
+# session for the retro served->used helpfulness join (#0069, ADR-0025). The
+# SessionEnd capture hook ships the SAME id, so transcript-vs-decisions joins on it.
+session="$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null || true)"
+
+payload="$(jq -n --arg q "$prompt" --arg s "$session" '{query: $q, session: $s, trigger: "prompt"}')" || fail_open
 
 response="$(
   curl -sfS --max-time 10 \
