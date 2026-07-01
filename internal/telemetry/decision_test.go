@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -132,6 +133,38 @@ func TestRecorder_HashRedactsQuery(t *testing.T) {
 		if d.QueryHash == secret {
 			t.Fatal("raw query must not be persisted")
 		}
+	}
+}
+
+// Decision.QueryText is the #0109 opt-in raw-query capture: the telemetry package
+// itself stays dumb (it serializes whatever it's given), so this tests the JSON
+// contract directly rather than the caller's flag — the field must vanish from the
+// line entirely when unset (byte-behavior identical to before #0109) and appear
+// verbatim when the caller populates it.
+func TestDecision_QueryTextOmittedWhenUnset(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "d.jsonl")
+	r := newRec(t, path, 1<<20)
+	r.Record(telemetry.Decision{Channel: "push", QueryHash: r.Hash("q")})
+	_ = r.Close()
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "query_text") {
+		t.Fatalf("query_text must be absent from the line when unset: %s", raw)
+	}
+}
+
+func TestDecision_QueryTextPresentWhenSet(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "d.jsonl")
+	r := newRec(t, path, 1<<20)
+	r.Record(telemetry.Decision{Channel: "push", QueryHash: r.Hash("q"), QueryText: "modernc.org/sqlite busy_timeout"})
+	_ = r.Close()
+
+	got := readLines(t, path)
+	if len(got) != 1 || got[0].QueryText != "modernc.org/sqlite busy_timeout" {
+		t.Fatalf("query_text not round-tripped: %+v", got)
 	}
 }
 

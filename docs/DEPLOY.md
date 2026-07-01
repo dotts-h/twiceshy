@@ -57,6 +57,12 @@ docker run -d --name twiceshy --restart unless-stopped \
   path, query text hashed not stored). The hash salt is `TWICESHY_TELEMETRY_SALT`
   (empty ⇒ unsalted `sha256`); it **must** match the brain's retro-drain salt or the
   session hashes diverge and the join attributes nothing.
+- **Raw query text on the decision log (#0109, opt-in):** add
+  `-telemetry-query-text` to also capture the raw query (truncated to 256 bytes) on
+  each gate-decision line, alongside the always-present hash — the hash alone is
+  sometimes insufficient to diagnose a precision regression without pulling a
+  session transcript out-of-band (ADR-0028 decision 5). Default off; single-tenant
+  deployments only, and a no-op without `-telemetry-log`.
 
 ## Measurement chain — cross-host decision-log sync (#0098)
 
