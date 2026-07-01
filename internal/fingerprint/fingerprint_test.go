@@ -3,8 +3,6 @@
 package fingerprint_test
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"regexp"
 	"testing"
 
@@ -104,14 +102,19 @@ func TestFingerprintFormatAndDomainSeparation(t *testing.T) {
 	}
 
 	// The construction is part of the spec: sha256 over the domain-separated
-	// normalized signature.
-	sum := sha256.Sum256([]byte("generic\n" + fingerprint.Normalize(sig)))
-	if want := "sha256:" + hex.EncodeToString(sum[:]); g != want {
-		t.Errorf("Generic(%q) = %s, want %s", sig, g, want)
+	// normalized signature (docs/SCHEMA.md). Pinned literals, verified once
+	// against sha256("generic\n"+Normalize(sig)) / sha256("app\n"+repo+"\n"+
+	// Normalize(sig)) — recomputing the same formula here would let a shared
+	// bug in both sides cancel out.
+	const (
+		wantGeneric = "sha256:db700532dd2f92ca0652919910c384609f3909ad59fb95ac6344908c209ce8b2"
+		wantApp     = "sha256:c200471236ddac7205af32e693e1ba8c3898003b26539a731558e3f93139054d"
+	)
+	if g != wantGeneric {
+		t.Errorf("Generic(%q) = %s, want %s", sig, g, wantGeneric)
 	}
-	sum = sha256.Sum256([]byte("app\n" + repo + "\n" + fingerprint.Normalize(sig)))
-	if want := "sha256:" + hex.EncodeToString(sum[:]); a != want {
-		t.Errorf("App(%q, %q) = %s, want %s", repo, sig, a, want)
+	if a != wantApp {
+		t.Errorf("App(%q, %q) = %s, want %s", repo, sig, a, wantApp)
 	}
 }
 
