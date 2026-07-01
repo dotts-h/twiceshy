@@ -50,7 +50,7 @@ func TestLive_AgentEval(t *testing.T) {
 	verifier := NewBrokerVerifier(broker)
 
 	var tc TaskCase
-	for _, c := range GoldTasks() {
+	for _, c := range allProspectAndGoldTasks() {
 		if c.VerifyID == "react19-useref" {
 			tc = c
 		}
