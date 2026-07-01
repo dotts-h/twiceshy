@@ -19,6 +19,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -75,6 +76,11 @@ type Config struct {
 	// search_experience (#0067) — write-only, off the hot path, never read by
 	// retrieval. nil disables it.
 	Telemetry *telemetry.Recorder
+	// TelemetryQueryText opts into capturing the raw query text (truncated to
+	// 256 bytes at a UTF-8 rune boundary) on gate-decision telemetry lines, in
+	// addition to the always-present hash (#0109, ADR-0028 decision 5). Default
+	// off; single-tenant deployments only. No-op if Telemetry is nil.
+	TelemetryQueryText bool
 }
 
 // Tool descriptions are load-bearing: description text alone produces
@@ -121,7 +127,7 @@ func New(cfg Config) (*Server, error) {
 		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	}
 
-	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, retroQueue: cfg.RetroQueue, issueQueue: cfg.IssueQueue, corpus: cfg.Corpus, telemetry: cfg.Telemetry}
+	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, retroQueue: cfg.RetroQueue, issueQueue: cfg.IssueQueue, corpus: cfg.Corpus, telemetry: cfg.Telemetry, queryText: cfg.TelemetryQueryText}
 	h.recordCount.Store(int64(cfg.RecordCount))
 	h.usage = newUsageRecorder(cfg.Index, logger, time.Now)
 	srv := mcp.NewServer(&mcp.Implementation{
@@ -203,6 +209,7 @@ type handlers struct {
 	issueQueue  string              // optional; report_issue enqueues here for intake-issues (#0066)
 	corpus      string              // corpus root for robust id allocation against the source of truth (#0059)
 	telemetry   *telemetry.Recorder // optional; per-query gate-decision log (#0067)
+	queryText   bool                // opt-in raw query text on gate-decision telemetry, truncated (#0109); no-op if telemetry is nil
 
 	idMu   sync.Mutex // serializes record-id allocation (#0089)
 	lastID int        // high-water mark of ids handed out this process; 0 = none yet
@@ -359,13 +366,39 @@ func (h *handlers) recordSearchDecision(query string, hits []index.Hit, sessionI
 	if sessionID != "" {
 		session = h.telemetry.Hash(sessionID)
 	}
+	queryText := ""
+	if h.queryText {
+		queryText = truncateQueryText(query)
+	}
 	h.telemetry.Record(telemetry.Decision{
 		Channel:   "search",
 		QueryHash: h.telemetry.Hash(query),
+		QueryText: queryText,
 		Session:   session,
 		Served:    served,
 		Count:     len(hits),
 	})
+}
+
+// maxQueryTextBytes caps the opt-in raw query text captured on gate-decision
+// telemetry (#0109, ADR-0028 decision 5) — bounded so a pathological query can't
+// blow up the log.
+const maxQueryTextBytes = 256
+
+// truncateQueryText truncates s to at most maxQueryTextBytes, backing off to a
+// UTF-8 rune boundary so a multibyte rune straddling the cut is never split into
+// invalid bytes (which would JSON-escape as replacement runes on decode). Unlike
+// capText, it appends no marker — this is a diagnostic raw-text capture, not a
+// rendered card.
+func truncateQueryText(s string) string {
+	if len(s) <= maxQueryTextBytes {
+		return s
+	}
+	cut := maxQueryTextBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 // GetArgs is the get_experience input.

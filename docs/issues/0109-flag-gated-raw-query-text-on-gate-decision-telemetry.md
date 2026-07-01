@@ -1,14 +1,14 @@
 ---
 id: 0109
 title: Flag-gated raw query text on gate-decision telemetry
-status: open
+status: closed
 severity: medium
 group: 0106
 depends_on: []
 forgejo: 475
 links:
   adr:
-  prs: []
+  prs: [481]
   issues: [0106, 0067]
   regression:
 assets: []

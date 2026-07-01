@@ -7,8 +7,9 @@
 // helpfulness signal. It is write-only and structurally separate from the index
 // (it CANNOT influence ranking — ADR-0013 §4), off the hot path (a single async
 // writer; Record never blocks serving and drops under overload), privacy-preserving
-// (the raw query is hashed, never persisted), and bounded (size-rotated, so the
-// log can never grow without limit).
+// by default (the raw query is hashed, never persisted, unless the caller opts into
+// QueryText — #0109, single-tenant deployments only), and bounded (size-rotated, so
+// the log can never grow without limit).
 package telemetry
 
 import (
@@ -31,16 +32,18 @@ type ServedHit struct {
 	Score float64 `json:"score"`
 }
 
-// Decision is the structured record of one retrieval query's gate decision. It
-// never carries the raw query — only its salted hash and the retrieval tokens
-// (already content-filtered: stopwords and ecosystem names excluded).
+// Decision is the structured record of one retrieval query's gate decision. By
+// default it never carries the raw query — only its salted hash and the retrieval
+// tokens (already content-filtered: stopwords and ecosystem names excluded) — unless
+// the caller populates QueryText (#0109, opt-in, single-tenant deployments only).
 type Decision struct {
-	Time              string      `json:"ts"`                  // RFC3339; stamped by the recorder
-	Channel           string      `json:"channel"`             // "push" | "search"
-	QueryHash         string      `json:"query_hash"`          // salted hash, for correlation without the text
-	Session           string      `json:"session,omitempty"`   // salted hash of the MCP session id (#0069), for attributing served cards to a session; "" when no session
-	Tokens            []string    `json:"tokens,omitempty"`    // retrieval tokens used (push: discriminative; search: fts)
-	FingerprintBypass bool        `json:"fp_bypass,omitempty"` // push: a deterministic stack match bypassed the gate
+	Time              string      `json:"ts"`                   // RFC3339; stamped by the recorder
+	Channel           string      `json:"channel"`              // "push" | "search"
+	QueryHash         string      `json:"query_hash"`           // salted hash, for correlation without the text
+	QueryText         string      `json:"query_text,omitempty"` // opt-in raw query text (#0109, ADR-0028 decision 5), truncated by the caller; "" when capture is off (the default) or the caller passes none
+	Session           string      `json:"session,omitempty"`    // salted hash of the MCP session id (#0069), for attributing served cards to a session; "" when no session
+	Tokens            []string    `json:"tokens,omitempty"`     // retrieval tokens used (push: discriminative; search: fts)
+	FingerprintBypass bool        `json:"fp_bypass,omitempty"`  // push: a deterministic stack match bypassed the gate
 	Served            []ServedHit `json:"served,omitempty"`
 	Count             int         `json:"count"`
 }

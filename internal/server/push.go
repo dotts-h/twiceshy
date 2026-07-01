@@ -187,9 +187,14 @@ func (h *handlers) recordPushDecision(query string, d index.PushDecision, sessio
 	if sessionID != "" {
 		session = h.telemetry.Hash(sessionID)
 	}
+	queryText := ""
+	if h.queryText {
+		queryText = truncateQueryText(query)
+	}
 	h.telemetry.Record(telemetry.Decision{
 		Channel:           "push",
 		QueryHash:         h.telemetry.Hash(query),
+		QueryText:         queryText,
 		Session:           session,
 		Tokens:            d.Discriminative,
 		FingerprintBypass: d.FingerprintBypass,

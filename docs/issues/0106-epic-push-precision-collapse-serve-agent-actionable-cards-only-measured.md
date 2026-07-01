@@ -8,7 +8,7 @@ depends_on: []
 forgejo: 472
 links:
   adr: docs/adr/ADR-0028-push-eligibility-and-corroborating-specificity.md
-  prs: []
+  prs: [479, 480]
   issues: [0005, 0067, 0068, 0069, 0105]
   regression:
 assets: []
@@ -68,10 +68,10 @@ IDF endgame these children bridge to).
 ## Acceptance (epic closes when)
 - [ ] Off-topic/meta prompts (incl. the two live specimens) inject 0 cards on
       the deployed server.
-- [ ] Push serves only agent-actionable records (0107) under the corroboration
+- [x] Push serves only agent-actionable records (0107) under the corroboration
       rule (0108), with the live precision/recall guard updated and green.
 - [ ] Gate decisions are debuggable (0109 deployed with the flag on).
-- [ ] Prose/advisory promotion asks the usefulness question (0110).
+- [x] Prose/advisory promotion asks the usefulness question (0110).
 - [ ] Post-deploy telemetry shows served-rate on prompt-triggered push well
       below the 70% baseline without losing error-pull hits.
 
