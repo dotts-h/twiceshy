@@ -35,6 +35,14 @@ func TestWithMaxBytes_RejectsOversizedBody(t *testing.T) {
 	if readErr != nil {
 		t.Fatalf("under-limit body must read cleanly, got %v", readErr)
 	}
+
+	// Exactly at the limit is the boundary's edge: it must still read cleanly,
+	// not be rejected as if it were one byte over.
+	exact := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(strings.Repeat("x", limit)))
+	h.ServeHTTP(httptest.NewRecorder(), exact)
+	if readErr != nil {
+		t.Fatalf("exact-limit body must read cleanly, got %v", readErr)
+	}
 }
 
 func TestWithTimeout_DeadlineReachesHandler(t *testing.T) {
