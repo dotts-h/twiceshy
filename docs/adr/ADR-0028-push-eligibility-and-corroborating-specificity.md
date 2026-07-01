@@ -132,6 +132,6 @@ Adopt Option 3. Numbered:
   going forward, complementing this ADR's filter on what already exists in the
   corpus.
 - **Cost:** origin indexing is a one-time additive DDL migration at `Rebuild`
-  (like the existing `usage.pushed` in-place migration); corroboration adds no
-  new round-trips — it re-checks tokens already fetched by the existing
-  discriminative-token pass, against text already loaded for the served hit.
+  (like the existing `usage.pushed` in-place migration); corroboration adds at
+  most `MaxK × |discriminative|` (≤ 3×24) single-token MATCH lookups per served
+  query — bounded, sub-ms, embedding-free (ADR-0001 §4 intact).
