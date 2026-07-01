@@ -3,6 +3,9 @@
 package spool
 
 import (
+	"encoding/json"
+	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -64,5 +67,20 @@ func TestReadTranscript_OnReportEntry_HasNoBody(t *testing.T) {
 	}
 	if got.Transcript != "" {
 		t.Errorf("report misrouted as transcript decoded a body %q, want empty (driver skips empties)", got.Transcript)
+	}
+}
+
+// A corrupt transcript entry must surface a decode error, not a silently
+// zeroed Transcript — retro-intake relies on this to skip-and-log.
+func TestReadTranscript_MalformedJSONErrors(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	_, err := ReadTranscript(path)
+	var syn *json.SyntaxError
+	if !errors.As(err, &syn) {
+		t.Fatalf("ReadTranscript of malformed JSON: got %v, want *json.SyntaxError", err)
 	}
 }
