@@ -5,7 +5,7 @@ status: open
 severity: low
 group: 0106
 depends_on: []
-forgejo:
+forgejo: 477
 links:
   adr:
   prs: []

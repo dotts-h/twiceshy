@@ -5,7 +5,7 @@ status: closed
 severity: medium
 group: 0101
 depends_on: []
-forgejo:
+forgejo: 471
 links:
   adr: docs/adr/ADR-0026-runtime-enforcement-of-experience-adoption.md
   prs: []

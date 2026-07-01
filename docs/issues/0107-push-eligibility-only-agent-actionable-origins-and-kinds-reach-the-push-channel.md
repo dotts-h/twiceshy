@@ -5,7 +5,7 @@ status: open
 severity: high
 group: 0106
 depends_on: []
-forgejo:
+forgejo: 473
 links:
   adr: docs/adr/ADR-0028-push-eligibility-and-corroborating-specificity.md
   prs: []

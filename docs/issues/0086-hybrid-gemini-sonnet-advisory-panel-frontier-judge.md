@@ -5,7 +5,7 @@ status: closed
 severity: medium
 group: 0034
 depends_on: []
-forgejo:
+forgejo: 459
 links:
   adr: docs/adr/ADR-0016-advisory-class-panel-promotion.md
   prs: []

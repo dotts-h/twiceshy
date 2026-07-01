@@ -5,7 +5,7 @@ status: open
 severity: medium
 group: 0106
 depends_on: []
-forgejo:
+forgejo: 476
 links:
   adr: docs/adr/ADR-0020-prose-class-panel-promotion.md
   prs: []

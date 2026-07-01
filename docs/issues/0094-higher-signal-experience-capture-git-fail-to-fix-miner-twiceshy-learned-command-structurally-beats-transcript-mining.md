@@ -5,7 +5,7 @@ status: in-progress
 severity: medium
 group:
 depends_on: []
-forgejo:
+forgejo: 463
 links:
   adr:
   prs: []
