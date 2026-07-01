@@ -16,6 +16,14 @@ input="$(cat)" || fail_open
 prompt="$(printf '%s' "$input" | jq -r '.prompt // empty' 2>/dev/null)" || fail_open
 [ -n "$prompt" ] || fail_open
 
+# Skip harness-generated pseudo-prompts (task notifications, local-command echoes):
+# they are not user intent, and their dev-flavored text false-fires the gate
+# (observed live 2026-07-01: the only post-v0.2.9 serves were <task-notification>
+# blobs corroborating unrelated trap cards).
+case "$prompt" in
+  "<task-notification>"*|"<local-command-"*|"<command-name>"*) fail_open ;;
+esac
+
 # Forward the session id so the gate-decision log attributes pushed cards to this
 # session for the retro served->used helpfulness join (#0069, ADR-0025). The
 # SessionEnd capture hook ships the SAME id, so transcript-vs-decisions joins on it.
