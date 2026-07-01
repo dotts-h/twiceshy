@@ -1,14 +1,14 @@
 ---
 id: 0108
 title: Two-token corroboration for prompt-triggered push; error trigger keeps single-token
-status: open
+status: closed
 severity: high
 group: 0106
 depends_on: []
 forgejo:
 links:
   adr: docs/adr/ADR-0028-push-eligibility-and-corroborating-specificity.md
-  prs: []
+  prs: [480]
   issues: [0106, 0107, 0069]
   regression:
 assets: []

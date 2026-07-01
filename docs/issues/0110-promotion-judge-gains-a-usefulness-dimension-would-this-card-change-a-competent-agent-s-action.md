@@ -1,14 +1,14 @@
 ---
 id: 0110
 title: Promotion judge gains a usefulness dimension: would this card change a competent agent's action
-status: open
+status: closed
 severity: medium
 group: 0106
 depends_on: []
 forgejo:
 links:
   adr: docs/adr/ADR-0020-prose-class-panel-promotion.md
-  prs: []
+  prs: [479]
   issues: [0106]
   regression:
 assets: []
@@ -68,6 +68,18 @@ usefulness question, so a passing-but-useless record has no path to rejection.
 This is complementary to #0107, not redundant with it: #0107 filters the
 *existing* corpus by kind/origin (what may reach push today); this issue narrows
 what enters `validated` at all going forward, at the promotion boundary that
-produced exp-2845 in the first place. Scoped to the advisory and prose panel
-paths per ADR-0016/ADR-0020; the execution-provable path (ADR-0013, repro + judge)
-is not in scope here — a passing repro is itself evidence of an actionable claim.
+produced exp-2845 in the first place.
+
+**Amended at close-out (PR #479):** the shipped design applies the usefulness
+check to **all three** judge paths — proof (`ProseSystemV1`→V2), advisory
+(`AdvisorySystemV1`→V2), and prose-panel (`ProsePanelSystemV1`→V2) — not just
+advisory/prose-panel as originally scoped above. `Verdict.Approved()`
+(`internal/judge/judge.go:78`) fail-safes on every canonical check regardless of
+path: a path whose prompt doesn't ask the usefulness question would still have
+`Usefulness` demanded by `Approved()` and so would have every one of its
+promotions blocked outright, not exempted. Per-path check vocabularies are
+fragile for this reason — extending `Checks` extends the gate for every path
+by construction, so the fix had to extend every path's prompt, not just two of
+them. The execution-provable/proof path's original rationale ("a passing repro
+is itself evidence of an actionable claim") turned out not to be a valid
+carve-out under a canonical-check gate shared across paths.

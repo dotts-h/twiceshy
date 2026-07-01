@@ -1,14 +1,14 @@
 ---
 id: 0107
 title: Push eligibility: only agent-actionable origins and kinds reach the push channel
-status: open
+status: closed
 severity: high
 group: 0106
 depends_on: []
 forgejo:
 links:
   adr: docs/adr/ADR-0028-push-eligibility-and-corroborating-specificity.md
-  prs: []
+  prs: [480]
   issues: [0106, 0108]
   regression:
 assets: []
