@@ -137,3 +137,4 @@ never a cycle).
 | [0116](0116-metrics-digest-daily-push-join-promote-health-digest-to-ntfy.md) | Metrics digest: daily push/join/promote health digest to ntfy | open | medium | — | |
 | [0117](0117-dev-code-idf-table-compute-word-level-df-from-a-permissive-code-corpus-adr-0017-phase-1.md) | Dev-code IDF table: compute word-level df from a permissive code corpus (ADR-0017 phase 1) | open | medium | — | |
 | [0118](0118-push-eligibility-excludes-importer-origin-breaking-change-traps-decide-the-admission-path.md) | Push eligibility excludes importer-origin breaking-change traps — decide the admission path | open | medium | — | |
+| [0119](0119-prospector-verdicts-need-a-per-case-positive-control-run-1-scored-5-5-vacuous-model-hard.md) | Prospector verdicts need a per-case positive control — run 1 scored 5/5 vacuous model-hard | open | high | 0112 | |
