@@ -5,7 +5,7 @@ status: open
 severity: high
 group: 
 depends_on: []
-forgejo:
+forgejo: 491
 links:
   adr: docs/adr/ADR-0029-model-hard-trap-prospector.md
   prs: [488]

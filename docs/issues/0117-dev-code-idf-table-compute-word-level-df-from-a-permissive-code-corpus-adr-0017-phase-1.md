@@ -5,7 +5,7 @@ status: open
 severity: medium
 group: 
 depends_on: []
-forgejo:
+forgejo: 496
 links:
   adr: docs/adr/ADR-0017-global-idf-push-gate-specificity.md
   prs: []
