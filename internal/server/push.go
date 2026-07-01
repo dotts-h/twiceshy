@@ -28,6 +28,14 @@ type PushArgs struct {
 	// (#0069) — push is the dominant channel, so without it nearly all served cards
 	// are unattributable. Optional; empty records no correlation key.
 	Session string `json:"session,omitempty"`
+	// Trigger names what prompted this call: "" or "prompt" (the UserPromptSubmit
+	// hook, a raw prompt) or "error" (the error-pull hook, #0087 — a verbatim
+	// error/log line the client already singled out). It maps to
+	// index.Query.ErrorTrigger, which relaxes the two-token corroboration rule
+	// (#0108) back to the single-token gate for a verbatim error line. Any other
+	// value is rejected (400) — a silently-ignored typo would silently reopen the
+	// single-token gate for what is actually a raw prompt.
+	Trigger string `json:"trigger,omitempty"`
 }
 
 // PushResult is the POST /push response: ready-to-inject additionalContext text.
@@ -66,16 +74,26 @@ func (h *handlers) pushHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("query too large: %d bytes (max %d)", len(args.Query), maxQueryBytes), http.StatusBadRequest)
 		return
 	}
+	switch args.Trigger {
+	case "", "prompt", "error":
+	default:
+		http.Error(w, fmt.Sprintf("trigger must be \"\", \"prompt\", or \"error\", got %q", args.Trigger), http.StatusBadRequest)
+		return
+	}
 
 	ctx := r.Context()
 	// Push channel: embedding-free retrieval only (ADR-0001 §4). RetrievePushTraced
 	// applies the discriminative-token gate so off-topic prompts inject nothing, and
 	// never surfaces quarantined records; its trace feeds per-query telemetry (#0067).
+	// trigger=="error" (the error-pull hook, #0087) relaxes the two-token
+	// corroboration rule (#0108) back to the single-token gate for a verbatim
+	// error line; "" and "prompt" are identical (strict prompt-triggered push).
 	decision, err := h.ix.RetrievePushTraced(ctx, index.Query{
-		Text:      args.Query,
-		Repo:      h.repo,
-		Ecosystem: args.Ecosystem,
-		Package:   args.Package,
+		Text:         args.Query,
+		Repo:         h.repo,
+		ErrorTrigger: args.Trigger == "error",
+		Ecosystem:    args.Ecosystem,
+		Package:      args.Package,
 	})
 	if err != nil {
 		h.logger.Error("push failed",

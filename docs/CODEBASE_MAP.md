@@ -105,19 +105,25 @@ optional dense/RRF behind the `Embedder` seam but is **not** on the hot path.
 
 ```
 prompt/query  →  POST /push                                   (internal/server/push.go: h.pushHTTP)
-              →  index.RetrievePushTraced → discriminative-term gate
-                                                              (internal/index/index.go:421; discriminativeTokens L450)
-              →  floor on the discriminative subset → PushResult card
-                                                              (internal/server/push.go:31; render.go: RenderPushContext)
+              →  index.RetrievePushTraced → eligibility + discriminative-term gate
+                                                              (internal/index/index.go:454; discriminativeTokens L523)
+              →  two-token corroboration (prompt trigger only) → PushResult card
+                                                              (internal/index/index.go: corroborated; render.go: RenderPushContext)
               →  telemetry.Record (why served / not)          (internal/server/push.go: recordPushDecision)
 ```
 
 The gate ([ADR-0015](adr/ADR-0015-push-discriminative-term-gate.md),
-[ADR-0017](adr/ADR-0017-global-idf-push-gate-specificity.md)) injects **nothing**
-unless the query carries a discriminative token (document-frequency / global-IDF
-specific, against a stoplist); a deterministic stack match bypasses it
-(`PushDecision.FingerprintBypass`, `internal/index/index.go:412`). Quarantined
-records never reach this channel.
+[ADR-0017](adr/ADR-0017-global-idf-push-gate-specificity.md), ADR-0028) injects
+**nothing** unless the query carries a discriminative token — document frequency
+computed over the **push-eligible subset** (validated, kind `trap`/`fix`,
+non-importer `provenance.source.author` — #0107), against a stoplist. A
+prompt-triggered query (`PushArgs.Trigger` != `"error"`) additionally needs TWO
+DISTINCT discriminative tokens that co-occur on the SAME served record
+(#0108) — a single rare token, or two tokens each living in a different record,
+serve nothing. A deterministic stack match bypasses the whole gate
+(`PushDecision.FingerprintBypass`, `internal/index/index.go:446`) — eligibility
+and corroboration never apply to it. Quarantined records never reach this
+channel.
 
 ### 3. WRITE paths
 

@@ -24,7 +24,15 @@ STUBDIR="$(mktemp -d)"
 trap 'rm -rf "$STUBDIR"' EXIT
 cat > "$STUBDIR/curl" <<'STUB'
 #!/usr/bin/env bash
-# Stub: ignore the request, emit the canned response, exit the canned code.
+# Stub: capture the request payload (the -d argument, so a test can assert on
+# it), ignore the request, emit the canned response, exit the canned code.
+if [ -n "${STUB_CAPTURE:-}" ]; then
+	for ((i = 1; i <= $#; i++)); do
+		if [ "${!i}" = "-d" ]; then
+			j=$((i + 1)); printf '%s' "${!j}" > "$STUB_CAPTURE"
+		fi
+	done
+fi
 printf '%s' "${STUB_RESPONSE:-}"
 exit "${STUB_EXIT:-0}"
 STUB
@@ -32,12 +40,14 @@ chmod +x "$STUBDIR/curl"
 
 # run_hook <stdin-json> — invoke the hook with the stub curl ahead on PATH and a
 # per-call session sandbox (TMPDIR) unless the caller pinned one for a sequence.
+# STUB_CAPTURE, if set, names a file the stub writes the sent -d payload to.
 run_hook() {
 	printf '%s' "$1" | PATH="$STUBDIR:$PATH" \
 		TWICESHY_TOKEN="${TWICESHY_TOKEN-tkn}" \
 		TWICESHY_URL="http://stub.invalid" \
 		TMPDIR="${TMPDIR_PIN:-$(mktemp -d "$STUBDIR/sess.XXXXXX")}" \
 		STUB_RESPONSE="${STUB_RESPONSE-}" STUB_EXIT="${STUB_EXIT-0}" \
+		STUB_CAPTURE="${STUB_CAPTURE-}" \
 		TWICESHY_ERROR_PULL_ON_FIRST="${TWICESHY_ERROR_PULL_ON_FIRST-0}" \
 		bash "$HOOK"
 }
@@ -62,12 +72,22 @@ STUB_RESPONSE="$CARD"
 empty_ok "first occurrence: armed, no query" "$(run_hook "$ERRJSON")"
 
 # 3) Second occurrence, server returns a card -> inject it as additionalContext.
+#    Also capture the sent payload: it must carry trigger:"error" and the
+#    session id (#0108) so the server relaxes corroboration to single-token.
+STUB_CAPTURE="$STUBDIR/req3.json"
 out="$(run_hook "$ERRJSON")"
 if contains "$out" "additionalContext" && contains "$out" "exp-9999" && contains "$out" "PostToolUse"; then
 	ok "second occurrence: card injected"
 else
 	bad "second occurrence missing card [$out]"
 fi
+req="$(cat "$STUB_CAPTURE" 2>/dev/null)"
+if contains "$req" '"trigger": "error"' && contains "$req" '"session": "s1"'; then
+	ok "second occurrence: payload carries trigger:error + session"
+else
+	bad "second occurrence payload missing trigger/session [$req]"
+fi
+unset STUB_CAPTURE
 
 # 4) Third occurrence of the SAME signature -> deduped (.done), no re-query.
 empty_ok "dedup: same signature queried once" "$(run_hook "$ERRJSON")"

@@ -11,8 +11,10 @@
 # It fires on the SECOND distinct appearance of an error signature (the "before
 # retrying what just failed" tripwire — a first failure may be a typo; a repeat means
 # stuck), dedupes per session+signature, and queries the existing /push retrieval with
-# the error line (the same gate the push hook uses; an error line's rare identifiers
-# are exactly the discriminative tokens the gate wants). Fail-open throughout; an empty
+# the error line and trigger:"error" (the same gate the push hook uses, but with the
+# two-token corroboration rule relaxed back to single-token, #0108: an error line's
+# rare identifiers are exactly the discriminative tokens the gate wants, and the line
+# is already high-precision — unlike a raw prompt). Fail-open throughout; an empty
 # result injects nothing.
 #
 # Tunables: TWICESHY_ERROR_PULL_ON_FIRST=1 fires on the first occurrence (testing/
@@ -63,7 +65,7 @@ case "${TWICESHY_ERROR_PULL_ON_FIRST:-0}" in
 esac
 : > "$done"                   # query once for this signature
 
-payload="$(jq -n --arg q "$errline" '{query: $q}')" || fail_open
+payload="$(jq -n --arg q "$errline" --arg sid "$sid" '{query: $q, trigger: "error", session: $sid}')" || fail_open
 response="$(curl -sfS --max-time 10 \
   -H "Authorization: Bearer ${TWICESHY_TOKEN}" -H "Content-Type: application/json" \
   -d "$payload" "${TWICESHY_URL%/}/push" 2>/dev/null)" || fail_open

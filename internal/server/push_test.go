@@ -253,6 +253,52 @@ func TestPushIgnoresDenseRetrieval(t *testing.T) {
 	}
 }
 
+// TestPushRejectsInvalidTrigger is #0108's contract wiring: PushArgs.Trigger
+// only accepts "", "prompt", or "error" — a typo must 400, not silently reopen
+// the single-token gate for what is actually a raw prompt.
+func TestPushRejectsInvalidTrigger(t *testing.T) {
+	ts := newTestServer(t)
+	resp, _ := postPush(t, ts.URL, token, map[string]string{
+		"query":   "fts5 syntax error",
+		"trigger": "bogus",
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for an invalid trigger", resp.StatusCode)
+	}
+}
+
+// TestPushTriggerErrorAllowsSingleDiscriminativeToken proves the trigger
+// contract end to end: a single-discriminative-token query serves nothing on
+// the default (prompt) trigger, and is served once trigger="error" — the
+// mapping to index.Query.ErrorTrigger (#0108) is live through the HTTP edge,
+// not just at the index layer.
+func TestPushTriggerErrorAllowsSingleDiscriminativeToken(t *testing.T) {
+	rec := mkServerRecord(t, 50, "Wigglesprocket contention under load",
+		"the wigglesprocket wigglesprocket wigglesprocket subsystem contends under load")
+	var recs []*record.Record
+	recs = append(recs, rec)
+	for i := 0; i < 10; i++ {
+		recs = append(recs, mkServerRecord(t, 60+i, "unrelated filler", "cache eviction retry budget notes"))
+	}
+	ts := newTestServerWith(t, recs...)
+
+	resp, out := postPush(t, ts.URL, token, map[string]string{"query": "wigglesprocket"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if out.Count != 0 {
+		t.Errorf("default (prompt) trigger, single token: count = %d, want 0 (gate closed)", out.Count)
+	}
+
+	resp, out = postPush(t, ts.URL, token, map[string]string{"query": "wigglesprocket", "trigger": "error"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if out.Count != 1 || !contains(out.IDs, "exp-0050") {
+		t.Errorf("trigger=error, single token: count=%d ids=%v, want exp-0050 served", out.Count, out.IDs)
+	}
+}
+
 func TestPushRejectsEmptyQuery(t *testing.T) {
 	ts := newTestServer(t)
 	resp, _ := postPush(t, ts.URL, token, map[string]string{"query": "   "})

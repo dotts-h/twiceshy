@@ -181,13 +181,21 @@ func PushNegatives() []PushCase {
 		{Query: "deploy to aws with terraform and check the ci pipeline logs", Note: "aws/terraform/ci"},
 		{Query: "add a graphql endpoint and a redis cache behind the nginx proxy", Note: "graphql/redis/nginx"},
 		{Query: "the css grid layout breaks on mobile when a large image loads", Note: "css/layout/mobile"},
+		// The reproduced live specimen (#0106/ADR-0028): a deep-analysis meta-prompt
+		// whose only discriminative tokens ("application", "llm") each lived in a
+		// DIFFERENT unrelated validated record — the cross-record false-positive the
+		// #0108 corroboration rule exists to close.
+		{Query: "need a deep analysis of this application and why it is still not working well not helping any llm", Note: "specimen: cross-record disc tokens, #0106"},
 	}
 }
 
 // PushPositives are genuine in-domain error queries that MUST still surface their
-// trap. Each carries a token that is specific, not common dev vocabulary (fts5,
-// bm25, servemux, tmpdir/noexec, rand/seed, setup-go) — the signal the gate should
-// key on. Ids are the validated engineering traps (the original 9).
+// trap. Each carries at least two specific, co-occurring tokens (fts5+syntax,
+// fts5+bm25, servemux+catch-all, fork/exec+tmpdir/noexec, rand.Seed+staticcheck,
+// setup-go+forgejo/runner) — not common dev vocabulary — because a prompt-triggered
+// push now requires TWO independent discriminative tokens landing on the SAME
+// eligible record (#0108's corroboration rule), not one. Ids are the validated
+// engineering traps (the original 9).
 func PushPositives() []PushCase {
 	return []PushCase{
 		{Query: `fts5 match throws a syntax error near "." when the query has a dotted module path`, ExpectID: "exp-0001"},
