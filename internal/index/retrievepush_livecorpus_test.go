@@ -28,22 +28,32 @@ var pushOffTopic = []string{
 	"test the code",                         // guards generic df>=3 tokens
 	"go to the store and buy milk",          // pure off-topic prose
 	"docker is great for shipping software", // guards the ecosystem-name stoplist
+	// The reproduced live specimen (#0106/ADR-0028): its only discriminative
+	// tokens ("application", "llm") each live in a DIFFERENT unrelated validated
+	// record — the cross-record false positive #0108's corroboration rule closes.
+	"need a deep analysis of this application and why it is still not working well not helping any llm",
+	// #0107: exp-0003 is kind convention and exp-0043 is twiceshy-importer origin —
+	// neither is push-eligible anymore, however exact the topical match. They stay
+	// reachable via pull (search_experience); see TestRetrievePushExcludesQuarantined's
+	// sibling invariant, and the eligibility unit tests in eligibility_test.go.
+	"mcp streamable http session id",
+	"io ioutil deprecated",
 }
 
 // pushOnTopic error prompts must inject the genuinely-relevant card: wantID
 // present, and where today's blanket push leaks the weak exp-0005 card, absent
-// names it so a regression that re-adds noise fails loudly.
+// names it so a regression that re-adds noise fails loudly. Each query carries
+// at least two co-occurring discriminative tokens (#0108: prompt-triggered push
+// now requires two, not one).
 var pushOnTopic = []struct {
 	query  string
 	wantID string
 	absent string // a noise id that must NOT appear ("" = no assertion)
 }{
 	{"fts5 syntax error on dotted query", "exp-0001", "exp-0005"},
-	{"go test fails with permission denied in TMPDIR", "exp-0017", "exp-0005"},
+	{"go test fails with permission denied on a noexec TMPDIR", "exp-0017", "exp-0005"},
 	{"bm25 negative scores", "exp-0002", ""},
-	{"mcp streamable http session id", "exp-0003", ""},
-	{"servemux method pattern fallthrough", "exp-0006", ""},
-	{"io ioutil deprecated", "exp-0043", ""},
+	{"servemux method pattern catch-all", "exp-0006", ""},
 	{"nonroot bind mount permission denied", "exp-0004", ""},
 	{"forgejo setup-go cache hang", "exp-0005", ""},
 }
