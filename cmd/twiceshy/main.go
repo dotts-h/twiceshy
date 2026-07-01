@@ -907,7 +907,7 @@ func acquireLoopLock(corpus string) (*lock.Lock, error) {
 	path := filepath.Join(corpus, loopLockName)
 	lk, err := lock.Acquire(path)
 	if errors.Is(err, lock.ErrHeld) {
-		return nil, fmt.Errorf("another promote/adapt run is in progress (lock %s held) — skipping this run", path)
+		return nil, fmt.Errorf("another promote/adapt run is in progress (lock %s held) — skipping this run: %w", path, lock.ErrHeld)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("acquiring run lock %s: %w", path, err)

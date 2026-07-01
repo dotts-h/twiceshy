@@ -5,9 +5,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/dotts-h/twiceshy/internal/lock"
@@ -45,8 +45,8 @@ func TestRunPromote_SingleFlightLockBlocksSecondRun(t *testing.T) {
 
 	var buf bytes.Buffer
 	err = runPromote(context.Background(), []string{"-corpus", corpus}, &buf, judgeEnv)
-	if err == nil || !strings.Contains(err.Error(), "in progress") {
-		t.Fatalf("a second run while the lock is held must fail clearly; got %v", err)
+	if !errors.Is(err, lock.ErrHeld) {
+		t.Fatalf("a second run while the lock is held must report lock.ErrHeld; got %v", err)
 	}
 }
 
@@ -60,8 +60,8 @@ func TestRunAdapt_SingleFlightLockBlocksSecondRun(t *testing.T) {
 
 	var buf bytes.Buffer
 	err = runAdapt(context.Background(), []string{"-corpus", corpus}, &buf, judgeEnv)
-	if err == nil || !strings.Contains(err.Error(), "in progress") {
-		t.Fatalf("a second adapt while the lock is held must fail clearly; got %v", err)
+	if !errors.Is(err, lock.ErrHeld) {
+		t.Fatalf("a second adapt while the lock is held must report lock.ErrHeld; got %v", err)
 	}
 }
 

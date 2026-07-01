@@ -28,8 +28,10 @@ func TestUsageEqual_AllBranches(t *testing.T) {
 		{"fully equal", &record.Usage{Retrieved: 3, ConfirmedHelpful: 1, LastHit: hit("2026-06-19")}, &record.Usage{Retrieved: 3, ConfirmedHelpful: 1, LastHit: hit("2026-06-19")}, true},
 	}
 	for _, tc := range cases {
-		if got := usageEqual(tc.a, tc.b); got != tc.want {
-			t.Errorf("%s: usageEqual = %v, want %v", tc.name, got, tc.want)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			if got := usageEqual(tc.a, tc.b); got != tc.want {
+				t.Errorf("usageEqual = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
