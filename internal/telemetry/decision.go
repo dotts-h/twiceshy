@@ -46,6 +46,7 @@ type Decision struct {
 	FingerprintBypass bool        `json:"fp_bypass,omitempty"`  // push: a deterministic stack match bypassed the gate
 	Served            []ServedHit `json:"served,omitempty"`
 	Count             int         `json:"count"`
+	Trigger           string      `json:"trigger,omitempty"` // push: "prompt" | "error" (#0116); "" on the search channel
 }
 
 // Config configures a Recorder.

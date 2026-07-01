@@ -61,7 +61,7 @@ func TestRecordPushDecision_QueryTextFlagOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := &handlers{telemetry: tel} // queryText defaults false
-	h.recordPushDecision("a raw prompt nobody opted in to persist", index.PushDecision{}, "")
+	h.recordPushDecision("a raw prompt nobody opted in to persist", index.PushDecision{}, "", "")
 	if err := tel.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestRecordPushDecision_QueryTextFlagOnTruncates(t *testing.T) {
 	// 255 ASCII bytes + a 3-byte rune (€) straddling byte 256: a naive [:256] slice
 	// would split the rune's bytes.
 	long := strings.Repeat("a", 255) + "€€€€"
-	h.recordPushDecision(long, index.PushDecision{}, "")
+	h.recordPushDecision(long, index.PushDecision{}, "", "")
 	if err := tel.Close(); err != nil {
 		t.Fatal(err)
 	}
