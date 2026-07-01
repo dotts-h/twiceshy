@@ -1,0 +1,14 @@
+# twiceshy-metrics-digest.timer — fire the daily metrics digest (#0116).
+# Runs after the morning promote audit (07:00 UTC) so the night's validate run is
+# reflected in the same day's digest.
+[Unit]
+Description=Daily twiceshy metrics digest (push/join/promote health -> ntfy)
+
+[Timer]
+# 07:30 UTC — after the audit timer (07:00 UTC). Adjust to taste.
+OnCalendar=*-*-* 07:30:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

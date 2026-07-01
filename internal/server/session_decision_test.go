@@ -70,8 +70,8 @@ func TestRecordPushDecision_AttributesSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := &handlers{telemetry: tel}
-	h.recordPushDecision("q1", index.PushDecision{Served: []index.Hit{{ID: "exp-0009", Score: 2}}}, "sess-abc")
-	h.recordPushDecision("q2", index.PushDecision{Served: []index.Hit{{ID: "exp-0010", Score: 2}}}, "") // no session
+	h.recordPushDecision("q1", index.PushDecision{Served: []index.Hit{{ID: "exp-0009", Score: 2}}}, "sess-abc", "")
+	h.recordPushDecision("q2", index.PushDecision{Served: []index.Hit{{ID: "exp-0010", Score: 2}}}, "", "") // no session
 	if err := tel.Close(); err != nil {
 		t.Fatal(err)
 	}

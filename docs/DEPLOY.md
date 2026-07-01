@@ -56,7 +56,9 @@ docker run -d --name twiceshy --restart unless-stopped \
   per-query gate decisions the #0069 helpfulness join reads (write-only, off the hot
   path, query text hashed not stored). The hash salt is `TWICESHY_TELEMETRY_SALT`
   (empty ⇒ unsalted `sha256`); it **must** match the brain's retro-drain salt or the
-  session hashes diverge and the join attributes nothing.
+  session hashes diverge and the join attributes nothing. **The `trigger` field
+  (#0116, prompt vs error)** appears on push decision lines only after the serve
+  binary is redeployed with that change — older lines have no `trigger` key.
 - **Raw query text on the decision log (#0109, opt-in):** add
   `-telemetry-query-text` to also capture the raw query (truncated to 256 bytes) on
   each gate-decision line, alongside the always-present hash — the hash alone is

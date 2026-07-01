@@ -1,0 +1,22 @@
+# twiceshy-metrics-digest.service — daily push/join/promote health digest (#0116).
+# Install on the brain (engine box; it reads journalctl -u twiceshy-retro/-validate
+# locally and pulls the NAS-deployed serve's telemetry over ssh), then enable
+# twiceshy-metrics-digest.timer. Operator step: copy this + the .timer to
+# /etc/systemd/system/, create the EnvironmentFile below (ntfy topic + any
+# TWICESHY_NAS_SSH/TWICESHY_CONTAINER overrides), `systemctl daemon-reload`,
+# `systemctl enable --now twiceshy-metrics-digest.timer`.
+[Unit]
+Description=twiceshy daily metrics digest (push/join/promote health -> ntfy)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ori
+WorkingDirectory=/home/ori/twiceshy
+# Knobs (TWICESHY_NAS_SSH, TWICESHY_NAS_SSH_PORT, TWICESHY_CONTAINER,
+# TWICESHY_NTFY_ENV, DIGEST_HOURS) — all have deployment-matching defaults in
+# the script; this file is optional. See docs/DEPLOY.md.
+EnvironmentFile=-/home/ori/.config/twiceshy/metrics-digest.env
+ExecStart=/home/ori/twiceshy/scripts/metrics-digest.sh
+TimeoutStartSec=300

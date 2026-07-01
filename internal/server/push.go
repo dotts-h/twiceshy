@@ -150,7 +150,7 @@ func (h *handlers) pushHTTP(w http.ResponseWriter, r *http.Request) {
 	// seam pull uses for `retrieved` — closing the feedback loop (#0058): `pushed`
 	// is the denominator a later confirm_helpful (numerator) is measured against.
 	h.usage.recordPush(ids)
-	h.recordPushDecision(args.Query, decision, args.Session)
+	h.recordPushDecision(args.Query, decision, args.Session, args.Trigger)
 
 	out := PushResult{
 		Count:   len(cards),
@@ -175,7 +175,10 @@ func (h *handlers) pushHTTP(w http.ResponseWriter, r *http.Request) {
 // to sessionID by a SALTED hash (never the raw id) so the retro helpfulness join can
 // confirm only cards served in that session (#0069). Best-effort and async; the raw
 // query is hashed, never stored. An empty sessionID records no key. nil recorder = no-op.
-func (h *handlers) recordPushDecision(query string, d index.PushDecision, sessionID string) {
+// trigger is the caller's PushArgs.Trigger ("" | "prompt" | "error"); "" and "prompt"
+// normalize to "prompt" on the log (#0116) — they are semantically identical
+// (ADR-0028 decision 4), so the served-rate split by trigger has no empty bucket.
+func (h *handlers) recordPushDecision(query string, d index.PushDecision, sessionID, trigger string) {
 	if h.telemetry == nil {
 		return
 	}
@@ -191,6 +194,9 @@ func (h *handlers) recordPushDecision(query string, d index.PushDecision, sessio
 	if h.queryText {
 		queryText = truncateQueryText(query)
 	}
+	if trigger == "" {
+		trigger = "prompt"
+	}
 	h.telemetry.Record(telemetry.Decision{
 		Channel:           "push",
 		QueryHash:         h.telemetry.Hash(query),
@@ -200,5 +206,6 @@ func (h *handlers) recordPushDecision(query string, d index.PushDecision, sessio
 		FingerprintBypass: d.FingerprintBypass,
 		Served:            served,
 		Count:             len(d.Served),
+		Trigger:           trigger,
 	})
 }
