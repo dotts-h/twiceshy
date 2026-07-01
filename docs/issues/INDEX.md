@@ -136,3 +136,4 @@ never a cycle).
 | [0115](0115-breaking-changes-release-notes-source-mine-breaking-sections-from-github-releases-into-quarantined-drafts.md) | Breaking-changes source: mine Node.js SEMVER-MAJOR changelog entries into quarantined drafts (v1 of the release-notes miners) | open | high | — | |
 | [0116](0116-metrics-digest-daily-push-join-promote-health-digest-to-ntfy.md) | Metrics digest: daily push/join/promote health digest to ntfy | open | medium | — | |
 | [0117](0117-dev-code-idf-table-compute-word-level-df-from-a-permissive-code-corpus-adr-0017-phase-1.md) | Dev-code IDF table: compute word-level df from a permissive code corpus (ADR-0017 phase 1) | open | medium | — | |
+| [0118](0118-push-eligibility-excludes-importer-origin-breaking-change-traps-decide-the-admission-path.md) | Push eligibility excludes importer-origin breaking-change traps — decide the admission path | open | medium | — | |
