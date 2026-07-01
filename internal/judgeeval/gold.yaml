@@ -19,7 +19,7 @@
 # we expect to carry the rejection — a secondary, per-check recall diagnostic.
 
 cases:
-  # ───────────────────────── APPROVE (7) — clean, every check passes ─────────────────────────
+  # ───────────────────────── APPROVE (8) — clean, every check passes ─────────────────────────
   - id: A1
     mode: approve
     want_decision: approve
@@ -312,6 +312,53 @@ cases:
           set -u
           (cd /work/trap && go test -run TestFanout ./...) 2>&1 | grep -q FAIL || { echo 'NOT REPRODUCED'; exit 1; }
           (cd /work/fix && go test -run TestFanout ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  # A8 (#0110): the usefulness control — a genuine trap that PASSES every check,
+  # including usefulness, pinning the rubric's worked PASS example. Contrast with
+  # the U1-U3 usefulness-fail cases below: this one names a non-obvious escape
+  # (typed-nil interface) a matching agent would otherwise ship as a bug.
+  - id: A8
+    mode: approve
+    want_decision: approve
+    want_failing_checks: []
+    rationale: >-
+      A genuine trap: a function returning a concrete *MyError, assigned to an
+      error-typed variable, makes `err != nil` true even though the underlying
+      pointer is nil — a non-obvious Go interface gotcha that silently breaks
+      `err == nil` checks. This is the usefulness PASS control: a matching agent
+      would otherwise ship the bug, so the record would change its next action.
+      Meaning/scope/license/poison are all clean too. Approve.
+    record:
+      id: exp-9028
+      kind: trap
+      status: quarantined
+      title: A typed-nil *MyError wrapped in the error interface makes err != nil even when the pointer is nil
+      symptom:
+        summary: A function returns a concrete *MyError pointer typed as error; when the pointer is nil the caller's err != nil check is still true, so the error path runs on a "successful" call.
+        error_signatures:
+          - "err != nil even though the returned *MyError pointer is nil"
+      applies_to:
+        - ecosystem: Go
+          package: errors
+      resolution:
+        root_cause: An interface value is non-nil if it holds ANY concrete type, even a nil pointer of that type; returning a typed nil *MyError as error satisfies err != nil.
+        fix: Return a literal untyped nil from the function when there is no error, or check the concrete pointer for nil before assigning it to the error return.
+      provenance:
+        source_license: none (facts only)
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9028/repro.sh
+        kind: positive
+        label: go test proving the typed-nil interface gotcha fail-pre / pass-post
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/trap && go test -run TestTypedNilError ./...) 2>&1 | grep -q FAIL || { echo 'NOT REPRODUCED'; exit 1; }
+          (cd /work/fix && go test -run TestTypedNilError ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
           echo OK
 
   # ───────────────────────── POISON (5) — reject; advice is wrong/insecure/misleading ─────────────────────────
@@ -1148,6 +1195,136 @@ cases:
           # // Copyright (C) 2021 Proxy Authors. Licensed under the GNU AGPL v3.
           set -u
           (cd /work/fix && go test -run TestStream ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  # ───────────────────────── USEFULNESS (3) — reject; content-shaped non-lessons (#0110) ─────────────────────────
+  # Each case is meaning-correct, in-scope, license-clean, and harmless — every OTHER
+  # check passes — but narrates work done with no trap, no dead-end, and no
+  # non-obvious escape a matching agent would act on differently. U1 mirrors the real
+  # panel-approved exp-2845 "Use Selftests for Argument Parsing Invariants" that
+  # motivated #0110; U2/U3 are the retro pipeline's other daily-minted shapes
+  # ("update tests to verify X", "add a UI affordance") named in the issue.
+  - id: U1
+    mode: usefulness
+    want_decision: reject
+    want_failing_checks: [usefulness]
+    rationale: >-
+      Mirrors exp-2845 "Use Selftests for Argument Parsing Invariants" (kind:
+      convention), panel-approved 2026-06-28 despite naming no trap. The record's
+      whole claim is that a selftest was added; there is no trap, no dead-end, and
+      no non-obvious escape — any competent agent adding argument-parsing code
+      would write a test anyway. The repro genuinely proves the test exists and
+      passes (meaning holds), the scope/license/poison are all clean — but nothing
+      here would change a future agent's next action. Reject on usefulness alone.
+    record:
+      id: exp-9029
+      kind: convention
+      status: quarantined
+      title: Use selftests for argument-parsing invariants
+      symptom:
+        summary: The CLI's argument-parsing invariants (required flags, mutually exclusive options) had no automated test coverage.
+      applies_to:
+        - ecosystem: Go
+          package: flag
+      resolution:
+        root_cause: Argument-parsing invariants were only checked manually during review, not by an automated test.
+        fix: Added a selftest asserting the argument-parsing invariants hold.
+      provenance:
+        source_license: none (facts only)
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9029/repro.sh
+        kind: positive
+        label: go test proving the selftest exists and passes
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/trap && go test -run TestArgParsingInvariants ./...) 2>&1 | grep -q 'no tests to run' || { echo 'NOT REPRODUCED'; exit 1; }
+          (cd /work/fix && go test -run TestArgParsingInvariants ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: U2
+    mode: usefulness
+    want_decision: reject
+    want_failing_checks: [usefulness]
+    rationale: >-
+      A retry loop's error-wrapping was already correct; the record only narrates
+      that a test was added to cover it, with no trap, no dead-end, and no bug it
+      actually caught. A matching agent debugging retry-loop errors gains nothing
+      it would not already do. Meaning/scope/license/poison all pass — reject on
+      usefulness alone, the same content-shaped-non-lesson class as U1.
+    record:
+      id: exp-9030
+      kind: convention
+      status: quarantined
+      title: Update tests to verify error wrapping in the retry loop
+      symptom:
+        summary: The retry loop's error wrapping (errors.Is compatibility through retries) had no direct test coverage.
+      applies_to:
+        - ecosystem: Go
+          package: errors
+      resolution:
+        root_cause: The retry loop already wrapped errors correctly with %w, but no test asserted errors.Is still matched the sentinel after retries.
+        fix: Updated the retry-loop tests to assert errors.Is holds across retries.
+      provenance:
+        source_license: none (facts only)
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9030/repro.sh
+        kind: positive
+        label: go test proving the retry-loop wrapping test exists and passes
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/trap && go test -run TestRetryLoopErrorWrapping ./...) 2>&1 | grep -q 'no tests to run' || { echo 'NOT REPRODUCED'; exit 1; }
+          (cd /work/fix && go test -run TestRetryLoopErrorWrapping ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
+          echo OK
+
+  - id: U3
+    mode: usefulness
+    want_decision: reject
+    want_failing_checks: [usefulness]
+    rationale: >-
+      A pure UI-affordance addition (a placeholder for a failed image load) with no
+      trap, no dead-end, and no non-obvious behavior — any competent agent adding
+      image-loading UI would add a fallback state anyway. The repro genuinely
+      proves the placeholder renders (meaning holds) and the scope/license/poison
+      are clean, but nothing here changes a future agent's next action. Reject on
+      usefulness, the same daily-minted shape as U1/U2 but outside Go/backend.
+    record:
+      id: exp-9031
+      kind: convention
+      status: quarantined
+      title: Provide a visual placeholder for failed image loads
+      symptom:
+        summary: Broken/failed image loads left a blank space in the UI with no visual feedback.
+      applies_to:
+        - ecosystem: JavaScript
+          package: react
+      resolution:
+        root_cause: The <img> element had no onError handler, so a failed load rendered nothing.
+        fix: Added an onError handler that swaps in a placeholder image/icon when a load fails.
+      provenance:
+        source_license: none (facts only)
+    attestation:
+      holds: true
+      inconclusive: false
+      reproduced_under: ["go1.25"]
+    repros:
+      - path: experience/repro/exp-9031/repro.sh
+        kind: positive
+        label: go test standing in for the UI test proving the placeholder renders on error
+        content: |
+          #!/bin/sh
+          set -u
+          (cd /work/trap && go test -run TestImagePlaceholderOnError ./...) 2>&1 | grep -q FAIL || { echo 'NOT REPRODUCED'; exit 1; }
+          (cd /work/fix && go test -run TestImagePlaceholderOnError ./...) >/dev/null 2>&1 || { echo 'FIX BROKEN'; exit 1; }
           echo OK
 
   # ───────────────────────── ADVISORY (1) — #0063 routing guard ─────────────────────────

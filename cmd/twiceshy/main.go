@@ -767,7 +767,7 @@ func wrapFrontierFallback(primary judge.Judge, fbURL, fbModel, drafterModel stri
 	}
 	fb, err := judge.NewModelJudge(judge.Config{
 		Endpoint: fbURL, Model: fbModel, DrafterModel: drafterModel,
-		System: judge.AdvisorySystemV1, Advisory: true,
+		System: judge.AdvisorySystemV2, Advisory: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("configuring advisory panel fallback judge: %w", err)
@@ -781,14 +781,14 @@ func buildPromoterOptions(getenv func(string) string, judgeURL, judgeModel, draf
 		panelModel := getenv("TWICESHY_PANEL_JUDGE_MODEL")
 		aj1, err := judge.NewModelJudge(judge.Config{
 			Endpoint: judgeURL, Model: judgeModel, DrafterModel: drafterModel,
-			System: judge.AdvisorySystemV1, Advisory: true,
+			System: judge.AdvisorySystemV2, Advisory: true,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("configuring advisory panel primary judge: %w", err)
 		}
 		aj2, err := judge.NewModelJudge(judge.Config{
 			Endpoint: panelURL, Model: panelModel, DrafterModel: drafterModel,
-			System: judge.AdvisorySystemV1, Advisory: true,
+			System: judge.AdvisorySystemV2, Advisory: true,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("configuring advisory panel secondary judge: %w", err)
@@ -836,14 +836,14 @@ func buildPromoterOptions(getenv func(string) string, judgeURL, judgeModel, draf
 		prosePanelModel := getenv("TWICESHY_PROSE_PANEL_JUDGE_MODEL")
 		pj1, err := judge.NewModelJudge(judge.Config{
 			Endpoint: judgeURL, Model: judgeModel, DrafterModel: drafterModel,
-			System: judge.ProsePanelSystemV1, Prose: true,
+			System: judge.ProsePanelSystemV2, Prose: true,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("configuring prose panel primary judge: %w", err)
 		}
 		pj2, err := judge.NewModelJudge(judge.Config{
 			Endpoint: prosePanelURL, Model: prosePanelModel, DrafterModel: drafterModel,
-			System: judge.ProsePanelSystemV1, Prose: true,
+			System: judge.ProsePanelSystemV2, Prose: true,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("configuring prose panel secondary judge: %w", err)
@@ -976,9 +976,12 @@ func runPromote(ctx context.Context, args []string, out io.Writer, getenv func(s
 	// the prose prompt at think=false had 0 false-approve / 0 false-reject, beating
 	// the rubric (over-rejects) and think=true (adds false-approves, slower). Pinned
 	// here so the validated prompt lives in version control, not the untracked shim.
+	// ProseSystemV2 supersedes that measured V1 text with the added usefulness
+	// check (#0110); the false-approve/false-reject figures above are V1's — V2
+	// awaits its own live A/B re-measurement (gated behind an endpoint, never CI).
 	j, err := judge.NewModelJudge(judge.Config{
 		Endpoint: judgeURL, Model: *judgeModel, DrafterModel: *drafterModel,
-		System: judge.ProseSystemV1, Think: false,
+		System: judge.ProseSystemV2, Think: false,
 	})
 	if err != nil {
 		return fmt.Errorf("configuring judge: %w", err)
@@ -1108,7 +1111,7 @@ func runRepromote(ctx context.Context, args []string, out io.Writer, getenv func
 	}
 	j, err := judge.NewModelJudge(judge.Config{
 		Endpoint: judgeURL, Model: *judgeModel, DrafterModel: *drafterModel,
-		System: judge.ProseSystemV1, Think: false,
+		System: judge.ProseSystemV2, Think: false,
 	})
 	if err != nil {
 		return fmt.Errorf("configuring judge: %w", err)
@@ -1196,9 +1199,12 @@ func runAdapt(ctx context.Context, args []string, out io.Writer, getenv func(str
 	// the prose prompt at think=false had 0 false-approve / 0 false-reject, beating
 	// the rubric (over-rejects) and think=true (adds false-approves, slower). Pinned
 	// here so the validated prompt lives in version control, not the untracked shim.
+	// ProseSystemV2 supersedes that measured V1 text with the added usefulness
+	// check (#0110); the false-approve/false-reject figures above are V1's — V2
+	// awaits its own live A/B re-measurement (gated behind an endpoint, never CI).
 	j, err := judge.NewModelJudge(judge.Config{
 		Endpoint: judgeURL, Model: *judgeModel, DrafterModel: *drafterModel,
-		System: judge.ProseSystemV1, Think: false,
+		System: judge.ProseSystemV2, Think: false,
 	})
 	if err != nil {
 		return fmt.Errorf("configuring judge: %w", err)

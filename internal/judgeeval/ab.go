@@ -19,10 +19,10 @@ type Config struct {
 
 // Configs is the prompt×reasoning table judge-eval sweeps.
 var Configs = []Config{
-	{"prose-nothink", judge.ProseSystemV1, false},
-	{"prose-think", judge.ProseSystemV1, true},
-	{"rubric-nothink", judge.RubricSystemV1, false},
-	{"rubric-think", judge.RubricSystemV1, true},
+	{"prose-nothink", judge.ProseSystemV2, false},
+	{"prose-think", judge.ProseSystemV2, true},
+	{"rubric-nothink", judge.RubricSystemV2, false},
+	{"rubric-think", judge.RubricSystemV2, true},
 }
 
 // NamedResult pairs a config name with its scored result (for the report table
