@@ -120,6 +120,11 @@ type ModelJudge struct {
 	client   *http.Client
 }
 
+// ErrGeminiProseForbidden marks the privacy-gate rejection (ADR-0016 §5 /
+// ADR-0020): gemini can never judge prose, since prose may carry sensitive
+// content and the gemini free tier trains on inputs.
+var ErrGeminiProseForbidden = errors.New("judge: gemini cannot judge prose (privacy gate)")
+
 // NewModelJudge builds a diverse-model judge, enforcing the two standing
 // constraints by construction: the cheap local model is rejected outright, and
 // the judge must not share a model family with the drafter (anti-monoculture).
@@ -143,7 +148,7 @@ func NewModelJudge(cfg Config) (*ModelJudge, error) {
 	// Rejected by construction here so a misconfigured TWICESHY_PROSE_PANEL_JUDGE_MODEL
 	// cannot silently leak prose to a training endpoint.
 	if cfg.Prose && fam == "gemini" {
-		return nil, fmt.Errorf("judge: %q (family %q) cannot judge prose — the gemini free tier trains on inputs and prose may carry sensitive content (privacy gate, ADR-0016 §5 / ADR-0020)", cfg.Model, fam)
+		return nil, fmt.Errorf("judge: %q (family %q) cannot judge prose — the gemini free tier trains on inputs and prose may carry sensitive content (privacy gate, ADR-0016 §5 / ADR-0020): %w", cfg.Model, fam, ErrGeminiProseForbidden)
 	}
 	if df := FamilyOf(cfg.DrafterModel); df != "" && df == fam {
 		return nil, fmt.Errorf("judge: model %q shares family %q with the drafter — the judge must be diverse (anti-monoculture, ADR-0013 §6)", cfg.Model, fam)

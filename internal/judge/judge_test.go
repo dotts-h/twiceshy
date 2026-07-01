@@ -5,6 +5,7 @@ package judge_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -225,7 +226,7 @@ func TestModelJudge_PerRequestAdvisoryRoutesPrompt(t *testing.T) {
 // for prose (it may carry sensitive content; gemini free tier trains on inputs), but is
 // still allowed for advisory (public OSV/GHSA data). agy is fine for prose.
 func TestNewModelJudge_RejectsGeminiForProse(t *testing.T) {
-	if _, err := judge.NewModelJudge(judge.Config{Endpoint: "http://x", Model: "gemini-2.5-pro", Prose: true}); err == nil || !strings.Contains(err.Error(), "gemini") {
+	if _, err := judge.NewModelJudge(judge.Config{Endpoint: "http://x", Model: "gemini-2.5-pro", Prose: true}); !errors.Is(err, judge.ErrGeminiProseForbidden) {
 		t.Fatalf("a gemini prose judge must be rejected (privacy gate); got %v", err)
 	}
 	if _, err := judge.NewModelJudge(judge.Config{Endpoint: "http://x", Model: "gemini-2.5-pro", Advisory: true}); err != nil {
