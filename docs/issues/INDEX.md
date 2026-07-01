@@ -133,6 +133,6 @@ never a cycle).
 | [0112](0112-epic-model-hard-trap-prospector-measure-which-records-flip-a-base-model.md) | Epic: Model-hard trap prospector — measure which records flip a base model | open | high | — | |
 | [0113](0113-prospector-core-record-to-task-templating-off-arm-run-broker-verdict-model-hard-report.md) | Prospector core: record-to-task templating, OFF-arm run, broker verdict, model-hard report | open | high | 0112 | |
 | [0114](0114-prospector-gold-emission-failed-tasks-become-0005-gold-cases-on-arm-delta-measured.md) | Prospector gold emission: failed tasks become #0005 gold cases; ON-arm delta measured | open | medium | 0112 | |
-| [0115](0115-breaking-changes-release-notes-source-mine-breaking-sections-from-github-releases-into-quarantined-drafts.md) | Breaking-changes release-notes source: mine BREAKING sections from GitHub releases into quarantined drafts | open | high | — | |
+| [0115](0115-breaking-changes-release-notes-source-mine-breaking-sections-from-github-releases-into-quarantined-drafts.md) | Breaking-changes source: mine Node.js SEMVER-MAJOR changelog entries into quarantined drafts (v1 of the release-notes miners) | open | high | — | |
 | [0116](0116-metrics-digest-daily-push-join-promote-health-digest-to-ntfy.md) | Metrics digest: daily push/join/promote health digest to ntfy | open | medium | — | |
 | [0117](0117-dev-code-idf-table-compute-word-level-df-from-a-permissive-code-corpus-adr-0017-phase-1.md) | Dev-code IDF table: compute word-level df from a permissive code corpus (ADR-0017 phase 1) | open | medium | — | |

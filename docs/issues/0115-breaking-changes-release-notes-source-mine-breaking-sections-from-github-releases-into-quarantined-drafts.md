@@ -1,6 +1,6 @@
 ---
 id: 0115
-title: Breaking-changes release-notes source: mine BREAKING sections from GitHub releases into quarantined drafts
+title: Breaking-changes source: mine Node.js SEMVER-MAJOR changelog entries into quarantined drafts (v1 of the release-notes miners)
 status: open
 severity: high
 group: 
