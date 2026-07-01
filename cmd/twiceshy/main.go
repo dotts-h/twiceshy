@@ -19,6 +19,7 @@
 //	twiceshy nextid -corpus <dir> -base <ref>          allocate one past local/base max
 //	twiceshy gold-add -record <path> -id <Gxx> -mode <mode> -rationale <text>  render a gold.yaml case from an audit miss
 //	twiceshy judge-eval                               A/B the judge prompt vs the gold set (needs judge)
+//	twiceshy prospect -corpus <dir>                   model-hard trap prospector, report + gold cases (needs docker+runsc+model)
 //
 // serve requires the bearer token in TWICESHY_TOKEN. index and serve accept an
 // optional -embed-url (Ollama) to enable dense, pull-only retrieval (ADR-0009);
@@ -196,7 +197,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|learned|draft|promote|repromote|adapt|intake-reports|intake-issues|retro-intake|screen|report|pack|doctor|eval|usage-flush|gold-add|judge-eval|corpus-merge-check|corpus-pr-paths|nextid> [flags]")
+		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|learned|draft|promote|repromote|adapt|intake-reports|intake-issues|retro-intake|screen|report|pack|doctor|eval|usage-flush|gold-add|judge-eval|prospect|corpus-merge-check|corpus-pr-paths|nextid> [flags]")
 	}
 	switch args[0] {
 	case "index":
@@ -239,6 +240,8 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runGoldAdd(ctx, args[1:], out)
 	case "judge-eval":
 		return runJudgeEval(ctx, args[1:], out, getenv)
+	case "prospect":
+		return runProspect(ctx, args[1:], out, getenv)
 	case "self-audit":
 		return runSelfAudit(args[1:], out)
 	case "similarity":
@@ -252,7 +255,7 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	case "nextid":
 		return runNextID(ctx, args[1:], out)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, learned, draft, promote, repromote, adapt, intake-reports, intake-issues, retro-intake, screen, report, pack, doctor, eval, usage-flush, gold-add, judge-eval, self-audit, similarity, author, corpus-merge-check, corpus-pr-paths, or nextid)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, learned, draft, promote, repromote, adapt, intake-reports, intake-issues, retro-intake, screen, report, pack, doctor, eval, usage-flush, gold-add, judge-eval, prospect, self-audit, similarity, author, corpus-merge-check, corpus-pr-paths, or nextid)", args[0])
 	}
 }
 
