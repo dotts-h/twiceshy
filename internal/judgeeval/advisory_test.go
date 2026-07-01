@@ -107,17 +107,17 @@ func TestInferChecks_WholeWordOnly(t *testing.T) {
 		{"nothing relevant here", []string{"meaning"}},
 	}
 	for _, tc := range cases {
-		got := inferChecks(tc.reason)
-		if len(got) != len(tc.want) {
-			t.Errorf("inferChecks(%q) = %v, want %v", tc.reason, got, tc.want)
-			continue
-		}
-		for i := range got {
-			if got[i] != tc.want[i] {
-				t.Errorf("inferChecks(%q) = %v, want %v", tc.reason, got, tc.want)
-				break
+		t.Run(tc.reason, func(t *testing.T) {
+			got := inferChecks(tc.reason)
+			if len(got) != len(tc.want) {
+				t.Fatalf("inferChecks(%q) = %v, want %v", tc.reason, got, tc.want)
 			}
-		}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("inferChecks(%q) = %v, want %v", tc.reason, got, tc.want)
+				}
+			}
+		})
 	}
 }
 
