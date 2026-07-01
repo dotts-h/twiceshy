@@ -130,3 +130,9 @@ never a cycle).
 | [0109](0109-flag-gated-raw-query-text-on-gate-decision-telemetry.md) | Flag-gated raw query text on gate-decision telemetry | closed | medium | 0106 | |
 | [0110](0110-promotion-judge-gains-a-usefulness-dimension-would-this-card-change-a-competent-agent-s-action.md) | Promotion judge gains a usefulness dimension: would this card change a competent agent's action | closed | medium | 0106 | |
 | [0111](0111-extend-the-push-stoplist-with-a-static-dev-vocabulary-list-adr-0017-cheap-proxy.md) | Extend the push stoplist with a static dev-vocabulary list (ADR-0017 cheap proxy) | open | low | 0106 | |
+| [0112](0112-epic-model-hard-trap-prospector-measure-which-records-flip-a-base-model.md) | Epic: Model-hard trap prospector — measure which records flip a base model | open | high | — | |
+| [0113](0113-prospector-core-record-to-task-templating-off-arm-run-broker-verdict-model-hard-report.md) | Prospector core: record-to-task templating, OFF-arm run, broker verdict, model-hard report | open | high | 0112 | |
+| [0114](0114-prospector-gold-emission-failed-tasks-become-0005-gold-cases-on-arm-delta-measured.md) | Prospector gold emission: failed tasks become #0005 gold cases; ON-arm delta measured | open | medium | 0112 | |
+| [0115](0115-breaking-changes-release-notes-source-mine-breaking-sections-from-github-releases-into-quarantined-drafts.md) | Breaking-changes release-notes source: mine BREAKING sections from GitHub releases into quarantined drafts | open | high | — | |
+| [0116](0116-metrics-digest-daily-push-join-promote-health-digest-to-ntfy.md) | Metrics digest: daily push/join/promote health digest to ntfy | open | medium | — | |
+| [0117](0117-dev-code-idf-table-compute-word-level-df-from-a-permissive-code-corpus-adr-0017-phase-1.md) | Dev-code IDF table: compute word-level df from a permissive code corpus (ADR-0017 phase 1) | open | medium | — | |
