@@ -16,7 +16,7 @@ input="$(cat)" || fail_open
 prompt="$(printf '%s' "$input" | jq -r '.prompt // empty' 2>/dev/null)" || fail_open
 [ -n "$prompt" ] || fail_open
 
-payload="$(jq -n --arg q "$prompt" '{query: $q}')" || fail_open
+payload="$(jq -n --arg q "$prompt" '{query: $q, trigger: "prompt"}')" || fail_open
 
 response="$(
   curl -sfS --max-time 10 \
