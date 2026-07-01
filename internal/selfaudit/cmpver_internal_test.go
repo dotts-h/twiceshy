@@ -32,9 +32,11 @@ func TestCmpVer(t *testing.T) {
 		{"1.0.0", "1.0.0", 0},
 	}
 	for _, c := range cases {
-		if got := cmpVer(c.a, c.b); got != c.want {
-			t.Errorf("cmpVer(%q, %q) = %d, want %d", c.a, c.b, got, c.want)
-		}
+		t.Run(c.a+"_vs_"+c.b, func(t *testing.T) {
+			if got := cmpVer(c.a, c.b); got != c.want {
+				t.Errorf("cmpVer(%q, %q) = %d, want %d", c.a, c.b, got, c.want)
+			}
+		})
 	}
 }
 
