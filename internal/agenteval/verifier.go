@@ -51,11 +51,18 @@ func NewBrokerVerifier(broker repro.Broker) *BrokerVerifier {
 	}
 }
 
+// VerifierImages returns the pinned images a repro.Broker needs allowlisted to run
+// every job buildJob can construct (Go + Node) — the caller-facing way to build a
+// broker for this package without knowing the concrete pinned digests.
+func VerifierImages() []string {
+	return []string{repro.PinnedGoImage, pinnedNodeImage}
+}
+
 // Avoided extracts code from output, builds a toolchain job for c.VerifyID,
 // runs it via the broker, and returns true when the job exits 0 (trap avoided).
 func (v *BrokerVerifier) Avoided(ctx context.Context, c TaskCase, output string) (bool, error) {
 	code := extractCode(output)
-	job, err := v.buildJob(c.VerifyID, code)
+	job, err := v.buildJob(c.VerifyID, c.Deps, code)
 	if err != nil {
 		return false, err
 	}
@@ -73,8 +80,10 @@ func (v *BrokerVerifier) Avoided(ctx context.Context, c TaskCase, output string)
 	return res.Execute.ExitCode == 0, nil
 }
 
-// buildJob constructs a repro.Job for the given verifyID and extracted code.
-func (v *BrokerVerifier) buildJob(verifyID, code string) (repro.Job, error) {
+// buildJob constructs a repro.Job for the given verifyID and extracted code. deps
+// is c.Deps, used only by the generic "tsc" class — the literal VerifyIDs below
+// carry their own hardcoded deps and ignore it.
+func (v *BrokerVerifier) buildJob(verifyID string, deps []string, code string) (repro.Job, error) {
 	switch verifyID {
 	case "fts5-match":
 		// NOTE: `go build` only proves the model's code COMPILES. The FTS5 MATCH trap
@@ -83,24 +92,43 @@ func (v *BrokerVerifier) buildJob(verifyID, code string) (repro.Job, error) {
 		// just build it. This compile gate is a placeholder; the runtime check is the
 		// follow-up. The TS traps below ARE compile-time type errors, so tsc checks
 		// them exactly.
-		return repro.Job{
-			Image: v.goImage,
-			Files: map[string][]byte{
-				"go.mod":  []byte("module agenteval-verify\n\ngo 1.25\n"),
-				"main.go": []byte(code),
-			},
-			Env:     sandboxEnv(),
-			Execute: []string{"go", "build", "-o", "/dev/null", "."},
-			Timeout: verifyTimeout,
-		}, nil
+		return v.goBuildJob(code), nil
 
 	case "react19-useref":
 		return v.tscJob(code, "typescript @types/react@19 react@19"), nil
 	case "rn-viewstyle":
 		return v.tscJob(code, "typescript @types/react@19 react@19 react-native@0.76"), nil
 
+	// "gobuild" and "tsc" are the prospector's GENERIC verify classes (#0113): unlike
+	// the literal VerifyIDs above (one hardcoded trap each), they scaffold whatever
+	// code a drafted task produced. "tsc" has no deps of its own, so an empty Deps is
+	// a caller error, not a silent "install nothing and type-check anyway".
+	case "gobuild":
+		return v.goBuildJob(code), nil
+	case "tsc":
+		if len(deps) == 0 {
+			return repro.Job{}, fmt.Errorf("agenteval: tsc verify requires Deps (npm packages), got none")
+		}
+		return v.tscJob(code, strings.Join(deps, " ")), nil
+
 	default:
 		return repro.Job{}, fmt.Errorf("unknown VerifyID %q", verifyID)
+	}
+}
+
+// goBuildJob scaffolds code as a compile-only Go project (main.go + a minimal
+// go.mod) — the shape shared by "fts5-match" (see its NOTE above) and the generic
+// "gobuild" class.
+func (v *BrokerVerifier) goBuildJob(code string) repro.Job {
+	return repro.Job{
+		Image: v.goImage,
+		Files: map[string][]byte{
+			"go.mod":  []byte("module agenteval-verify\n\ngo 1.25\n"),
+			"main.go": []byte(code),
+		},
+		Env:     sandboxEnv(),
+		Execute: []string{"go", "build", "-o", "/dev/null", "."},
+		Timeout: verifyTimeout,
 	}
 }
 

@@ -99,6 +99,56 @@ func TestBrokerVerifier_UnknownVerifyID(t *testing.T) {
 	}
 }
 
+// The "gobuild" verify class is the generic compile-only Go check the prospector
+// uses (mirroring fts5-match's job shape, but for any Go trap, not just FTS5).
+func TestBuildJob_GoBuild(t *testing.T) {
+	v := NewBrokerVerifier(&stubBroker{})
+	job, err := v.buildJob("gobuild", nil, "package main\nfunc main() {}\n")
+	if err != nil {
+		t.Fatalf("buildJob: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(job.Image), "golang") {
+		t.Errorf("gobuild job image = %q, want the pinned Go image", job.Image)
+	}
+	if _, ok := job.Files["main.go"]; !ok {
+		t.Fatalf("gobuild job must scaffold main.go; files = %v", keys(job.Files))
+	}
+	if !strings.Contains(strings.Join(job.Execute, " "), "go build") {
+		t.Errorf("gobuild job Execute = %v, want a 'go build'", job.Execute)
+	}
+}
+
+// The generic "tsc" verify class type-checks with the caller-supplied Deps (the
+// prospector's drafted npm packages), unlike the literal react19-useref/rn-viewstyle
+// classes which carry their own hardcoded deps.
+func TestBuildJob_Tsc(t *testing.T) {
+	v := NewBrokerVerifier(&stubBroker{})
+	job, err := v.buildJob("tsc", []string{"typescript", "@types/react@19"}, "const x: number = 1")
+	if err != nil {
+		t.Fatalf("buildJob: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(job.Image), "node") {
+		t.Errorf("tsc job image = %q, want the pinned Node image", job.Image)
+	}
+	if !hasFileWithSuffix(job.Files, ".tsx") {
+		t.Errorf("tsc job must scaffold a .tsx file; files = %v", keys(job.Files))
+	}
+	prepare := strings.Join(job.Prepare, " ")
+	if !strings.Contains(prepare, "typescript") || !strings.Contains(prepare, "@types/react@19") {
+		t.Errorf("tsc job Prepare = %q, want it to install the given Deps", prepare)
+	}
+}
+
+// tsc has no fixed deps of its own (unlike react19-useref/rn-viewstyle) — an empty
+// Deps means the drafter/caller forgot to supply the npm packages the code needs,
+// so this must error rather than silently run tsc against nothing installed.
+func TestBuildJob_TscRequiresDeps(t *testing.T) {
+	v := NewBrokerVerifier(&stubBroker{})
+	if _, err := v.buildJob("tsc", nil, "const x = 1"); err == nil {
+		t.Error("buildJob(\"tsc\", nil, ...) must error when Deps is empty")
+	}
+}
+
 func TestExtractCode(t *testing.T) {
 	for _, tc := range []struct {
 		name, in, want string

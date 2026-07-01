@@ -20,6 +20,11 @@ type TaskCase struct {
 	Prompt   string // the task handed to the agent
 	Card     string // experience-card text injected ONLY in the memory-on arm
 	VerifyID string // opaque key the Verifier maps to an avoidance check (e.g. a scaffold name)
+	// Deps names the npm packages (with major pins, e.g. "typescript", "@types/react@19")
+	// the generic "tsc" verify class installs before type-checking. The literal
+	// VerifyIDs ("react19-useref", "rn-viewstyle") keep their own hardcoded deps and
+	// ignore this field; it exists for the prospector's generic verify classes.
+	Deps []string
 }
 
 // Result is one agent run's output + cost. card=="" is the memory-OFF arm.
