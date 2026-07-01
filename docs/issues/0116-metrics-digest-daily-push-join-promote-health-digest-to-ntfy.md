@@ -1,14 +1,14 @@
 ---
 id: 0116
 title: Metrics digest: daily push/join/promote health digest to ntfy
-status: open
+status: closed
 severity: medium
 group: 
 depends_on: []
 forgejo:
 links:
   adr:
-  prs: []
+  prs: [486]
   issues: [0106, 0067, 0069]
   regression:
 assets: []

@@ -1,14 +1,14 @@
 ---
 id: 0113
 title: Prospector core: record-to-task templating, OFF-arm run, broker verdict, model-hard report
-status: open
+status: closed
 severity: high
 group: 0112
 depends_on: []
 forgejo:
 links:
   adr: docs/adr/ADR-0029-model-hard-trap-prospector.md
-  prs: []
+  prs: [488]
   issues: [0112, 0005]
   regression:
 assets: []

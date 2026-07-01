@@ -1,14 +1,14 @@
 ---
 id: 0114
 title: Prospector gold emission: failed tasks become #0005 gold cases; ON-arm delta measured
-status: open
+status: closed
 severity: medium
 group: 0112
 depends_on: [0113]
 forgejo:
 links:
   adr: docs/adr/ADR-0029-model-hard-trap-prospector.md
-  prs: []
+  prs: [488]
   issues: [0112, 0113, 0005]
   regression:
 assets: []

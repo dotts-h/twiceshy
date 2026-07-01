@@ -8,7 +8,7 @@ depends_on: []
 forgejo:
 links:
   adr: docs/adr/ADR-0029-model-hard-trap-prospector.md
-  prs: []
+  prs: [488]
   issues: [0005, 0106]
   regression:
 assets: []

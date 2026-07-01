@@ -1,14 +1,14 @@
 ---
 id: 0115
 title: Breaking-changes source: mine Node.js SEMVER-MAJOR changelog entries into quarantined drafts (v1 of the release-notes miners)
-status: open
+status: closed
 severity: high
 group: 
 depends_on: []
 forgejo:
 links:
   adr:
-  prs: []
+  prs: [485]
   issues: [0022, 0073, 0106]
   regression:
 assets: []
