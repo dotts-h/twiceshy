@@ -480,8 +480,8 @@ func (ix *Index) Retrieve(ctx context.Context, q Query) ([]Hit, error) {
 // signature) always bypasses the gate: it is real context by construction.
 // Embedding-free; quarantined records are never surfaced (ADR-0001 §4, §6).
 func (ix *Index) RetrievePush(ctx context.Context, q Query) ([]Hit, error) {
-	d, err := ix.RetrievePushTraced(ctx, q)
-	return d.Served, err
+	decision, err := ix.RetrievePushTraced(ctx, q)
+	return decision.Served, err
 }
 
 // PushDecision is the gate decision RetrievePushTraced makes, for per-query
@@ -766,11 +766,7 @@ func (ix *Index) fingerprintHits(ctx context.Context, q Query, k int) ([]Hit, er
 	sb.WriteString(`SELECT DISTINCT r.id, r.kind, r.status, r.title, r.summary, r.path
 		FROM fingerprints f JOIN records r ON r.id = f.record_id
 		WHERE f.fp IN (?` + strings.Repeat(",?", len(fps)-1) + `)`)
-	args = appendStatusFilter(&sb, args, q)
-	args = appendStackFilter(&sb, args, q)
-	if q.PushEligibleOnly {
-		args = appendEligibleFilter(&sb, args)
-	}
+	args = appendSearchFilters(&sb, args, q)
 	sb.WriteString(" ORDER BY r.id LIMIT ?")
 	args = append(args, k)
 
@@ -810,11 +806,7 @@ func (ix *Index) lexicalHits(ctx context.Context, q Query, k int) ([]Hit, error)
 		sb.WriteString(" AND m.s <= ?")
 		args = append(args, -q.Floor)
 	}
-	args = appendStatusFilter(&sb, args, q)
-	args = appendStackFilter(&sb, args, q)
-	if q.PushEligibleOnly {
-		args = appendEligibleFilter(&sb, args)
-	}
+	args = appendSearchFilters(&sb, args, q)
 	sb.WriteString(" ORDER BY m.s ASC, r.id LIMIT ?")
 	args = append(args, k)
 
@@ -836,6 +828,18 @@ func (ix *Index) lexicalHits(ctx context.Context, q Query, k int) ([]Hit, error)
 		hits = append(hits, h)
 	}
 	return hits, rows.Err()
+}
+
+// appendSearchFilters appends the status, stack (ecosystem/package), and —
+// when requested — push-eligibility predicates shared by fingerprintHits and
+// lexicalHits, in the fixed order both already agreed on.
+func appendSearchFilters(sb *strings.Builder, args []any, q Query) []any {
+	args = appendStatusFilter(sb, args, q)
+	args = appendStackFilter(sb, args, q)
+	if q.PushEligibleOnly {
+		args = appendEligibleFilter(sb, args)
+	}
+	return args
 }
 
 func appendStatusFilter(sb *strings.Builder, args []any, q Query) []any {
