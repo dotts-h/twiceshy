@@ -63,13 +63,13 @@ func readIdfTable(t *testing.T, path string) (totalDocs uint64, df map[string]ui
 	if err != nil {
 		t.Fatalf("Open(%s): %v", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	gr, err := gzip.NewReader(f)
 	if err != nil {
 		t.Fatalf("gzip.NewReader(%s): %v", path, err)
 	}
-	defer gr.Close()
+	defer func() { _ = gr.Close() }()
 
 	sc := bufio.NewScanner(gr)
 	if !sc.Scan() {

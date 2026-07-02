@@ -13,7 +13,7 @@ func writeTable(w io.Writer, totalDocs uint64, entries []dfEntry) error {
 
 	writeLine := func(format string, args ...any) error {
 		if _, err := fmt.Fprintf(gw, format, args...); err != nil {
-			gw.Close()
+			_ = gw.Close()
 			return err
 		}
 		return nil

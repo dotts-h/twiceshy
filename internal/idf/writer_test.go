@@ -26,7 +26,7 @@ func TestWriteTable_RoundTripsHeaderAndRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gzip.NewReader(output) returned error: %v", err)
 	}
-	defer gr.Close()
+	defer func() { _ = gr.Close() }()
 
 	raw, err := io.ReadAll(gr)
 	if err != nil {
@@ -68,7 +68,7 @@ func TestWriteTable_DistinctInputsProduceDistinctOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gzip.NewReader(output) returned error: %v", err)
 	}
-	defer gr.Close()
+	defer func() { _ = gr.Close() }()
 
 	raw, err := io.ReadAll(gr)
 	if err != nil {
