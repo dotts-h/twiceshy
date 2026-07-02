@@ -60,7 +60,7 @@ type ProspectReport struct {
 	Scanned, Eligible, Drafted int
 	// Skipped counts records that never reached a verdict, by reason: "ineligible"
 	// (prospectEligible false), "unsupported" (drafter declined), "leak" (the leak
-	// guard tripped).
+	// guard tripped), "control" (the drafted control did not verify as avoided).
 	Skipped map[string]int
 	// OffAvoided lists the TrapIDs whose OFF arm already avoided the trap — no
 	// ON arm was run for these (nothing to measure).
@@ -84,10 +84,13 @@ type ProspectConfig struct {
 
 // Prospect walks cfg.Records in order, drafting and running at most cfg.Max
 // eligible cases. For each: eligibility → draft (skip on ErrTaskUnsupported,
-// abort on any other drafter error) → leak guard → OFF run → verify. An OFF
-// avoidance ends the case; an OFF hit triggers an ON run (card rendered from the
-// record) and both arms' verdicts are recorded. Runner/Verifier errors abort the
-// run, like agenteval.Run.
+// abort on any other drafter error) → leak guard → control check → OFF run →
+// verify. The control check runs tc.Control through the same Verifier.Avoided
+// used for the OFF/ON arms; a control that doesn't verify as avoided voids the
+// case (Skipped["control"]) before it ever reaches an arm. An OFF avoidance ends
+// the case; an OFF hit triggers an ON run (card rendered from the record) and
+// both arms' verdicts are recorded. Runner/Verifier errors abort the run, like
+// agenteval.Run.
 func Prospect(ctx context.Context, cfg ProspectConfig) (ProspectReport, error) {
 	rep := ProspectReport{Skipped: map[string]int{}}
 
@@ -115,6 +118,15 @@ func Prospect(ctx context.Context, cfg ProspectConfig) (ProspectReport, error) {
 		refText := rec.Resolution.RootCause + " " + rec.Resolution.Fix
 		if similarity.Assess(tc.Prompt, refText, similarity.DefaultN).Flagged(leakShingleThreshold) {
 			rep.Skipped["leak"]++
+			continue
+		}
+
+		controlAvoided, err := cfg.Verifier.Avoided(ctx, tc, tc.Control)
+		if err != nil {
+			return ProspectReport{}, fmt.Errorf("agenteval: control verify for %s: %w", rec.ID, err)
+		}
+		if !controlAvoided {
+			rep.Skipped["control"]++
 			continue
 		}
 		rep.Drafted++
