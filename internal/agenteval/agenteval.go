@@ -25,6 +25,9 @@ type TaskCase struct {
 	// VerifyIDs ("react19-useref", "rn-viewstyle") keep their own hardcoded deps and
 	// ignore this field; it exists for the prospector's generic verify classes.
 	Deps []string
+	// Control is a correct, trap-avoiding answer to Prompt, used to sanity-check the
+	// drafted task and its verify class before it is ever handed to an agent.
+	Control string
 }
 
 // Result is one agent run's output + cost. card=="" is the memory-OFF arm.

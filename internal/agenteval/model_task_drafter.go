@@ -78,9 +78,10 @@ func (d *ModelTaskDrafter) Name() string { return "model-task-drafter(" + d.mode
 
 // draftedTaskJSON is the strict shape the model must emit.
 type draftedTaskJSON struct {
-	Prompt string   `json:"prompt"`
-	Verify string   `json:"verify"`
-	Deps   []string `json:"deps"`
+	Prompt  string   `json:"prompt"`
+	Verify  string   `json:"verify"`
+	Deps    []string `json:"deps"`
+	Control string   `json:"control"`
 }
 
 // prospectDrafterVerifyClasses are the only verify values the model may emit;
@@ -107,6 +108,7 @@ func (d *ModelTaskDrafter) DraftTask(ctx context.Context, rec *record.Record) (T
 		Prompt:   dt.Prompt,
 		VerifyID: dt.Verify,
 		Deps:     dt.Deps,
+		Control:  dt.Control,
 	}, nil
 }
 
@@ -162,8 +164,9 @@ func (d *ModelTaskDrafter) complete(ctx context.Context, system, user string) (s
 
 // parseDraftedTask extracts the JSON object from raw (tolerating prose/markdown
 // fences around it, like internal/drafter/model.go's extractJSONObject) and
-// validates it: prompt must be non-empty, verify must be a known class, and
-// verify=="tsc" requires at least one dep.
+// validates it: prompt must be non-empty, verify must be a known class,
+// verify=="tsc" requires at least one dep, and control must be non-empty — a
+// missing/blank control makes the draft unusable, same as an empty prompt.
 func parseDraftedTask(raw string) (draftedTaskJSON, error) {
 	js := extractDraftedJSONObject(raw)
 	if js == "" {
@@ -181,6 +184,9 @@ func parseDraftedTask(raw string) (draftedTaskJSON, error) {
 	}
 	if dt.Verify == "tsc" && len(dt.Deps) == 0 {
 		return draftedTaskJSON{}, errors.New("verify tsc requires deps")
+	}
+	if strings.TrimSpace(dt.Control) == "" {
+		return draftedTaskJSON{}, errors.New("empty control")
 	}
 	return dt, nil
 }
@@ -225,10 +231,19 @@ Given a record's title, symptom, and ecosystem/package, output ONLY a JSON objec
 {
   "prompt": "<a natural, self-contained coding request an unwarned coder would answer by hitting the trap>",
   "verify": "tsc" | "gobuild",
-  "deps": ["<npm package with a major pin, e.g. typescript, @types/react@19>"]
+  "deps": ["<npm package with a major pin, e.g. typescript, @types/react@19>"],
+  "control": "<a correct, trap-avoiding answer to the same task — the code an experienced coder would write>"
 }
 Rules:
 - The prompt MUST NOT mention the trap, any error text, or the escape/fix — it is a plain task, nothing more.
 - Choose verify=gobuild for a Go trap, verify=tsc for a TypeScript/JS type-level trap.
 - deps must name every npm package (with a major version pin) the task's code needs; required whenever verify is tsc.
+- control is REQUIRED and must be non-empty: a correct, trap-avoiding solution to prompt, verifiable by the chosen
+  verify class.
+- Both prompt and control must describe/produce a single, self-contained, verifiable source file:
+  - verify=gobuild: a single stdlib-only "package main" Go file — no external deps, no multi-file layout.
+  - verify=tsc: a single .ts or .tsx module.
+- NEVER ask for, or answer with, a workflow, pipeline, config, or YAML file — CI workflows, docker-compose,
+  package.json, or any other config-shaped answer cannot be verified by a plain compiler invocation and must not be
+  drafted.
 - Output JSON only — no prose, no markdown fences.`
