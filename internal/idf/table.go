@@ -38,7 +38,7 @@ func parseTable(r io.Reader) (*Table, error) {
 		return nil, fmt.Errorf("idf: invalid docs count in header %q: %w", header, err)
 	}
 
-	table := &Table{
+	t := &Table{
 		totalDocs: totalDocs,
 		df:        make(map[string]uint64),
 	}
@@ -56,13 +56,13 @@ func parseTable(r io.Reader) (*Table, error) {
 		if err != nil {
 			return nil, fmt.Errorf("idf: invalid df count in row %q: %w", line, err)
 		}
-		table.df[strings.ToLower(fields[0])] = df
+		t.df[strings.ToLower(fields[0])] = df
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
 
-	return table, nil
+	return t, nil
 }
 
 // Available reports whether the table has any word/df rows loaded.
