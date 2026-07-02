@@ -122,11 +122,7 @@ func buildDocFreq(sources []idfManifestSource) (map[string]uint64, uint64, error
 // idfIsBinary reports whether data looks like binary content, detected via
 // the presence of a NUL byte within the first 512 bytes.
 func idfIsBinary(data []byte) bool {
-	n := len(data)
-	if n > 512 {
-		n = 512
-	}
-	return bytes.IndexByte(data[:n], 0) != -1
+	return bytes.IndexByte(data[:min(len(data), 512)], 0) != -1
 }
 
 // idfDFEntry pairs a word with its document frequency.
@@ -150,10 +146,7 @@ func topN(df map[string]uint64, n int) []idfDFEntry {
 		return entries[i].Word < entries[j].Word
 	})
 
-	if n < len(entries) {
-		entries = entries[:n]
-	}
-	return entries
+	return entries[:min(n, len(entries))]
 }
 
 // writeTable gzip-writes a TSV table to w: a "docs\t<totalDocs>" header line
