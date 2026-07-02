@@ -254,8 +254,10 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runCorpusPRPaths(ctx, args[1:], out)
 	case "nextid":
 		return runNextID(ctx, args[1:], out)
+	case "idf-build":
+		return runIdfBuild(args[1:], out)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, learned, draft, promote, repromote, adapt, intake-reports, intake-issues, retro-intake, screen, report, pack, doctor, eval, usage-flush, gold-add, judge-eval, prospect, self-audit, similarity, author, corpus-merge-check, corpus-pr-paths, or nextid)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, learned, draft, promote, repromote, adapt, intake-reports, intake-issues, retro-intake, screen, report, pack, doctor, eval, usage-flush, gold-add, judge-eval, prospect, self-audit, similarity, author, corpus-merge-check, corpus-pr-paths, nextid, or idf-build)", args[0])
 	}
 }
 
