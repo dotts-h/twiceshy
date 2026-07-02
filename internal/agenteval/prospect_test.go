@@ -5,6 +5,7 @@ package agenteval
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/dotts-h/twiceshy/internal/record"
@@ -44,15 +45,18 @@ func (d *stubDrafter) DraftTask(_ context.Context, rec *record.Record) (TaskCase
 	return TaskCase{}, errors.New("stubDrafter: no task configured for " + rec.ID)
 }
 
-// prospectStubRunner records every ON-arm (card != "") prompt it was called with,
-// so tests can assert whether the ON arm ran at all — the load-bearing branch
-// ("OFF avoided" must skip the ON run entirely).
+// prospectStubRunner records every OFF-arm (card == "") and ON-arm (card != "")
+// prompt it was called with, so tests can assert whether either arm ran at all —
+// the load-bearing branches ("OFF avoided" and now "control voided" must skip
+// arm runs entirely).
 type prospectStubRunner struct {
-	onCalls []string
+	offCalls []string
+	onCalls  []string
 }
 
 func (r *prospectStubRunner) Run(_ context.Context, prompt, card string) (Result, error) {
 	if card == "" {
+		r.offCalls = append(r.offCalls, prompt)
 		return Result{Output: "OFF:" + prompt, Tokens: 10}, nil
 	}
 	r.onCalls = append(r.onCalls, prompt)
@@ -60,17 +64,35 @@ func (r *prospectStubRunner) Run(_ context.Context, prompt, card string) (Result
 }
 
 // prospectStubVerifier maps a TaskCase's Prompt to the avoidance verdict for its
-// OFF and ON arm, keyed by the OFF:/ON: prefix prospectStubRunner's Output carries.
+// OFF and ON arm, keyed by the OFF:/ON: prefix prospectStubRunner's Output
+// carries. Prospect now also runs the SAME Avoided call directly against
+// tc.Control (no runner involved, so the output carries neither prefix) — that
+// call is resolved via controlAvoided/controlErr, keyed by the plain control
+// text itself, distinct from the OFF:/ON:-prefixed runner outputs. An unset
+// control entry defaults to "avoided" so every pre-existing test in this file
+// (none of which populate controlAvoided) keeps its original behavior.
 type prospectStubVerifier struct {
-	offAvoided map[string]bool
-	onAvoided  map[string]bool
+	offAvoided     map[string]bool
+	onAvoided      map[string]bool
+	controlAvoided map[string]bool
+	controlErr     map[string]error
 }
 
 func (v *prospectStubVerifier) Avoided(_ context.Context, c TaskCase, output string) (bool, error) {
-	if len(output) >= 4 && output[:4] == "OFF:" {
+	switch {
+	case strings.HasPrefix(output, "OFF:"):
 		return v.offAvoided[c.Prompt], nil
+	case strings.HasPrefix(output, "ON:"):
+		return v.onAvoided[c.Prompt], nil
+	default:
+		if err, ok := v.controlErr[output]; ok {
+			return false, err
+		}
+		if got, ok := v.controlAvoided[output]; ok {
+			return got, nil
+		}
+		return true, nil
 	}
-	return v.onAvoided[c.Prompt], nil
 }
 
 func TestProspect_EligibilitySkipsImporterWrongKindAndStatus(t *testing.T) {
@@ -159,6 +181,124 @@ func TestProspect_LeakGuardSkipsCopiedPrompt(t *testing.T) {
 	}
 	if rep.Drafted != 0 {
 		t.Errorf("Drafted = %d, want 0 (leaked draft must not count as drafted)", rep.Drafted)
+	}
+}
+
+// The control check runs right after the leak guard and before rep.Drafted is
+// incremented. When the control does NOT verify as avoided, the case is voided:
+// it never reaches the OFF or ON arm (the runner is never called for it), it
+// never appears in rep.ModelHard or rep.OffAvoided, rep.Drafted does not count
+// it, and rep.Skipped["control"] — a new reason alongside "ineligible",
+// "unsupported", and "leak" — is incremented instead.
+func TestProspect_ControlFailsVoidsCase(t *testing.T) {
+	rec := mkProspectRecord("exp-0001", "trap", "validated", "horia")
+	drafter := &stubDrafter{tasks: map[string]TaskCase{
+		"exp-0001": {
+			TrapID: "exp-0001", Prompt: "solve it cleanly", VerifyID: "gobuild",
+			Control: "control answer text",
+		},
+	}}
+	runner := &prospectStubRunner{}
+	// offAvoided/onAvoided are deliberately set to true here: if the control gate
+	// were a no-op, this record would sail through as an ordinary OFF-avoided
+	// case. The assertions below prove that does NOT happen — the control gate
+	// overrides, and the OFF/ON verdicts configured here are never even consulted.
+	verifier := &prospectStubVerifier{
+		controlAvoided: map[string]bool{"control answer text": false},
+		offAvoided:     map[string]bool{"solve it cleanly": true},
+		onAvoided:      map[string]bool{"solve it cleanly": true},
+	}
+
+	rep, err := Prospect(context.Background(), ProspectConfig{
+		Records: []*record.Record{rec}, Runner: runner, Verifier: verifier, Drafter: drafter, Max: 10,
+	})
+	if err != nil {
+		t.Fatalf("Prospect: %v", err)
+	}
+	if rep.Skipped["control"] != 1 {
+		t.Errorf("Skipped[control] = %d, want 1; skipped=%v", rep.Skipped["control"], rep.Skipped)
+	}
+	if rep.Drafted != 0 {
+		t.Errorf("Drafted = %d, want 0 (a control-voided case must not count as drafted)", rep.Drafted)
+	}
+	if len(rep.ModelHard) != 0 {
+		t.Errorf("ModelHard = %v, want empty (a control-voided case never reaches an arm)", rep.ModelHard)
+	}
+	if len(rep.OffAvoided) != 0 {
+		t.Errorf("OffAvoided = %v, want empty (a control-voided case never reaches an arm)", rep.OffAvoided)
+	}
+	if len(runner.offCalls) != 0 || len(runner.onCalls) != 0 {
+		t.Errorf("runner must never be called for a control-voided case; offCalls=%v onCalls=%v", runner.offCalls, runner.onCalls)
+	}
+}
+
+// A transport/verify error on the control check aborts the run, exactly like the
+// OFF/ON verify calls already do.
+func TestProspect_ControlVerifyErrorAborts(t *testing.T) {
+	rec := mkProspectRecord("exp-0001", "trap", "validated", "horia")
+	drafter := &stubDrafter{tasks: map[string]TaskCase{
+		"exp-0001": {
+			TrapID: "exp-0001", Prompt: "solve it cleanly", VerifyID: "gobuild",
+			Control: "control answer text",
+		},
+	}}
+	wantErr := errors.New("verify transport boom")
+	verifier := &prospectStubVerifier{
+		controlErr: map[string]error{"control answer text": wantErr},
+	}
+
+	_, err := Prospect(context.Background(), ProspectConfig{
+		Records: []*record.Record{rec}, Runner: &prospectStubRunner{}, Verifier: verifier, Drafter: drafter, Max: 10,
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("want the control verify error to abort the run, got %v", err)
+	}
+}
+
+// When the control DOES verify as avoided, behavior is byte-for-byte unchanged
+// from today: the existing OFF-hit/ON-run path runs exactly as it did before the
+// control gate existed.
+func TestProspect_ControlPassesRunsExistingOffHitOnArmPath(t *testing.T) {
+	rec := mkProspectRecord("exp-0001", "trap", "validated", "horia")
+	drafter := &stubDrafter{tasks: map[string]TaskCase{
+		"exp-0001": {
+			TrapID: "exp-0001", Prompt: "solve it cleanly", VerifyID: "gobuild",
+			Control: "control answer text",
+		},
+	}}
+	runner := &prospectStubRunner{}
+	verifier := &prospectStubVerifier{
+		controlAvoided: map[string]bool{"control answer text": true},
+		offAvoided:     map[string]bool{"solve it cleanly": false},
+		onAvoided:      map[string]bool{"solve it cleanly": true},
+	}
+
+	rep, err := Prospect(context.Background(), ProspectConfig{
+		Records: []*record.Record{rec}, Runner: runner, Verifier: verifier, Drafter: drafter, Max: 10,
+	})
+	if err != nil {
+		t.Fatalf("Prospect: %v", err)
+	}
+	if rep.Skipped["control"] != 0 {
+		t.Errorf("Skipped[control] = %d, want 0; skipped=%v", rep.Skipped["control"], rep.Skipped)
+	}
+	if rep.Drafted != 1 {
+		t.Errorf("Drafted = %d, want 1", rep.Drafted)
+	}
+	if len(runner.offCalls) != 1 {
+		t.Fatalf("want the OFF arm run exactly once, got %d", len(runner.offCalls))
+	}
+	if len(runner.onCalls) != 1 {
+		t.Fatalf("want the ON arm run exactly once, got %d", len(runner.onCalls))
+	}
+	if len(rep.OffAvoided) != 0 {
+		t.Errorf("OffAvoided = %v, want empty (the OFF arm hit)", rep.OffAvoided)
+	}
+	if len(rep.ModelHard) != 1 {
+		t.Fatalf("ModelHard len = %d, want 1", len(rep.ModelHard))
+	}
+	if got := rep.ModelHard[0]; got.TrapID != "exp-0001" || !got.OnAvoided {
+		t.Errorf("ModelHard[0] = %+v, want TrapID exp-0001 OnAvoided true", got)
 	}
 }
 
