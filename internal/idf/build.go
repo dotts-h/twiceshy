@@ -2,6 +2,7 @@ package idf
 
 import (
 	"bytes"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -54,6 +55,29 @@ func buildDocFreq(sources []ManifestSource) (map[string]uint64, uint64, error) {
 	}
 
 	return docFreq, totalDocs, nil
+}
+
+// Build loads the manifest at manifestPath, validates source licenses,
+// computes document frequencies from every source, keeps the top maxWords
+// highest-df tokens, and gzip-writes the TSV table to w.
+func Build(manifestPath string, maxWords int, w io.Writer) error {
+	manifest, err := loadManifest(manifestPath)
+	if err != nil {
+		return err
+	}
+
+	if err := validateLicenses(manifest); err != nil {
+		return err
+	}
+
+	docFreq, totalDocs, err := buildDocFreq(manifest.Sources)
+	if err != nil {
+		return err
+	}
+
+	entries := topN(docFreq, maxWords)
+
+	return writeTable(w, totalDocs, entries)
 }
 
 // isBinary reports whether data looks like binary content, detected via the
