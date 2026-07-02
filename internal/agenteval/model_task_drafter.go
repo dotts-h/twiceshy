@@ -176,7 +176,7 @@ func parseDraftedTask(raw string) (draftedTaskJSON, error) {
 	if err := json.Unmarshal([]byte(js), &dt); err != nil {
 		return draftedTaskJSON{}, fmt.Errorf("invalid JSON: %w", err)
 	}
-	if strings.TrimSpace(dt.Prompt) == "" {
+	if isBlank(dt.Prompt) {
 		return draftedTaskJSON{}, errors.New("empty prompt")
 	}
 	if !prospectDrafterVerifyClasses[dt.Verify] {
@@ -185,11 +185,14 @@ func parseDraftedTask(raw string) (draftedTaskJSON, error) {
 	if dt.Verify == "tsc" && len(dt.Deps) == 0 {
 		return draftedTaskJSON{}, errors.New("verify tsc requires deps")
 	}
-	if strings.TrimSpace(dt.Control) == "" {
+	if isBlank(dt.Control) {
 		return draftedTaskJSON{}, errors.New("empty control")
 	}
 	return dt, nil
 }
+
+// isBlank reports whether s is empty once surrounding whitespace is trimmed.
+func isBlank(s string) bool { return strings.TrimSpace(s) == "" }
 
 // extractDraftedJSONObject returns the substring from the first '{' to the last
 // '}', or "" if absent — tolerant of a model that wraps JSON in prose or ```json
