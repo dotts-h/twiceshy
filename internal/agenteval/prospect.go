@@ -112,7 +112,7 @@ func Prospect(ctx context.Context, cfg ProspectConfig) (ProspectReport, error) {
 				rep.Skipped["unsupported"]++
 				continue
 			}
-			return ProspectReport{}, fmt.Errorf("agenteval: drafting task for %s: %w", rec.ID, err)
+			return ProspectReport{}, prospectErr("drafting task", rec.ID, err)
 		}
 
 		refText := rec.Resolution.RootCause + " " + rec.Resolution.Fix
@@ -123,7 +123,7 @@ func Prospect(ctx context.Context, cfg ProspectConfig) (ProspectReport, error) {
 
 		controlAvoided, err := cfg.Verifier.Avoided(ctx, tc, tc.Control)
 		if err != nil {
-			return ProspectReport{}, fmt.Errorf("agenteval: control verify for %s: %w", rec.ID, err)
+			return ProspectReport{}, prospectErr("control verify", rec.ID, err)
 		}
 		if !controlAvoided {
 			rep.Skipped["control"]++
@@ -133,11 +133,11 @@ func Prospect(ctx context.Context, cfg ProspectConfig) (ProspectReport, error) {
 
 		off, err := cfg.Runner.Run(ctx, tc.Prompt, "")
 		if err != nil {
-			return ProspectReport{}, fmt.Errorf("agenteval: OFF run for %s: %w", rec.ID, err)
+			return ProspectReport{}, prospectErr("OFF run", rec.ID, err)
 		}
 		offAvoided, err := cfg.Verifier.Avoided(ctx, tc, off.Output)
 		if err != nil {
-			return ProspectReport{}, fmt.Errorf("agenteval: OFF verify for %s: %w", rec.ID, err)
+			return ProspectReport{}, prospectErr("OFF verify", rec.ID, err)
 		}
 		if offAvoided {
 			rep.OffAvoided = append(rep.OffAvoided, rec.ID)
@@ -147,11 +147,11 @@ func Prospect(ctx context.Context, cfg ProspectConfig) (ProspectReport, error) {
 		card := renderProspectCard(rec)
 		on, err := cfg.Runner.Run(ctx, tc.Prompt, card)
 		if err != nil {
-			return ProspectReport{}, fmt.Errorf("agenteval: ON run for %s: %w", rec.ID, err)
+			return ProspectReport{}, prospectErr("ON run", rec.ID, err)
 		}
 		onAvoided, err := cfg.Verifier.Avoided(ctx, tc, on.Output)
 		if err != nil {
-			return ProspectReport{}, fmt.Errorf("agenteval: ON verify for %s: %w", rec.ID, err)
+			return ProspectReport{}, prospectErr("ON verify", rec.ID, err)
 		}
 		rep.ModelHard = append(rep.ModelHard, ProspectCase{
 			TrapID:    rec.ID,
@@ -165,6 +165,12 @@ func Prospect(ctx context.Context, cfg ProspectConfig) (ProspectReport, error) {
 		})
 	}
 	return rep, nil
+}
+
+// prospectErr wraps err with the "agenteval: <step> for <id>: <err>" shape every
+// abort path in Prospect uses, so the six call sites don't repeat the format string.
+func prospectErr(step, id string, err error) error {
+	return fmt.Errorf("agenteval: %s for %s: %w", step, id, err)
 }
 
 // prospectEligible mirrors the push channel's eligibility predicate (ADR-0028):
@@ -185,15 +191,12 @@ func prospectEligible(rec *record.Record) bool {
 // symptom summary, and the fix — a few lines, NOT the server's full card
 // renderer (which formats retrieval metadata this harness never has).
 func renderProspectCard(rec *record.Record) string {
-	var b strings.Builder
-	b.WriteString(rec.Title)
+	lines := []string{rec.Title}
 	if rec.Symptom != nil && rec.Symptom.Summary != "" {
-		b.WriteString("\n")
-		b.WriteString(rec.Symptom.Summary)
+		lines = append(lines, rec.Symptom.Summary)
 	}
 	if rec.Resolution != nil && rec.Resolution.Fix != "" {
-		b.WriteString("\n")
-		b.WriteString(rec.Resolution.Fix)
+		lines = append(lines, rec.Resolution.Fix)
 	}
-	return b.String()
+	return strings.Join(lines, "\n")
 }
