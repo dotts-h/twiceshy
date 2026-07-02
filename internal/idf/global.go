@@ -20,21 +20,17 @@ var (
 // return the same cached *Table instance.
 func Global() *Table {
 	globalOnce.Do(func() {
-		globalTable = mustLoadGlobal()
+		gz, err := gzip.NewReader(bytes.NewReader(tableGz))
+		if err != nil {
+			panic("idf: failed to open embedded table.tsv.gz: " + err.Error())
+		}
+		defer func() { _ = gz.Close() }()
+
+		t, err := parseTable(gz)
+		if err != nil {
+			panic("idf: failed to parse embedded table.tsv.gz: " + err.Error())
+		}
+		globalTable = t
 	})
 	return globalTable
-}
-
-func mustLoadGlobal() *Table {
-	gz, err := gzip.NewReader(bytes.NewReader(tableGz))
-	if err != nil {
-		panic("idf: failed to open embedded table.tsv.gz: " + err.Error())
-	}
-	defer gz.Close()
-
-	t, err := parseTable(gz)
-	if err != nil {
-		panic("idf: failed to parse embedded table.tsv.gz: " + err.Error())
-	}
-	return t
 }
