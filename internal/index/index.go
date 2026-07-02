@@ -18,6 +18,7 @@ import (
 	_ "modernc.org/sqlite" // database/sql driver
 
 	"github.com/dotts-h/twiceshy/internal/fingerprint"
+	"github.com/dotts-h/twiceshy/internal/idf"
 	"github.com/dotts-h/twiceshy/internal/record"
 )
 
@@ -109,6 +110,50 @@ var importerOrigins = []string{"twiceshy-importer"}
 // and the mechanical TestPushGateExcludesCommonVocabulary (no common word is ever
 // discriminative). Grow it — with both guards — as new common words surface.
 var pushStopwords = wordSet(commonWords)
+
+// idfMaxDocRatio is the phase-1 ceiling (ADR-0017) above which a token's
+// global document-frequency ratio (df/totalDocs, from the embedded idf.Table)
+// marks it as "globally common": too generic to ever be a discriminative
+// push-gate signal, regardless of how rare it looks in this tiny corpus. The
+// literal is deliberately conservative for this first phase — it is not
+// derived from measurement yet — and is expected to be recalibrated once
+// telemetry from the live gate is available.
+const idfMaxDocRatio = 0.10
+
+// idfTableProvider is the small subset of *idf.Table's methods globallyCommonWord
+// needs, seamed out so a test can inject a fake table without touching the real
+// embedded idf.Global() data.
+type idfTableProvider interface {
+	Available() bool
+	TotalDocs() uint64
+	DF(word string) (uint64, bool)
+}
+
+// idfProvider is the injectable idfTableProvider seam, defaulting to the
+// process-wide embedded table. Tests swap it to exercise globallyCommonWord
+// against controlled df/totalDocs values.
+var idfProvider idfTableProvider = idf.Global()
+
+// globallyCommonWord reports whether tok is globally common per idfProvider:
+// true only when the provider is available, has documents loaded, contains
+// tok, and tok's df/totalDocs ratio strictly exceeds idfMaxDocRatio. Every
+// other case — an unavailable provider, an empty/default table, or a token
+// absent from it — reports false, so a missing table can never be
+// misread as "everything is common".
+func globallyCommonWord(tok string) bool {
+	if idfProvider == nil || !idfProvider.Available() {
+		return false
+	}
+	total := idfProvider.TotalDocs()
+	if total == 0 {
+		return false
+	}
+	df, ok := idfProvider.DF(tok)
+	if !ok {
+		return false
+	}
+	return float64(df)/float64(total) > idfMaxDocRatio
+}
 
 // wordSet splits whitespace-separated words into a lookup set.
 func wordSet(s string) map[string]bool {
