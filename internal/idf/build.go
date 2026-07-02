@@ -12,8 +12,9 @@ import (
 // NUL byte in the first 512 bytes) are skipped. Each distinct Tokenize-derived
 // token is counted once per document into docFreq, and totalDocs is
 // incremented once per counted document.
-func buildDocFreq(sources []ManifestSource) (docFreq map[string]uint64, totalDocs uint64, err error) {
-	docFreq = make(map[string]uint64)
+func buildDocFreq(sources []ManifestSource) (map[string]uint64, uint64, error) {
+	docFreq := make(map[string]uint64)
+	var totalDocs uint64
 
 	for _, source := range sources {
 		walkErr := filepath.WalkDir(source.Path, func(path string, d fs.DirEntry, err error) error {
