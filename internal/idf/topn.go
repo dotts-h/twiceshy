@@ -8,9 +8,9 @@ type dfEntry struct {
 	DF   uint64
 }
 
-// topN returns the top max entries from df sorted by descending document
+// topN returns the top n entries from df sorted by descending document
 // frequency, breaking ties lexicographically by word ascending.
-func topN(df map[string]uint64, max int) []dfEntry {
+func topN(df map[string]uint64, n int) []dfEntry {
 	entries := make([]dfEntry, 0, len(df))
 	for word, count := range df {
 		entries = append(entries, dfEntry{Word: word, DF: count})
@@ -23,8 +23,5 @@ func topN(df map[string]uint64, max int) []dfEntry {
 		return entries[i].Word < entries[j].Word
 	})
 
-	if max < len(entries) {
-		entries = entries[:max]
-	}
-	return entries
+	return entries[:min(n, len(entries))]
 }
