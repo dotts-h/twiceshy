@@ -620,8 +620,7 @@ func (ix *Index) discriminativeTokensVia(ctx context.Context, text string, df fu
 	}
 
 	var out []string
-	globallyDropped := 0
-	scanned := 0
+	var globallyDropped, scanned int
 	seen := map[string]bool{}
 	for _, field := range strings.Fields(strings.ToLower(text)) {
 		tok := stripControl(field)
@@ -775,7 +774,7 @@ func (ix *Index) fingerprintHits(ctx context.Context, q Query, k int) ([]Hit, er
 	args := fps
 	sb.WriteString(`SELECT DISTINCT r.id, r.kind, r.status, r.title, r.summary, r.path
 		FROM fingerprints f JOIN records r ON r.id = f.record_id
-		WHERE f.fp IN (?` + strings.Repeat(",?", len(fps)-1) + `)`)
+		WHERE f.fp IN (` + placeholders(len(fps)) + `)`)
 	args = appendSearchFilters(&sb, args, q)
 	sb.WriteString(" ORDER BY r.id LIMIT ?")
 	args = append(args, k)
@@ -844,7 +843,7 @@ func (ix *Index) lexicalHits(ctx context.Context, q Query, k int) ([]Hit, error)
 // when requested — push-eligibility predicates shared by fingerprintHits and
 // lexicalHits, in the fixed order both already agreed on.
 func appendSearchFilters(sb *strings.Builder, args []any, q Query) []any {
-	args = appendStatusFilter(sb, args, q)
+	appendStatusFilter(sb, q)
 	args = appendStackFilter(sb, args, q)
 	if q.PushEligibleOnly {
 		args = appendEligibleFilter(sb, args)
@@ -852,13 +851,12 @@ func appendSearchFilters(sb *strings.Builder, args []any, q Query) []any {
 	return args
 }
 
-func appendStatusFilter(sb *strings.Builder, args []any, q Query) []any {
+func appendStatusFilter(sb *strings.Builder, q Query) {
 	if q.IncludeQuarantined {
 		sb.WriteString(" AND r.status IN ('validated','quarantined')")
 	} else {
 		sb.WriteString(" AND r.status = 'validated'")
 	}
-	return args
 }
 
 func appendStackFilter(sb *strings.Builder, args []any, q Query) []any {

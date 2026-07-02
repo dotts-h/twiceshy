@@ -250,7 +250,7 @@ func (ix *Index) denseHits(ctx context.Context, qvec []float32, q Query, k int) 
 		FROM embeddings e JOIN records r ON r.id = e.record_id
 		WHERE 1=1`)
 	var args []any
-	args = appendStatusFilter(&sb, args, q)
+	appendStatusFilter(&sb, q)
 	args = appendStackFilter(&sb, args, q)
 
 	rows, err := ix.db.QueryContext(ctx, sb.String(), args...)
