@@ -30,7 +30,7 @@ type prospectGoldCaseYAML struct {
 }
 
 func (c prospectGoldCaseYAML) toTaskCase() TaskCase {
-	return TaskCase(c)
+	return TaskCase{TrapID: c.TrapID, Prompt: c.Prompt, Card: c.Card, VerifyID: c.VerifyID, Deps: c.Deps}
 }
 
 func prospectGoldCaseFrom(pc ProspectCase) prospectGoldCaseYAML {

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/dotts-h/twiceshy/internal/record"
@@ -45,7 +46,7 @@ func draftRec() *record.Record {
 }
 
 func TestModelTaskDrafter_DraftsFromModelOutput(t *testing.T) {
-	srv := chatCompletionStub(t, `{"prompt":"Build a search query from user input","verify":"gobuild","deps":[]}`, http.StatusOK)
+	srv := chatCompletionStub(t, `{"prompt":"Build a search query from user input","verify":"gobuild","deps":[],"control":"package main\n\nfunc main() {}\n"}`, http.StatusOK)
 	d, err := NewModelTaskDrafter(DrafterConfig{Endpoint: srv.URL, Model: "m"})
 	if err != nil {
 		t.Fatalf("NewModelTaskDrafter: %v", err)
@@ -62,6 +63,87 @@ func TestModelTaskDrafter_DraftsFromModelOutput(t *testing.T) {
 	}
 	if tc.VerifyID != "gobuild" {
 		t.Errorf("VerifyID = %q, want gobuild", tc.VerifyID)
+	}
+}
+
+// TestModelTaskDrafter_ControlField table-drives the new control-snippet
+// contract: DraftTask must thread a non-empty "control" field from the model's
+// JSON into TaskCase.Control, and must treat an empty or missing control the
+// same as an empty prompt -- ErrTaskUnsupported, never a silently-empty
+// control reaching the verifier. Two distinct, non-trivial control values are
+// asserted on the success path so the test cannot be satisfied by a drafter
+// that always returns one constant string.
+func TestModelTaskDrafter_ControlField(t *testing.T) {
+	cases := []struct {
+		name        string
+		content     string
+		wantErr     bool
+		wantControl string
+	}{
+		{
+			name:        "gobuild control threads through verbatim",
+			content:     `{"prompt":"Write a single self-contained package main program that reverses a string","verify":"gobuild","deps":[],"control":"package main\n\nfunc reverse(s string) string {\n\trunes := []rune(s)\n\tfor i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {\n\t\trunes[i], runes[j] = runes[j], runes[i]\n\t}\n\treturn string(runes)\n}\n\nfunc main() {}\n"}`,
+			wantControl: "package main\n\nfunc reverse(s string) string {\n\trunes := []rune(s)\n\tfor i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {\n\t\trunes[i], runes[j] = runes[j], runes[i]\n\t}\n\treturn string(runes)\n}\n\nfunc main() {}\n",
+		},
+		{
+			name:        "tsc control threads through with a different value",
+			content:     `{"prompt":"Write a single .ts module exporting a reverse(s: string) function","verify":"tsc","deps":["typescript"],"control":"export function reverse(s: string): string {\n  return s.split('').reverse().join('');\n}\n"}`,
+			wantControl: "export function reverse(s: string): string {\n  return s.split('').reverse().join('');\n}\n",
+		},
+		{
+			name:    "empty control string is unsupported",
+			content: `{"prompt":"Write a function","verify":"gobuild","deps":[],"control":""}`,
+			wantErr: true,
+		},
+		{
+			name:    "missing control field is unsupported",
+			content: `{"prompt":"Write a function","verify":"gobuild","deps":[]}`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := chatCompletionStub(t, tt.content, http.StatusOK)
+			d, err := NewModelTaskDrafter(DrafterConfig{Endpoint: srv.URL, Model: "m"})
+			if err != nil {
+				t.Fatalf("NewModelTaskDrafter: %v", err)
+			}
+			tc, err := d.DraftTask(context.Background(), draftRec())
+			if tt.wantErr {
+				if !errors.Is(err, ErrTaskUnsupported) {
+					t.Fatalf("an empty/missing control must be ErrTaskUnsupported, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("DraftTask: %v", err)
+			}
+			if tc.Control != tt.wantControl {
+				t.Errorf("Control = %q, want %q", tc.Control, tt.wantControl)
+			}
+		})
+	}
+}
+
+// TestProspectDrafterSystemV1_RequiresControlAndVerifiableShapes asserts the
+// system prompt was tightened to (a) require a "control" answer alongside the
+// prompt, (b) constrain gobuild tasks to a single self-contained stdlib-only
+// "package main" file and tsc tasks to a single .ts/.tsx module, and (c)
+// explicitly forbid workflow/config/YAML-shaped answers, which can't be
+// verified by a plain compiler invocation.
+func TestProspectDrafterSystemV1_RequiresControlAndVerifiableShapes(t *testing.T) {
+	lower := strings.ToLower(prospectDrafterSystemV1)
+
+	required := []string{"control", "package main", "workflow", "config", "yaml"}
+	for _, s := range required {
+		if !strings.Contains(lower, s) {
+			t.Errorf("prospectDrafterSystemV1 must mention %q, got:\n%s", s, prospectDrafterSystemV1)
+		}
+	}
+
+	if !strings.Contains(prospectDrafterSystemV1, ".ts") && !strings.Contains(prospectDrafterSystemV1, ".tsx") {
+		t.Errorf("prospectDrafterSystemV1 must require a .ts/.tsx module for verify=tsc, got:\n%s", prospectDrafterSystemV1)
 	}
 }
 

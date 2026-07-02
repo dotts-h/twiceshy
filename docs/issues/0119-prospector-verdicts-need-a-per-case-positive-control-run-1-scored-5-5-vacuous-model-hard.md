@@ -1,14 +1,14 @@
 ---
 id: 0119
 title: Prospector verdicts need a per-case positive control — run 1 scored 5/5 vacuous model-hard
-status: open
+status: closed
 severity: high
 group: 0112
 depends_on: []
 forgejo: 498
 links:
   adr: docs/adr/ADR-0029-model-hard-trap-prospector.md
-  prs: []
+  prs: [500]
   issues: [0112, 0113, 0005]
   regression:
 assets: []
@@ -61,3 +61,18 @@ Run-1 report preserved at the session scratchpad (prospect-run1.json); no gold w
 emitted from the run (-gold-out not set). Also noted: using the same model as
 drafter and runner biases task difficulty — acceptable for smoke, worth a distinct
 drafter model once verdicts are valid.
+
+## Close-out (2026-07-02, PR #500)
+Fixes 1+2 landed, built TDD-first via helm-tdd (run 4b0f7bc1; 2 slices, mutation
+1.0 each): drafter contract requires a non-empty `control` (rejected in
+parseDraftedTask like an empty prompt), `Prospect` verifies the control through
+the same `Verifier.Avoided` before any arm — a failing control voids the case as
+`Skipped["control"]` (no verdict, not counted Drafted) — and the drafter system
+prompt now demands verifiable shapes (single stdlib-only `package main` for
+gobuild / single .ts(x) for tsc; workflow/config/YAML answers forbidden).
+Hermetic acceptance covered (control-fail voids, verifier-error aborts,
+control-pass leaves the verdict path unchanged). Deferred to the next live
+session: the 17-record live re-run and the react19-useref gold-case check
+(acceptance bullets 1 and 3); fix 3 (gobuild module fetch or narrower
+eligibility) intentionally not built — the shape constraints make the drafter
+mark third-party-dep Go tasks stdlib-only or unsupported.
