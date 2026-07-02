@@ -34,7 +34,7 @@ func TestPushGateDiscriminativeTokensOnFixture(t *testing.T) {
 	}
 
 	// "fts5" appears in exp-0001/exp-0002 validated records — it must be discriminative.
-	disc, err := ix.discriminativeTokens(ctx, `fts5 syntax error near "."`)
+	disc, _, err := ix.discriminativeTokens(ctx, `fts5 syntax error near "."`)
 	if err != nil {
 		t.Fatalf("discriminativeTokens: %v", err)
 	}

@@ -513,7 +513,7 @@ func (ix *Index) RetrievePushTraced(ctx context.Context, q Query) (PushDecision,
 	// 2) discriminative-token precondition, computed over the ELIGIBLE subset
 	// (#0107): a token whose df is nonzero only among importer-origin advisories
 	// or a non-trap/fix kind must never open the gate.
-	disc, err := ix.discriminativeTokens(ctx, q.Text)
+	disc, _, err := ix.discriminativeTokens(ctx, q.Text)
 	if err != nil {
 		return PushDecision{}, err
 	}
@@ -565,9 +565,8 @@ func (ix *Index) RetrievePushTraced(ctx context.Context, q Query) (PushDecision,
 // (#0107: validated, kind trap/fix, non-importer origin) is in [1, pushMaxDF]. It
 // reuses the ftsQuery tokenization and quoting so df counts agree with what the
 // lexical search later matches (exp-0001).
-func (ix *Index) discriminativeTokens(ctx context.Context, text string) ([]string, error) {
-	out, _, err := ix.discriminativeTokensVia(ctx, text, ix.eligibleDF)
-	return out, err
+func (ix *Index) discriminativeTokens(ctx context.Context, text string) ([]string, int, error) {
+	return ix.discriminativeTokensVia(ctx, text, ix.eligibleDF)
 }
 
 // corroborated is the per-hit specificity check for prompt-triggered push
