@@ -566,7 +566,8 @@ func (ix *Index) RetrievePushTraced(ctx context.Context, q Query) (PushDecision,
 // reuses the ftsQuery tokenization and quoting so df counts agree with what the
 // lexical search later matches (exp-0001).
 func (ix *Index) discriminativeTokens(ctx context.Context, text string) ([]string, error) {
-	return ix.discriminativeTokensVia(ctx, text, ix.eligibleDF)
+	out, _, err := ix.discriminativeTokensVia(ctx, text, ix.eligibleDF)
+	return out, err
 }
 
 // corroborated is the per-hit specificity check for prompt-triggered push
@@ -608,13 +609,18 @@ func (ix *Index) tokenMatchCount(ctx context.Context, id string, tokens []string
 
 // discriminativeTokensVia is discriminativeTokens with the per-token validated-DF
 // lookup injected, so the serial-round-trip bound below can be asserted in a test.
-func (ix *Index) discriminativeTokensVia(ctx context.Context, text string, df func(context.Context, string) (int, error)) ([]string, error) {
+// The second return value counts tokens dropped by the global-IDF check
+// (globallyCommonWord) ALONE: a token that passes every local check (df in
+// [1, pushMaxDF]) but is globally common per idfProvider is excluded from the
+// slice and counted here, separate from tokens that never reach that check.
+func (ix *Index) discriminativeTokensVia(ctx context.Context, text string, df func(context.Context, string) (int, error)) ([]string, int, error) {
 	eco, err := ix.ecosystemNames(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	var out []string
+	globallyDropped := 0
 	scanned := 0
 	seen := map[string]bool{}
 	for _, field := range strings.Fields(strings.ToLower(text)) {
@@ -625,10 +631,14 @@ func (ix *Index) discriminativeTokensVia(ctx context.Context, text string, df fu
 		seen[tok] = true
 		n, err := df(ctx, tok)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if n >= 1 && n <= pushMaxDF {
-			out = append(out, tok)
+			if globallyCommonWord(tok) {
+				globallyDropped++
+			} else {
+				out = append(out, tok)
+			}
 		}
 		if len(out) >= maxQueryTokens {
 			break
@@ -641,7 +651,7 @@ func (ix *Index) discriminativeTokensVia(ctx context.Context, text string, df fu
 			break
 		}
 	}
-	return out, nil
+	return out, globallyDropped, nil
 }
 
 // validatedDF counts how many VALIDATED records contain the token in any indexed

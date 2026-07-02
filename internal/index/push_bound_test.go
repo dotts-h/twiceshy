@@ -28,7 +28,7 @@ func TestDiscriminativeTokens_BoundsDFRoundTrips(t *testing.T) {
 	var calls int
 	df := func(_ context.Context, _ string) (int, error) { calls++; return 0, nil }
 
-	out, err := ix.discriminativeTokensVia(context.Background(), sb.String(), df)
+	out, _, err := ix.discriminativeTokensVia(context.Background(), sb.String(), df)
 	if err != nil {
 		t.Fatalf("discriminativeTokensVia: %v", err)
 	}
