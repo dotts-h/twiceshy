@@ -652,14 +652,19 @@ func (ix *Index) discriminativeTokensVia(ctx context.Context, text string, df fu
 	return out, globallyDropped, nil
 }
 
+// validatedDFQuery is the shared base count-query for validatedDF and eligibleDF:
+// how many VALIDATED records contain a token in any indexed field. eligibleDF
+// appends the push-eligibility predicate to this same base via appendEligibleFilter
+// so the two queries can never silently drift apart.
+const validatedDFQuery = `SELECT count(*) FROM records_fts m JOIN records r ON r.id = m.id
+		 WHERE records_fts MATCH ? AND r.status = 'validated'`
+
 // validatedDF counts how many VALIDATED records contain the token in any indexed
 // field. Quarantine scope matters: counting the OSV stubs would dilute df and mask
 // the discriminative gap, so the count is validated-only.
 func (ix *Index) validatedDF(ctx context.Context, tok string) (int, error) {
 	var n int
-	err := ix.db.QueryRowContext(ctx,
-		`SELECT count(*) FROM records_fts m JOIN records r ON r.id = m.id
-		 WHERE records_fts MATCH ? AND r.status = 'validated'`, ftsPhrase(tok)).Scan(&n)
+	err := ix.db.QueryRowContext(ctx, validatedDFQuery, ftsPhrase(tok)).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("validated df: %w", err)
 	}
@@ -674,8 +679,7 @@ func (ix *Index) validatedDF(ctx context.Context, tok string) (int, error) {
 // finds those records via pull (Retrieve), just never via push.
 func (ix *Index) eligibleDF(ctx context.Context, tok string) (int, error) {
 	var sb strings.Builder
-	sb.WriteString(`SELECT count(*) FROM records_fts m JOIN records r ON r.id = m.id
-		 WHERE records_fts MATCH ? AND r.status = 'validated'`)
+	sb.WriteString(validatedDFQuery)
 	args := appendEligibleFilter(&sb, []any{ftsPhrase(tok)})
 	var n int
 	if err := ix.db.QueryRowContext(ctx, sb.String(), args...).Scan(&n); err != nil {
