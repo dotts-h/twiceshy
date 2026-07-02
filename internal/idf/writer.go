@@ -11,14 +11,20 @@ import (
 func writeTable(w io.Writer, totalDocs uint64, entries []dfEntry) error {
 	gw := gzip.NewWriter(w)
 
-	if _, err := fmt.Fprintf(gw, "docs\t%d\n", totalDocs); err != nil {
-		gw.Close()
+	writeLine := func(format string, args ...any) error {
+		if _, err := fmt.Fprintf(gw, format, args...); err != nil {
+			gw.Close()
+			return err
+		}
+		return nil
+	}
+
+	if err := writeLine("docs\t%d\n", totalDocs); err != nil {
 		return err
 	}
 
 	for _, e := range entries {
-		if _, err := fmt.Fprintf(gw, "%s\t%d\n", e.Word, e.DF); err != nil {
-			gw.Close()
+		if err := writeLine("%s\t%d\n", e.Word, e.DF); err != nil {
 			return err
 		}
 	}
