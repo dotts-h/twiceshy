@@ -19,7 +19,7 @@ type fakeIDFProvider struct {
 	df        map[string]uint64
 }
 
-func (f fakeIDFProvider) Available() bool  { return f.available }
+func (f fakeIDFProvider) Available() bool   { return f.available }
 func (f fakeIDFProvider) TotalDocs() uint64 { return f.totalDocs }
 func (f fakeIDFProvider) DF(word string) (uint64, bool) {
 	v, ok := f.df[word]
