@@ -175,13 +175,26 @@ git checkout main -q
 # exits 0=merged, 1=CI red (left open), 3=timeout. A left-open PR is exactly the
 # silent-stall seed — announce it NOW so it's visible at creation, not only when the
 # periodic corpus-stall-alarm catches the pile-up hours later.
-if [ "$AUTOMERGE" != "1" ]; then
-  notify "twiceshy: imported ${n} new ${SOURCE} records (PR #${pr}) — auto-merge off, PR left open"
-elif ! command -v forgejo-ci-merge >/dev/null; then
-  notify "twiceshy: imported ${n} new ${SOURCE} records (PR #${pr}) — forgejo-ci-merge unavailable, PR left open"
-elif FORGEJO_CI_MIN_RUNS=1 forgejo-ci-merge "$FORGEJO_REPO" "$pr" "$sha" "$REPO"; then
-  notify "twiceshy: imported ${n} new ${SOURCE} records and merged PR #${pr}"
-else
-  notify "twiceshy: import PR #${pr} (${n} ${SOURCE} records) left OPEN — auto-merge refused (CI red or timeout); needs attention"
-fi
+#
+# FORGEJO_CI_MIN_RUNS is pinned to 1 here (unlike scheduled-validate.sh, which
+# serves multiple repos and must NOT pin it): this script only ever targets the
+# corpus repo (claude/twiceshy-corpus), which has exactly ONE workflow, so the
+# historical default of 3 terminal runs would never be satisfied and every
+# import PR would time out unmerged.
+scheduled_import_sets_forgejo_ci_min_runs() {
+  local pr="$1" sha="$2"
+  local left_open="twiceshy: imported ${n} new ${SOURCE} records (PR #${pr}) — "
+
+  if [ "$AUTOMERGE" != "1" ]; then
+    notify "${left_open}auto-merge off, PR left open"
+  elif ! command -v forgejo-ci-merge >/dev/null; then
+    notify "${left_open}forgejo-ci-merge unavailable, PR left open"
+  elif FORGEJO_CI_MIN_RUNS=1 forgejo-ci-merge "$FORGEJO_REPO" "$pr" "$sha" "$REPO"; then
+    notify "twiceshy: imported ${n} new ${SOURCE} records and merged PR #${pr}"
+  else
+    notify "twiceshy: import PR #${pr} (${n} ${SOURCE} records) left OPEN — auto-merge refused (CI red or timeout); needs attention"
+  fi
+}
+
+scheduled_import_sets_forgejo_ci_min_runs "$pr" "$sha"
 echo "done: ${n} records, PR #${pr}"
