@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -278,6 +279,61 @@ esac`)
 	alerts := result.callsTo("curl", "http://ntfy.invalid/import")
 	if len(alerts) != 1 || !containsArg(alerts[0].Args, "twiceshy: import PR #42 (1 fixture records) left OPEN — auto-merge refused (CI red or timeout); needs attention") {
 		t.Fatalf("merge failure was not observable in notification; calls: %s", formatCalls(alerts))
+	}
+}
+
+// TestScheduledImportPinsForgejoCIMinRunsToOneForCorpusRepo covers the
+// scheduled-import.sh call site (elif forgejo-ci-merge "$FORGEJO_REPO" "$pr"
+// "$sha" "$REPO"; then) that decides whether an auto-merged import PR is safe
+// to merge. This script only ever targets the corpus repo
+// (claude/twiceshy-corpus), which has exactly ONE workflow — so the call must
+// pin FORGEJO_CI_MIN_RUNS=1 as an env-assignment prefix on that invocation
+// (unlike scheduled-validate.sh, which serves multiple repos and must NOT
+// pin it). Without this, forgejo-ci-merge falls back to its historical
+// default of 3 terminal runs (see TestForgejoCIMergeMinRuns) and every corpus
+// import PR times out unmerged because a 1-workflow repo can never produce 3
+// terminal runs.
+func TestScheduledImportPinsForgejoCIMinRunsToOneForCorpusRepo(t *testing.T) {
+	h := newShellHarness(t)
+	h.fake("git", `
+case "$*" in
+  *"status --porcelain -- experience/"*) echo '?? experience/record.md' ;;
+  *"config --get remote.origin.url"*) echo 'http://user:forge-token@forge/owner/repo' ;;
+  *"rev-parse --verify"*) exit 1 ;;
+  *"rev-parse HEAD"*) echo 'head-sha' ;;
+esac`)
+	h.fake("curl", `case "$*" in *"/pulls"*) echo '{"number":42}' ;; esac`)
+	h.fake("jq", `case "$*" in *"-nc"*) echo '{}' ;; *) echo 42 ;; esac`)
+	minRunsSeen := filepath.Join(h.root, "min_runs_seen")
+	h.fake("forgejo-ci-merge", fmt.Sprintf(`printf '%%s' "${FORGEJO_CI_MIN_RUNS:-unset}" > %q; exit 0`, minRunsSeen))
+	bin := h.fake("twiceshy", ":")
+	h.set("TWICESHY_REPO", h.root)
+	h.set("TWICESHY_BIN", bin)
+	h.set("TWICESHY_IMPORT_SOURCE", "fixture")
+
+	result := h.run("scheduled-import.sh")
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout: %s stderr: %s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if len(result.Invocations["forgejo-ci-merge"]) != 1 {
+		t.Fatalf("forgejo-ci-merge calls = %s, want exactly one", formatCalls(result.Invocations["forgejo-ci-merge"]))
+	}
+
+	seen, err := os.ReadFile(minRunsSeen)
+	if err != nil {
+		t.Fatalf("reading recorded FORGEJO_CI_MIN_RUNS: %v", err)
+	}
+	if got := string(seen); got != "1" {
+		t.Errorf("FORGEJO_CI_MIN_RUNS observed by forgejo-ci-merge = %q, want %q (corpus repo has exactly 1 workflow)", got, "1")
+	}
+
+	// A second, differently-shaped assertion so this test can't be satisfied by
+	// a fake that just always writes "1" regardless of what actually ran: the
+	// rest of the merge flow (PR number resolution, success notification text)
+	// must still complete normally once forgejo-ci-merge reports success.
+	wantDone := "done: 1 records, PR #42"
+	if !strings.Contains(result.Stdout, wantDone) {
+		t.Errorf("stdout = %q, want it to contain %q", result.Stdout, wantDone)
 	}
 }
 
