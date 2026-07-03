@@ -1,7 +1,7 @@
 ---
 id: 0105
 title: Served→used confirmed-helpful stuck at 0: retro analyzer (gpt-oss:20b) drops ~22% of transcripts as unprocessable, throttling the #0069 join
-status: open
+status: closed
 severity: high
 group: 0064
 depends_on: []
@@ -84,3 +84,43 @@ issue itself was surfaced). Guarded by `TestDrainRetro_ChronicFailureRate_Alerts
 **Still open:** the retry-budget half of (d), and fixes (a)/(b)/(c) — the analyzer
 itself still drops ~22% of real transcripts. The alert makes the failure visible; it
 does not reduce it.
+
+## Resolution (2026-07-03) — root cause was none of (a)/(b)/(c): Ollama's default context silently truncated the prompt
+
+Live diagnosis against the 73 dead-lettered transcripts found the real mechanism. The
+Ollama serve on VM 101 ran with the **default `num_ctx` = 4096**; real transcripts need up
+to ~23k prompt tokens. Ollama **silently truncates the prompt to the context window**, so
+for any transcript past ~12 KB the prompt alone filled the window and generation got ~1
+token of room. The smoking-gun signature, identical on all 8 largest dead-letters replayed
+raw against the API:
+
+    "finish_reason": "length", "usage": {"prompt_tokens": 4095, "completion_tokens": 1}
+
+That produces exactly the two observed failure shapes: **"empty model content"** (no room to
+generate) and **truncated/malformed JSON** (mid-size transcripts fit, but gpt-oss's
+*reasoning* output shares the 4096 `max_tokens` completion budget with the JSON answer, so
+the JSON gets cut mid-object — the `char 4763` hint). The model itself is fine — this was an
+infra config bug wearing a "flaky model" costume.
+
+**Fix (infra config, no engine change):**
+- VM 101 `ollama.service` drop-in: `OLLAMA_CONTEXT_LENGTH=32768` (largest queued transcript
+  ≈ 68 KB ≈ 23k tokens; 16k would still truncate the tail) and `OLLAMA_NUM_PARALLEL=2`
+  (4 × 32k KV slots spilled the 20b weights to CPU on the 16 GB card; 2 fits).
+- `twiceshy-retro-analyzer.service` drop-in: `OPENROUTER_MAX_TOKENS=8192` so reasoning +
+  candidate JSON no longer fight over a 4096 completion budget.
+
+**Verification (real signal, same shim path):** pre-fix replay of dead-letters through the
+live shim: 5/10 unprocessable. Post-fix replay of the **20 largest** dead-letters: **0/20
+unprocessable** (19 analyzed clean; 1 client-timeout from GPU contention while the live
+drain ran concurrently on the spilled model — the `NUM_PARALLEL=2` half of the fix). All 73
+dead-lettered transcripts were requeued for the nightly drains.
+
+Downstream unblocked the same evening: the retro automerge quality hold was lifted
+(`TWICESHY_AUTOMERGE=1`) and the 26-PR stale corpus backlog (625 held drafts, 549 record
+IDs re-numbered where parallel-open PRs collided) drained via the consolidated corpus PR
+#132. The #0069 served→used join
+now gets a full-rate feed; watch the next drain cycles for confirmed-helpful going
+positive (that remains gated on real usage, not on this bug).
+
+Diagnostic lesson recorded as a corpus record (Ollama prompt-truncation trap: check
+`prompt_tokens == num_ctx-1, completion_tokens == 1` before blaming the model).
