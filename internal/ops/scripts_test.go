@@ -1,7 +1,10 @@
 package ops
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -275,5 +278,157 @@ esac`)
 	alerts := result.callsTo("curl", "http://ntfy.invalid/import")
 	if len(alerts) != 1 || !containsArg(alerts[0].Args, "twiceshy: import PR #42 (1 fixture records) left OPEN — auto-merge refused (CI red or timeout); needs attention") {
 		t.Fatalf("merge failure was not observable in notification; calls: %s", formatCalls(alerts))
+	}
+}
+
+// runScriptWithArgs is like shellHarness.run, but forwards positional argv
+// to the target script. forgejo-ci-merge (REPO PR SHA [REPO_DIR]) needs
+// this; the shared harness.run only ever invokes scripts with no args, so
+// we can't reuse it as-is without touching harness_test.go.
+func runScriptWithArgs(h *shellHarness, script string, args ...string) result {
+	h.t.Helper()
+	path := filepath.Join(repoRoot(h.t), "scripts", script)
+	cmd := exec.Command("bash", append([]string{path}, args...)...)
+	cmd.Dir = h.root
+	cmd.Env = []string{
+		"PATH=" + h.binDir + ":/usr/bin:/bin",
+		"HOME=" + h.root,
+		"TMPDIR=" + h.root,
+		"FAKE_LOG_DIR=" + h.logDir,
+		"LC_ALL=C",
+	}
+	for key, value := range h.env {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	exitCode := 0
+	if err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			h.t.Fatalf("run %s: %v", script, err)
+		}
+		exitCode = exitErr.ExitCode()
+	}
+	return result{
+		Stdout:      stdout.String(),
+		Stderr:      stderr.String(),
+		ExitCode:    exitCode,
+		Invocations: h.readInvocations(),
+	}
+}
+
+// forgejoActionsFixture builds a fake Forgejo actions/tasks JSON body with n
+// workflow_runs, all matching sha and reporting status.
+func forgejoActionsFixture(sha, status string, n int) string {
+	var runs []string
+	for i := 0; i < n; i++ {
+		runs = append(runs, fmt.Sprintf(`{"head_sha":%q,"status":%q}`, sha, status))
+	}
+	return fmt.Sprintf(`{"workflow_runs":[%s]}`, strings.Join(runs, ","))
+}
+
+// TestForgejoCIMergeMinRuns covers scripts/forgejo-ci-merge's
+// FORGEJO_CI_MIN_RUNS gate. scripts/forgejo-ci-merge must be a repo-tracked,
+// byte-identical copy of the deployed ~/.local/bin/forgejo-ci-merge, except
+// the merge gate's hardcoded `len(r)>=3` becomes env-configurable. MIN_RUNS
+// exists because the corpus repo (claude/twiceshy-corpus) has only ONE
+// workflow, while the engine repo has three — a hardcoded "wait for 3
+// terminal runs" gate never fires for the corpus repo and every corpus PR
+// times out unmerged. The env value must be parsed defensively: empty or
+// non-numeric falls back to the historical default of 3; zero or negative
+// floors to 1 (a repo always has at least one workflow to wait on).
+func TestForgejoCIMergeMinRuns(t *testing.T) {
+	const sha = "deadbeefcafebabe1234567890abcdef12345678"
+	const repo = "owner/repo"
+	const pr = "9"
+
+	setup := func(t *testing.T, minRuns *string, availableRuns int) result {
+		t.Helper()
+		h := newShellHarness(t)
+		// Collapse the poll loop's real 12s backoff to instant retries so an
+		// insufficient-runs case (which must exhaust all 80 attempts before
+		// giving up) doesn't turn this test into a 16-minute sleep.
+		h.fake("sleep", ":")
+		h.fake("git", `
+case "$*" in
+  *"remote get-url origin"*) echo 'http://user:forge-token@forge.invalid/owner/repo' ;;
+esac`)
+		h.fake("curl", fmt.Sprintf(`
+case "$*" in
+  *"/actions/tasks"*) echo %q ;;
+  *"/pulls/"*"/merge"*) printf '200' ;;
+esac`, forgejoActionsFixture(sha, "success", availableRuns)))
+		if minRuns != nil {
+			h.set("FORGEJO_CI_MIN_RUNS", *minRuns)
+		}
+		return runScriptWithArgs(h, "forgejo-ci-merge", repo, pr, sha)
+	}
+
+	strp := func(s string) *string { return &s }
+
+	for _, tc := range []struct {
+		name          string
+		minRuns       *string
+		availableRuns int
+		wantExitCode  int
+		wantMerged    bool
+	}{
+		{
+			name:          "unset FORGEJO_CI_MIN_RUNS still requires 3 terminal runs",
+			minRuns:       nil,
+			availableRuns: 3,
+			wantExitCode:  0,
+			wantMerged:    true,
+		},
+		{
+			name:          "FORGEJO_CI_MIN_RUNS=1 merges after just 1 terminal run",
+			minRuns:       strp("1"),
+			availableRuns: 1,
+			wantExitCode:  0,
+			wantMerged:    true,
+		},
+		{
+			name:          "invalid FORGEJO_CI_MIN_RUNS falls back to 3, so 2 runs is not enough",
+			minRuns:       strp("banana"),
+			availableRuns: 2,
+			wantExitCode:  3,
+			wantMerged:    false,
+		},
+		{
+			name:          "empty FORGEJO_CI_MIN_RUNS falls back to 3, so 2 runs is not enough",
+			minRuns:       strp(""),
+			availableRuns: 2,
+			wantExitCode:  3,
+			wantMerged:    false,
+		},
+		{
+			name:          "FORGEJO_CI_MIN_RUNS=0 floors to 1",
+			minRuns:       strp("0"),
+			availableRuns: 1,
+			wantExitCode:  0,
+			wantMerged:    true,
+		},
+		{
+			name:          "FORGEJO_CI_MIN_RUNS=-5 floors to 1",
+			minRuns:       strp("-5"),
+			availableRuns: 1,
+			wantExitCode:  0,
+			wantMerged:    true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := setup(t, tc.minRuns, tc.availableRuns)
+			if result.ExitCode != tc.wantExitCode {
+				t.Fatalf("exit code = %d, want %d; stdout: %s stderr: %s", result.ExitCode, tc.wantExitCode, result.Stdout, result.Stderr)
+			}
+			mergeCalls := result.callsTo("curl", "http://192.168.50.244:3030/api/v1/repos/"+repo+"/pulls/"+pr+"/merge")
+			merged := len(mergeCalls) > 0
+			if merged != tc.wantMerged {
+				t.Fatalf("merged = %v, want %v; curl calls: %s; stdout: %s", merged, tc.wantMerged, formatCalls(result.Invocations["curl"]), result.Stdout)
+			}
+		})
 	}
 }
