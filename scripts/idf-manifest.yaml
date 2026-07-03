@@ -1,0 +1,18 @@
+# Dev-code IDF background corpus manifest (ADR-0017 phase 1, issue 0117).
+# Per-source license audit trail: every source must carry a permissive SPDX id
+# from idf's allowlist; `twiceshy idf-build` refuses to run otherwise.
+# Paths are local to the build host (claude-brain); the committed table asset
+# is the reproducible artifact, this manifest is its provenance record.
+sources:
+  - name: go-stdlib-1.25
+    path: /usr/local/go/src
+    license: BSD-3-Clause
+  - name: python-stdlib-3.13
+    path: /usr/lib/python3.13
+    license: Python-2.0
+  - name: typescript-5.9
+    path: /home/ori/wayfarer/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript
+    license: Apache-2.0
+  - name: eslint-10.4
+    path: /home/ori/wayfarer/node_modules/.pnpm/eslint@10.4.1/node_modules/eslint
+    license: MIT
