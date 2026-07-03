@@ -178,12 +178,12 @@ func (h *handlers) pushHTTP(w http.ResponseWriter, r *http.Request) {
 // trigger is the caller's PushArgs.Trigger ("" | "prompt" | "error"); "" and "prompt"
 // normalize to "prompt" on the log (#0116) — they are semantically identical
 // (ADR-0028 decision 4), so the served-rate split by trigger has no empty bucket.
-func (h *handlers) recordPushDecision(query string, d index.PushDecision, sessionID, trigger string) {
+func (h *handlers) recordPushDecision(query string, decision index.PushDecision, sessionID, trigger string) {
 	if h.telemetry == nil {
 		return
 	}
-	served := make([]telemetry.ServedHit, len(d.Served))
-	for i, hit := range d.Served {
+	served := make([]telemetry.ServedHit, len(decision.Served))
+	for i, hit := range decision.Served {
 		served[i] = telemetry.ServedHit{ID: hit.ID, Score: hit.Score}
 	}
 	session := ""
@@ -202,11 +202,11 @@ func (h *handlers) recordPushDecision(query string, d index.PushDecision, sessio
 		QueryHash:         h.telemetry.Hash(query),
 		QueryText:         queryText,
 		Session:           session,
-		Tokens:            d.Discriminative,
-		FingerprintBypass: d.FingerprintBypass,
-		IdfFiltered:       d.IdfFiltered,
+		Tokens:            decision.Discriminative,
+		FingerprintBypass: decision.FingerprintBypass,
+		IdfFiltered:       decision.IdfFiltered,
 		Served:            served,
-		Count:             len(d.Served),
+		Count:             len(decision.Served),
 		Trigger:           trigger,
 	})
 }
