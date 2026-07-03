@@ -204,6 +204,7 @@ func (h *handlers) recordPushDecision(query string, d index.PushDecision, sessio
 		Session:           session,
 		Tokens:            d.Discriminative,
 		FingerprintBypass: d.FingerprintBypass,
+		IdfFiltered:       d.IdfFiltered,
 		Served:            served,
 		Count:             len(d.Served),
 		Trigger:           trigger,
