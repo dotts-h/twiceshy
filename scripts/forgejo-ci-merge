@@ -16,17 +16,22 @@
 # parsed defensively (empty/non-numeric falls back to 3, and anything below 1
 # floors to 1, since a repo always has at least one workflow to wait on).
 set -uo pipefail
+
+# resolve_min_runs prints the effective FORGEJO_CI_MIN_RUNS gate: the raw env
+# value if it's a valid integer, else the historical default of 3; floored to
+# 1 (a repo always has at least one workflow to wait on).
+resolve_min_runs() {
+  local raw="${FORGEJO_CI_MIN_RUNS:-}" min=3
+  [[ "$raw" =~ ^-?[0-9]+$ ]] && min="$raw"
+  [ "$min" -ge 1 ] || min=1
+  echo "$min"
+}
+
 REPO="${1:?repo, e.g. claude/twiceshy}"; PR="${2:?pr number}"; SHA="${3:?head sha}"
 DIR="${4:-.}"; HOST="http://192.168.50.244:3030"
 TOK="$(git -C "$DIR" remote get-url origin 2>/dev/null | sed -n 's#.*://[^:]*:\([^@]*\)@.*#\1#p')"
 [ -n "$TOK" ] || { echo "forgejo-ci-merge: no token in origin remote"; exit 2; }
-MIN_RUNS_RAW="${FORGEJO_CI_MIN_RUNS:-}"
-if [[ "$MIN_RUNS_RAW" =~ ^-?[0-9]+$ ]]; then
-  MIN_RUNS="$MIN_RUNS_RAW"
-else
-  MIN_RUNS=3
-fi
-[ "$MIN_RUNS" -ge 1 ] || MIN_RUNS=1
+MIN_RUNS="$(resolve_min_runs)"
 for _ in $(seq 1 80); do
   json="$(curl -s "$HOST/api/v1/repos/$REPO/actions/tasks?limit=8" -H "Authorization: token $TOK")"
   verdict="$(printf '%s' "$json" | SHA="$SHA" MIN="$MIN_RUNS" python3 -c "
