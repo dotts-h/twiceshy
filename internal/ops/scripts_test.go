@@ -138,6 +138,115 @@ func TestCorpusStallAlarmWarnsOnTopiclessURL(t *testing.T) {
 	}
 }
 
+// TWICESHY_IMPORT_AUTHOR (#0115/#0118, ADR-0028 push-eligibility origin cut on
+// provenance.source.author) is optional provenance forwarded to every `twiceshy
+// ingest` invocation as `-author "$AUTHOR"`. Left unset, the ingest argv must be
+// byte-for-byte unchanged (no -author flag at all) — both on the generic
+// single-source path and the osv-live per-ecosystem loop.
+func TestScheduledImportAuthorFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		source     string
+		author     string
+		wantAuthor []string // nil = no -author flag anywhere in the ingest argv
+	}{
+		{
+			name:       "generic source with TWICESHY_IMPORT_AUTHOR appends -author",
+			source:     "node-breaking",
+			author:     "node-breaking",
+			wantAuthor: []string{"-author", "node-breaking"},
+		},
+		{
+			name:       "generic source with a different author value still appends it verbatim",
+			source:     "fixture",
+			author:     "quill-reviewer",
+			wantAuthor: []string{"-author", "quill-reviewer"},
+		},
+		{
+			name:       "generic source with TWICESHY_IMPORT_AUTHOR unset leaves argv unchanged",
+			source:     "fixture",
+			author:     "",
+			wantAuthor: nil,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newShellHarness(t)
+			configureCommonGit(h)
+			bin := h.fake("twiceshy", ":")
+			h.set("TWICESHY_REPO", h.root)
+			h.set("TWICESHY_BIN", bin)
+			h.set("TWICESHY_IMPORT_SOURCE", tc.source)
+			if tc.author != "" {
+				h.set("TWICESHY_IMPORT_AUTHOR", tc.author)
+			}
+
+			result := h.run("scheduled-import.sh")
+			calls := result.Invocations["twiceshy"]
+			if len(calls) != 1 {
+				t.Fatalf("twiceshy invocations = %d, want 1; stdout: %s stderr: %s", len(calls), result.Stdout, result.Stderr)
+			}
+			assertAuthorArgs(t, calls[0].Args, tc.wantAuthor)
+		})
+	}
+
+	t.Run("osv-live per-ecosystem loop appends -author to every ecosystem call", func(t *testing.T) {
+		h := newShellHarness(t)
+		configureCommonGit(h)
+		bin := h.fake("twiceshy", ":")
+		h.set("TWICESHY_REPO", h.root)
+		h.set("TWICESHY_BIN", bin)
+		h.set("TWICESHY_IMPORT_SOURCE", "osv-live")
+		h.set("TWICESHY_IMPORT_ECOSYSTEMS", "npm PyPI")
+		h.set("TWICESHY_IMPORT_AUTHOR", "node-breaking")
+
+		result := h.run("scheduled-import.sh")
+		calls := result.Invocations["twiceshy"]
+		if len(calls) != 2 {
+			t.Fatalf("twiceshy invocations = %d, want 2 (one per ecosystem); stdout: %s stderr: %s", len(calls), result.Stdout, result.Stderr)
+		}
+		for _, call := range calls {
+			assertAuthorArgs(t, call.Args, []string{"-author", "node-breaking"})
+		}
+	})
+
+	t.Run("osv-live per-ecosystem loop omits -author when TWICESHY_IMPORT_AUTHOR is unset", func(t *testing.T) {
+		h := newShellHarness(t)
+		configureCommonGit(h)
+		bin := h.fake("twiceshy", ":")
+		h.set("TWICESHY_REPO", h.root)
+		h.set("TWICESHY_BIN", bin)
+		h.set("TWICESHY_IMPORT_SOURCE", "osv-live")
+		h.set("TWICESHY_IMPORT_ECOSYSTEMS", "npm PyPI")
+
+		result := h.run("scheduled-import.sh")
+		calls := result.Invocations["twiceshy"]
+		if len(calls) != 2 {
+			t.Fatalf("twiceshy invocations = %d, want 2 (one per ecosystem); stdout: %s stderr: %s", len(calls), result.Stdout, result.Stderr)
+		}
+		for _, call := range calls {
+			assertAuthorArgs(t, call.Args, nil)
+		}
+	})
+}
+
+// assertAuthorArgs checks that -author immediately followed by its value appears
+// (or, when want is nil, does NOT appear at all) in an ingest invocation's argv.
+func assertAuthorArgs(t *testing.T, args []string, want []string) {
+	t.Helper()
+	if want == nil {
+		if containsArg(args, "-author") {
+			t.Errorf("argv unexpectedly contains -author: %q", args)
+		}
+		return
+	}
+	for i, arg := range args {
+		if arg == want[0] && i+1 < len(args) && args[i+1] == want[1] {
+			return
+		}
+	}
+	t.Errorf("argv %q does not contain %q immediately followed by %q", args, want[0], want[1])
+}
+
 func TestScheduledImportMergeFailureIsVisible(t *testing.T) {
 	h := newShellHarness(t)
 	h.fake("git", `

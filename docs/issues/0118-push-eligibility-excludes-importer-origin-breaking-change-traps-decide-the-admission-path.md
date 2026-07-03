@@ -1,14 +1,14 @@
 ---
 id: 0118
 title: Push eligibility excludes importer-origin breaking-change traps — decide the admission path
-status: open
+status: closed
 severity: medium
 group: 
 depends_on: []
 forgejo: 497
 links:
   adr: docs/adr/ADR-0028-push-eligibility-and-corroborating-specificity.md
-  prs: []
+  prs: [504]
   issues: [0106, 0115, 0112]
   regression:
 assets: []
@@ -44,3 +44,15 @@ the label approach confusing.
 ## Notes
 Found during the #0115 live smoke (2026-07-01). No action needed until node-breaking
 records reach `validated`; the promote cadence gives ~days of runway.
+
+## Close-out (2026-07-03, PR #504)
+Option 1 adopted (the issue's own recommendation): scheduled-import.sh gains
+TWICESHY_IMPORT_AUTHOR (built TDD-first via helm-tdd run 12c602c5 — RED
+failed-as-expected, GREEN 1 iteration, mutation 1.0; guarded by
+TestScheduledImportAuthorFlag incl. the unset-leaves-argv-unchanged regression),
+and scripts/twiceshy-import-node-breaking.{service,timer} schedule a daily
+node-breaking import with `-author node-breaking`, keeping those records out of
+ADR-0028's importerOrigins cut once validated. Side fix: the ops harness now
+isolates TWICESHY_NTFY_ENV, curing the TestNtfyAuthorization failure on hosts
+with a real /etc/twiceshy/ntfy.env. Option 3 (prospector-gated admission)
+remains the ADR-0029 destination once model-hard tags exist at volume.

@@ -31,6 +31,11 @@
 #                          opened (#0072 item 1); default = the fast corpus-guard
 #                          subset. On red, no PR is opened and ntfy fires — never
 #                          create an un-mergeable PR that piles up red (lesson exp-0746).
+#   TWICESHY_IMPORT_AUTHOR optional provenance forwarded to every `twiceshy ingest`
+#                          invocation as `-author "$AUTHOR"` (issues #0115/#0118,
+#                          ADR-0028 push-eligibility origin cut on
+#                          provenance.source.author). Unset/empty = ingest argv is
+#                          byte-for-byte unchanged (no -author flag).
 #   GO                     go toolchain (default /usr/local/go/bin/go)
 set -euo pipefail
 
@@ -42,6 +47,7 @@ LIMIT="${TWICESHY_IMPORT_LIMIT:-25}"
 # each is an exact OSV ecosystem label. Only used when SOURCE=osv-live.
 ECOSYSTEMS="${TWICESHY_IMPORT_ECOSYSTEMS:-npm PyPI Go}"
 AUTOMERGE="${TWICESHY_AUTOMERGE:-1}"
+AUTHOR="${TWICESHY_IMPORT_AUTHOR:-}"
 GO="${GO:-/usr/local/go/bin/go}"
 NTFY_URL="${NTFY_URL:-}"
 NTFY_TOKEN="${NTFY_TOKEN:-}"
@@ -71,6 +77,13 @@ BASE_ARGS=()
 if git rev-parse --verify -q origin/main >/dev/null; then
   BASE_ARGS=(-base origin/main)
 fi
+AUTHOR_ARGS=()
+if [ -n "$AUTHOR" ]; then
+  AUTHOR_ARGS=(-author "$AUTHOR")
+fi
+# Args common to every `twiceshy ingest` invocation below (osv-live's per-ecosystem
+# loop and the generic single-source path alike).
+INGEST_ARGS=(-limit "$LIMIT" -corpus "$REPO" "${BASE_ARGS[@]}" "${AUTHOR_ARGS[@]}")
 
 # Resolve the engine binary: a PATH-installed prebuilt (decoupled corpus — no
 # source in $REPO) or a build from this clone (legacy engine-repo deployment).
@@ -98,7 +111,7 @@ if [ "$SOURCE" = "osv-live" ]; then
   # blip) is logged + alerted but does NOT abort the others — a bulk importer
   # makes partial progress rather than failing the whole batch.
   for eco in $ECOSYSTEMS; do
-    if out="$("$bin" ingest osv-live -ecosystem "$eco" -limit "$LIMIT" -corpus "$REPO" "${BASE_ARGS[@]}" 2>&1)"; then
+    if out="$("$bin" ingest osv-live -ecosystem "$eco" "${INGEST_ARGS[@]}" 2>&1)"; then
       echo "[$eco] $out"
     else
       echo "[$eco] FAILED: $out"
@@ -106,7 +119,7 @@ if [ "$SOURCE" = "osv-live" ]; then
     fi
   done
 else
-  if ! out="$("$bin" ingest "$SOURCE" -limit "$LIMIT" -corpus "$REPO" "${BASE_ARGS[@]}" 2>&1)"; then
+  if ! out="$("$bin" ingest "$SOURCE" "${INGEST_ARGS[@]}" 2>&1)"; then
     notify "twiceshy import FAILED ($SOURCE): $out"
     git checkout main -q
     git branch -D "$branch" -q

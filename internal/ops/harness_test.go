@@ -271,6 +271,11 @@ func configureAlertPath(h *shellHarness, script, alertURL string) {
 		h.fake("git", "exit 1")
 		h.set("TWICESHY_REPO", h.root)
 		h.set("TWICESHY_GROWTH_STATE", filepath.Join(h.root, "growth.state"))
+		// Isolate from the real host's /etc/twiceshy/ntfy.env: the script
+		// sources NTFY_ENV unconditionally, which would clobber the
+		// test-provided NTFY_URL/NTFY_TOKEN with production values when
+		// this suite runs on a box with that file present.
+		h.set("TWICESHY_NTFY_ENV", filepath.Join(h.root, "ntfy.env"))
 	default:
 		h.t.Fatalf("unknown script %q", script)
 	}

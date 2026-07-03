@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily twiceshy node-breaking import (issues 0115/0118)
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

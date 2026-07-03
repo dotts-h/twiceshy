@@ -1,0 +1,23 @@
+[Unit]
+Description=twiceshy node-breaking import (Node.js SEMVER-MAJOR changelog traps -> quarantined-record PR, issues 0115/0118)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ori
+Environment=PATH=/home/ori/.local/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
+Environment=GO=/usr/local/go/bin/go
+Environment=TWICESHY_REPO=/home/ori/twiceshy-import
+Environment=TWICESHY_IMPORT_SOURCE=node-breaking
+# 0118 option 1: a distinct provenance author keeps these records OUT of
+# ADR-0028's importerOrigins push-eligibility cut — node-breaking records are
+# exactly mid-prompt material once validated.
+Environment=TWICESHY_IMPORT_AUTHOR=node-breaking
+Environment=TWICESHY_IMPORT_LIMIT=10
+Environment=TWICESHY_AUTOMERGE=1
+Environment=TWICESHY_FORGEJO_REPO=claude/twiceshy-corpus
+Environment=TWICESHY_BIN=/home/ori/.local/bin/twiceshy
+# ntfy channel + token (deny-all server) — same env file the other twiceshy units load.
+EnvironmentFile=/etc/twiceshy/ntfy.env
+ExecStart=/home/ori/twiceshy/scripts/scheduled-import.sh
