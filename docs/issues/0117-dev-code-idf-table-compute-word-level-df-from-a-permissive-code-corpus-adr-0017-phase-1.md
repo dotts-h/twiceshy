@@ -1,15 +1,15 @@
 ---
 id: 0117
 title: Dev-code IDF table: compute word-level df from a permissive code corpus (ADR-0017 phase 1)
-status: open
+status: closed
 severity: medium
 group: 
 depends_on: []
 forgejo: 496
 links:
   adr: docs/adr/ADR-0017-global-idf-push-gate-specificity.md
-  prs: []
-  issues: [0068, 0111, 0106]
+  prs: [501, 502, 503]
+  issues: [0068, 0111, 0106, 0120]
   regression:
 assets: []
 ---
@@ -69,3 +69,20 @@ the hand-maintained stoplist (#0111) stands in for it.
 This is phase 1 only — "run alongside," never a replacement. Retiring #0111's
 stoplist (ADR-0017 phase 2) is a separate, later decision gated on the
 no-regression evidence above; this issue does not remove the stoplist.
+
+## Close-out (2026-07-03, PRs #501/#502/#503)
+Phase 1 landed in three PRs, all built TDD-first via helm-tdd (every slice: RED
+failed-as-expected, GREEN 1 iteration, mutation 1.0): #501 internal/idf (embedded
+gzip-TSV word-level DF table, empty-table-means-signal-absent semantics,
+gate-granularity Tokenize, license-allowlisted `idf-build` precompute); #502 gate
+wiring (globallyCommonWord alongside stoplist+pushMaxDF, idfMaxDocRatio=0.10
+conservative constant, PushDecision.IdfFiltered double-filter counter threaded
+into #0067 telemetry as idf_filtered); #503 the real asset — 963 KB gzip, 200k
+words over 13,074 docs from a license-audited local corpus (Go stdlib
+BSD-3-Clause, Python stdlib Python-2.0, TypeScript Apache-2.0, ESLint MIT;
+provenance in scripts/idf-manifest.yaml). Sanity: the(0.81)/if(0.58)/error(0.23)
+read generic; sqlite(0.0009)/fts5(absent) stay discriminative — the exp-0622
+criterion. The exp-0622 vocabulary-exclusion guard passes with the real table.
+The dormant live-corpus recall guard was found already failing 0/6 WITHOUT these
+changes (positive control) — split to issue 0120 rather than papered over here.
+Stoplist retirement remains phase 2, gated on 0120 + telemetry evidence.

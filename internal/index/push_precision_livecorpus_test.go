@@ -85,7 +85,7 @@ func TestPushGateExcludesCommonVocabulary(t *testing.T) {
 			continue
 		}
 		seen[w] = true
-		disc, err := ix.discriminativeTokens(ctx, w)
+		disc, _, err := ix.discriminativeTokens(ctx, w)
 		if err != nil {
 			t.Fatal(err)
 		}
