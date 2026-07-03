@@ -179,7 +179,7 @@ if [ "$AUTOMERGE" != "1" ]; then
   notify "twiceshy: imported ${n} new ${SOURCE} records (PR #${pr}) — auto-merge off, PR left open"
 elif ! command -v forgejo-ci-merge >/dev/null; then
   notify "twiceshy: imported ${n} new ${SOURCE} records (PR #${pr}) — forgejo-ci-merge unavailable, PR left open"
-elif forgejo-ci-merge "$FORGEJO_REPO" "$pr" "$sha" "$REPO"; then
+elif FORGEJO_CI_MIN_RUNS=1 forgejo-ci-merge "$FORGEJO_REPO" "$pr" "$sha" "$REPO"; then
   notify "twiceshy: imported ${n} new ${SOURCE} records and merged PR #${pr}"
 else
   notify "twiceshy: import PR #${pr} (${n} ${SOURCE} records) left OPEN — auto-merge refused (CI red or timeout); needs attention"
