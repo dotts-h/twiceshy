@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# forgejo-ci-merge REPO PR SHA [REPO_DIR]
+#
+# Installed to ~/.local/bin/forgejo-ci-merge — this file is the repo-tracked
+# source of truth; keep the deployed copy in sync with edits made here.
+#
+# Poll Forgejo Actions for a PR's head SHA until all checks are terminal, then
+# merge on success (delete branch). Designed to run in the BACKGROUND so the
+# harness notifies on exit instead of blocking on a foreground sleep-loop.
+#
+# FORGEJO_CI_MIN_RUNS: the "enough terminal runs to trust the verdict" gate
+# was historically hardcoded to 3, tuned for the engine repo which has three
+# workflows. The corpus repo (claude/twiceshy-corpus) has only ONE workflow,
+# so a hardcoded 3-run gate never fires there and every corpus PR times out
+# unmerged. FORGEJO_CI_MIN_RUNS makes the gate configurable per repo; it is
+# parsed defensively (empty/non-numeric falls back to 3, and anything below 1
+# floors to 1, since a repo always has at least one workflow to wait on).
+set -uo pipefail
+REPO="${1:?repo, e.g. claude/twiceshy}"; PR="${2:?pr number}"; SHA="${3:?head sha}"
+DIR="${4:-.}"; HOST="http://192.168.50.244:3030"
+TOK="$(git -C "$DIR" remote get-url origin 2>/dev/null | sed -n 's#.*://[^:]*:\([^@]*\)@.*#\1#p')"
+[ -n "$TOK" ] || { echo "forgejo-ci-merge: no token in origin remote"; exit 2; }
+MIN_RUNS_RAW="${FORGEJO_CI_MIN_RUNS:-}"
+if [[ "$MIN_RUNS_RAW" =~ ^-?[0-9]+$ ]]; then
+  MIN_RUNS="$MIN_RUNS_RAW"
+else
+  MIN_RUNS=3
+fi
+[ "$MIN_RUNS" -ge 1 ] || MIN_RUNS=1
+for _ in $(seq 1 80); do
+  json="$(curl -s "$HOST/api/v1/repos/$REPO/actions/tasks?limit=8" -H "Authorization: token $TOK")"
+  verdict="$(printf '%s' "$json" | SHA="$SHA" MIN="$MIN_RUNS" python3 -c "
+import sys,json,os
+# Forgejo actions/tasks: status is the terminal value itself
+# (success|failure|cancelled|skipped|error vs running|waiting|blocked).
+TERMINAL={'success','failure','cancelled','skipped','error'}
+d=json.load(sys.stdin); s=os.environ['SHA'][:8]
+MIN=int(os.environ['MIN'])
+r=[w for w in d.get('workflow_runs',[]) if w.get('head_sha','').startswith(s)]
+if len(r) >= MIN and all(w.get('status') in TERMINAL for w in r):
+    print('ok' if all(w.get('status')=='success' for w in r) else 'fail')
+else: print('wait')")"
+  case "$verdict" in
+    ok)   code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$HOST/api/v1/repos/$REPO/pulls/$PR/merge" \
+            -H "Authorization: token $TOK" -H "Content-Type: application/json" \
+            -d '{"Do":"merge","delete_branch_after_merge":true}')
+          echo "CI green → merged PR #$PR (HTTP $code)"; exit 0 ;;
+    fail) echo "CI FAILED for PR #$PR — left open for inspection"; exit 1 ;;
+  esac
+  sleep 12
+done
+echo "forgejo-ci-merge: timed out waiting on PR #$PR"; exit 3
