@@ -152,7 +152,7 @@ sha="$(git rev-parse HEAD)"
 # catch it now and DON'T open an un-mergeable PR that sits red and freezes the queue
 # (the exp-0746 freeze). Records stay committed on the local branch in the dedicated
 # clone for inspection; the next run dedups, so a transient failure self-heals.
-if ! gate_out="$(eval "$PREFLIGHT_CMD" 2>&1)"; then
+if ! gate_out="$(cd "$REPO" && eval "$PREFLIGHT_CMD" 2>&1)"; then
   notify "twiceshy import PRE-FLIGHT FAILED (${n} ${SOURCE} records held, NO PR opened) — inspect branch ${branch} in ${REPO}: $(printf '%s' "$gate_out" | tail -n 3)"
   echo "pre-flight gate failed — not opening a PR:"; printf '%s\n' "$gate_out" | tail -n 20
   git checkout main -q
