@@ -490,6 +490,7 @@ func (ix *Index) RetrievePush(ctx context.Context, q Query) ([]Hit, error) {
 type PushDecision struct {
 	FingerprintBypass bool     // a deterministic stack match bypassed the discriminative gate
 	Discriminative    []string // the gate-passing tokens; empty means the gate stayed closed
+	IdfFiltered       int      // eligible tokens dropped by the global-IDF check (globallyCommonWord, ADR-0017)
 	Served            []Hit
 }
 
@@ -513,7 +514,7 @@ func (ix *Index) RetrievePushTraced(ctx context.Context, q Query) (PushDecision,
 	// 2) discriminative-token precondition, computed over the ELIGIBLE subset
 	// (#0107): a token whose df is nonzero only among importer-origin advisories
 	// or a non-trap/fix kind must never open the gate.
-	disc, _, err := ix.discriminativeTokens(ctx, q.Text)
+	disc, idfFiltered, err := ix.discriminativeTokens(ctx, q.Text)
 	if err != nil {
 		return PushDecision{}, err
 	}
@@ -529,7 +530,7 @@ func (ix *Index) RetrievePushTraced(ctx context.Context, q Query) (PushDecision,
 	// itself is already high-precision. The gate decision still records disc for
 	// telemetry (#0067) even though nothing is served.
 	if !q.ErrorTrigger && len(disc) < 2 {
-		return PushDecision{Discriminative: disc}, nil
+		return PushDecision{Discriminative: disc, IdfFiltered: idfFiltered}, nil
 	}
 
 	// 3) retrieve + floor on the discriminative subset, restricted to eligible
@@ -557,7 +558,7 @@ func (ix *Index) RetrievePushTraced(ctx context.Context, q Query) (PushDecision,
 		}
 	}
 
-	return PushDecision{Discriminative: disc, Served: served}, nil
+	return PushDecision{Discriminative: disc, IdfFiltered: idfFiltered, Served: served}, nil
 }
 
 // discriminativeTokens returns the query's content tokens (lowercased, alnum,
