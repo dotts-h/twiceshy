@@ -46,6 +46,11 @@ AUTOMERGE="${TWICESHY_AUTOMERGE:-1}"
 DRYRUN="${TWICESHY_RETRO_DRYRUN:-0}"
 BIN="${TWICESHY_BIN:-/home/ori/.local/bin/twiceshy}"
 FORGEJO_REPO="${TWICESHY_FORGEJO_REPO:-claude/twiceshy-corpus}"
+# The corpus repo has exactly ONE CI workflow (the engine repo has three), so
+# forgejo-ci-merge's default wait-for-3-terminal-runs gate would never fire
+# there and every PR would time out unmerged (issue 0105 pile-up). Derive the
+# gate from the repo; an explicit FORGEJO_CI_MIN_RUNS in the env still wins.
+case "$FORGEJO_REPO" in */twiceshy-corpus) export FORGEJO_CI_MIN_RUNS="${FORGEJO_CI_MIN_RUNS:-1}";; esac
 NTFY_URL="${NTFY_URL:-}"
 NTFY_TOKEN="${NTFY_TOKEN:-}"
 

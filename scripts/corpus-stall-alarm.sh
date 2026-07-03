@@ -52,7 +52,7 @@ def get(path):
 now = datetime.datetime.now(datetime.timezone.utc)
 for pr in get("/pulls?state=open&limit=50&type=pulls"):
     ref = (pr.get("head") or {}).get("ref", "")
-    if not (ref.startswith("import/") or ref.startswith("validate/")):
+    if not (ref.startswith("import/") or ref.startswith("validate/") or ref.startswith("retro/")):
         continue
     created = pr.get("created_at", "")
     try:
@@ -96,7 +96,7 @@ EOF
 	nowts="$(now)"
 	[ -f "$STATE_FILE" ] && last="$(cat "$STATE_FILE" 2>/dev/null || echo 0)"
 	if [ "$(( nowts - last ))" -ge "$COOLDOWN" ]; then
-		notify "corpus pipeline STALLED — ${count} import/validate PR(s) open past ${THRESHOLD_MIN}m or red; the corpus may be frozen. Investigate + drain:
+		notify "corpus pipeline STALLED — ${count} pipeline PR(s) open past ${THRESHOLD_MIN}m or red; the corpus may be frozen. Investigate + drain:
 ${stalled}"
 		echo "$nowts" > "$STATE_FILE" 2>/dev/null || true
 	fi
