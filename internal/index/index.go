@@ -529,7 +529,7 @@ func (ix *Index) RetrievePushTraced(ctx context.Context, q Query) (PushDecision,
 	// error-pull hook already singled out — keeps the single-token gate: the text
 	// itself is already high-precision. The gate decision still records disc for
 	// telemetry (#0067) even though nothing is served.
-	if !q.ErrorTrigger && len(disc) < 2 {
+	if !q.ErrorTrigger && len(disc) < minCorroboratingTokens {
 		return PushDecision{Discriminative: disc, IdfFiltered: idfFiltered}, nil
 	}
 
@@ -570,10 +570,17 @@ func (ix *Index) discriminativeTokens(ctx context.Context, text string) ([]strin
 	return ix.discriminativeTokensVia(ctx, text, ix.eligibleDF)
 }
 
+// minCorroboratingTokens is the ADR-0108 two-token corroboration threshold:
+// a prompt-triggered query needs at least this many distinct discriminative
+// tokens (RetrievePushTraced step 2b), and a served hit must lexically carry
+// at least this many of them (corroborated). Named once so the precondition
+// and the per-hit check can never silently drift apart.
+const minCorroboratingTokens = 2
+
 // corroborated is the per-hit specificity check for prompt-triggered push
-// (#0108): a served hit must lexically MATCH at least two of the query's
-// DISTINCT discriminative tokens. Cheap: at most MaxK hits x maxQueryTokens
-// tokens, one indexed MATCH+id lookup each (sub-ms).
+// (#0108): a served hit must lexically MATCH at least minCorroboratingTokens
+// of the query's DISTINCT discriminative tokens. Cheap: at most MaxK hits x
+// maxQueryTokens tokens, one indexed MATCH+id lookup each (sub-ms).
 func (ix *Index) corroborated(ctx context.Context, hits []Hit, disc []string) ([]Hit, error) {
 	var out []Hit
 	for _, h := range hits {
@@ -581,7 +588,7 @@ func (ix *Index) corroborated(ctx context.Context, hits []Hit, disc []string) ([
 		if err != nil {
 			return nil, err
 		}
-		if n >= 2 {
+		if n >= minCorroboratingTokens {
 			out = append(out, h)
 		}
 	}
