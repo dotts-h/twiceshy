@@ -37,13 +37,14 @@ type ServedHit struct {
 // tokens (already content-filtered: stopwords and ecosystem names excluded) — unless
 // the caller populates QueryText (#0109, opt-in, single-tenant deployments only).
 type Decision struct {
-	Time              string      `json:"ts"`                   // RFC3339; stamped by the recorder
-	Channel           string      `json:"channel"`              // "push" | "search"
-	QueryHash         string      `json:"query_hash"`           // salted hash, for correlation without the text
-	QueryText         string      `json:"query_text,omitempty"` // opt-in raw query text (#0109, ADR-0028 decision 5), truncated by the caller; "" when capture is off (the default) or the caller passes none
-	Session           string      `json:"session,omitempty"`    // salted hash of the MCP session id (#0069), for attributing served cards to a session; "" when no session
-	Tokens            []string    `json:"tokens,omitempty"`     // retrieval tokens used (push: discriminative; search: fts)
-	FingerprintBypass bool        `json:"fp_bypass,omitempty"`  // push: a deterministic stack match bypassed the gate
+	Time              string      `json:"ts"`                     // RFC3339; stamped by the recorder
+	Channel           string      `json:"channel"`                // "push" | "search"
+	QueryHash         string      `json:"query_hash"`             // salted hash, for correlation without the text
+	QueryText         string      `json:"query_text,omitempty"`   // opt-in raw query text (#0109, ADR-0028 decision 5), truncated by the caller; "" when capture is off (the default) or the caller passes none
+	Session           string      `json:"session,omitempty"`      // salted hash of the MCP session id (#0069), for attributing served cards to a session; "" when no session
+	Tokens            []string    `json:"tokens,omitempty"`       // retrieval tokens used (push: discriminative; search: fts)
+	FingerprintBypass bool        `json:"fp_bypass,omitempty"`    // push: a deterministic stack match bypassed the gate
+	IdfFiltered       int         `json:"idf_filtered,omitempty"` // push: eligible tokens dropped by the global-IDF check (ADR-0017)
 	Served            []ServedHit `json:"served,omitempty"`
 	Count             int         `json:"count"`
 	Trigger           string      `json:"trigger,omitempty"` // push: "prompt" | "error" (#0116); "" on the search channel

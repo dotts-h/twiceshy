@@ -18,6 +18,7 @@ import (
 	_ "modernc.org/sqlite" // database/sql driver
 
 	"github.com/dotts-h/twiceshy/internal/fingerprint"
+	"github.com/dotts-h/twiceshy/internal/idf"
 	"github.com/dotts-h/twiceshy/internal/record"
 )
 
@@ -109,6 +110,50 @@ var importerOrigins = []string{"twiceshy-importer"}
 // and the mechanical TestPushGateExcludesCommonVocabulary (no common word is ever
 // discriminative). Grow it — with both guards — as new common words surface.
 var pushStopwords = wordSet(commonWords)
+
+// idfMaxDocRatio is the phase-1 ceiling (ADR-0017) above which a token's
+// global document-frequency ratio (df/totalDocs, from the embedded idf.Table)
+// marks it as "globally common": too generic to ever be a discriminative
+// push-gate signal, regardless of how rare it looks in this tiny corpus. The
+// literal is deliberately conservative for this first phase — it is not
+// derived from measurement yet — and is expected to be recalibrated once
+// telemetry from the live gate is available.
+const idfMaxDocRatio = 0.10
+
+// idfTableProvider is the small subset of *idf.Table's methods globallyCommonWord
+// needs, seamed out so a test can inject a fake table without touching the real
+// embedded idf.Global() data.
+type idfTableProvider interface {
+	Available() bool
+	TotalDocs() uint64
+	DF(word string) (uint64, bool)
+}
+
+// idfProvider is the injectable idfTableProvider seam, defaulting to the
+// process-wide embedded table. Tests swap it to exercise globallyCommonWord
+// against controlled df/totalDocs values.
+var idfProvider idfTableProvider = idf.Global()
+
+// globallyCommonWord reports whether tok is globally common per idfProvider:
+// true only when the provider is available, has documents loaded, contains
+// tok, and tok's df/totalDocs ratio strictly exceeds idfMaxDocRatio. Every
+// other case — an unavailable provider, an empty/default table, or a token
+// absent from it — reports false, so a missing table can never be
+// misread as "everything is common".
+func globallyCommonWord(tok string) bool {
+	if idfProvider == nil || !idfProvider.Available() {
+		return false
+	}
+	total := idfProvider.TotalDocs()
+	if total == 0 {
+		return false
+	}
+	df, ok := idfProvider.DF(tok)
+	if !ok {
+		return false
+	}
+	return float64(df)/float64(total) > idfMaxDocRatio
+}
 
 // wordSet splits whitespace-separated words into a lookup set.
 func wordSet(s string) map[string]bool {
@@ -435,8 +480,8 @@ func (ix *Index) Retrieve(ctx context.Context, q Query) ([]Hit, error) {
 // signature) always bypasses the gate: it is real context by construction.
 // Embedding-free; quarantined records are never surfaced (ADR-0001 §4, §6).
 func (ix *Index) RetrievePush(ctx context.Context, q Query) ([]Hit, error) {
-	d, err := ix.RetrievePushTraced(ctx, q)
-	return d.Served, err
+	decision, err := ix.RetrievePushTraced(ctx, q)
+	return decision.Served, err
 }
 
 // PushDecision is the gate decision RetrievePushTraced makes, for per-query
@@ -445,6 +490,7 @@ func (ix *Index) RetrievePush(ctx context.Context, q Query) ([]Hit, error) {
 type PushDecision struct {
 	FingerprintBypass bool     // a deterministic stack match bypassed the discriminative gate
 	Discriminative    []string // the gate-passing tokens; empty means the gate stayed closed
+	IdfFiltered       int      // eligible tokens dropped by the global-IDF check (globallyCommonWord, ADR-0017)
 	Served            []Hit
 }
 
@@ -468,7 +514,7 @@ func (ix *Index) RetrievePushTraced(ctx context.Context, q Query) (PushDecision,
 	// 2) discriminative-token precondition, computed over the ELIGIBLE subset
 	// (#0107): a token whose df is nonzero only among importer-origin advisories
 	// or a non-trap/fix kind must never open the gate.
-	disc, err := ix.discriminativeTokens(ctx, q.Text)
+	disc, idfFiltered, err := ix.discriminativeTokens(ctx, q.Text)
 	if err != nil {
 		return PushDecision{}, err
 	}
@@ -483,8 +529,8 @@ func (ix *Index) RetrievePushTraced(ctx context.Context, q Query) (PushDecision,
 	// error-pull hook already singled out — keeps the single-token gate: the text
 	// itself is already high-precision. The gate decision still records disc for
 	// telemetry (#0067) even though nothing is served.
-	if !q.ErrorTrigger && len(disc) < 2 {
-		return PushDecision{Discriminative: disc}, nil
+	if !q.ErrorTrigger && len(disc) < minCorroboratingTokens {
+		return PushDecision{Discriminative: disc, IdfFiltered: idfFiltered}, nil
 	}
 
 	// 3) retrieve + floor on the discriminative subset, restricted to eligible
@@ -512,7 +558,7 @@ func (ix *Index) RetrievePushTraced(ctx context.Context, q Query) (PushDecision,
 		}
 	}
 
-	return PushDecision{Discriminative: disc, Served: served}, nil
+	return PushDecision{Discriminative: disc, IdfFiltered: idfFiltered, Served: served}, nil
 }
 
 // discriminativeTokens returns the query's content tokens (lowercased, alnum,
@@ -520,14 +566,21 @@ func (ix *Index) RetrievePushTraced(ctx context.Context, q Query) (PushDecision,
 // (#0107: validated, kind trap/fix, non-importer origin) is in [1, pushMaxDF]. It
 // reuses the ftsQuery tokenization and quoting so df counts agree with what the
 // lexical search later matches (exp-0001).
-func (ix *Index) discriminativeTokens(ctx context.Context, text string) ([]string, error) {
+func (ix *Index) discriminativeTokens(ctx context.Context, text string) ([]string, int, error) {
 	return ix.discriminativeTokensVia(ctx, text, ix.eligibleDF)
 }
 
+// minCorroboratingTokens is the ADR-0108 two-token corroboration threshold:
+// a prompt-triggered query needs at least this many distinct discriminative
+// tokens (RetrievePushTraced step 2b), and a served hit must lexically carry
+// at least this many of them (corroborated). Named once so the precondition
+// and the per-hit check can never silently drift apart.
+const minCorroboratingTokens = 2
+
 // corroborated is the per-hit specificity check for prompt-triggered push
-// (#0108): a served hit must lexically MATCH at least two of the query's
-// DISTINCT discriminative tokens. Cheap: at most MaxK hits x maxQueryTokens
-// tokens, one indexed MATCH+id lookup each (sub-ms).
+// (#0108): a served hit must lexically MATCH at least minCorroboratingTokens
+// of the query's DISTINCT discriminative tokens. Cheap: at most MaxK hits x
+// maxQueryTokens tokens, one indexed MATCH+id lookup each (sub-ms).
 func (ix *Index) corroborated(ctx context.Context, hits []Hit, disc []string) ([]Hit, error) {
 	var out []Hit
 	for _, h := range hits {
@@ -535,7 +588,7 @@ func (ix *Index) corroborated(ctx context.Context, hits []Hit, disc []string) ([
 		if err != nil {
 			return nil, err
 		}
-		if n >= 2 {
+		if n >= minCorroboratingTokens {
 			out = append(out, h)
 		}
 	}
@@ -563,14 +616,18 @@ func (ix *Index) tokenMatchCount(ctx context.Context, id string, tokens []string
 
 // discriminativeTokensVia is discriminativeTokens with the per-token validated-DF
 // lookup injected, so the serial-round-trip bound below can be asserted in a test.
-func (ix *Index) discriminativeTokensVia(ctx context.Context, text string, df func(context.Context, string) (int, error)) ([]string, error) {
+// The second return value counts tokens dropped by the global-IDF check
+// (globallyCommonWord) ALONE: a token that passes every local check (df in
+// [1, pushMaxDF]) but is globally common per idfProvider is excluded from the
+// slice and counted here, separate from tokens that never reach that check.
+func (ix *Index) discriminativeTokensVia(ctx context.Context, text string, df func(context.Context, string) (int, error)) ([]string, int, error) {
 	eco, err := ix.ecosystemNames(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	var out []string
-	scanned := 0
+	var globallyDropped, scanned int
 	seen := map[string]bool{}
 	for _, field := range strings.Fields(strings.ToLower(text)) {
 		tok := stripControl(field)
@@ -580,10 +637,14 @@ func (ix *Index) discriminativeTokensVia(ctx context.Context, text string, df fu
 		seen[tok] = true
 		n, err := df(ctx, tok)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if n >= 1 && n <= pushMaxDF {
-			out = append(out, tok)
+			if globallyCommonWord(tok) {
+				globallyDropped++
+			} else {
+				out = append(out, tok)
+			}
 		}
 		if len(out) >= maxQueryTokens {
 			break
@@ -596,17 +657,22 @@ func (ix *Index) discriminativeTokensVia(ctx context.Context, text string, df fu
 			break
 		}
 	}
-	return out, nil
+	return out, globallyDropped, nil
 }
+
+// validatedDFQuery is the shared base count-query for validatedDF and eligibleDF:
+// how many VALIDATED records contain a token in any indexed field. eligibleDF
+// appends the push-eligibility predicate to this same base via appendEligibleFilter
+// so the two queries can never silently drift apart.
+const validatedDFQuery = `SELECT count(*) FROM records_fts m JOIN records r ON r.id = m.id
+		 WHERE records_fts MATCH ? AND r.status = 'validated'`
 
 // validatedDF counts how many VALIDATED records contain the token in any indexed
 // field. Quarantine scope matters: counting the OSV stubs would dilute df and mask
 // the discriminative gap, so the count is validated-only.
 func (ix *Index) validatedDF(ctx context.Context, tok string) (int, error) {
 	var n int
-	err := ix.db.QueryRowContext(ctx,
-		`SELECT count(*) FROM records_fts m JOIN records r ON r.id = m.id
-		 WHERE records_fts MATCH ? AND r.status = 'validated'`, ftsPhrase(tok)).Scan(&n)
+	err := ix.db.QueryRowContext(ctx, validatedDFQuery, ftsPhrase(tok)).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("validated df: %w", err)
 	}
@@ -621,8 +687,7 @@ func (ix *Index) validatedDF(ctx context.Context, tok string) (int, error) {
 // finds those records via pull (Retrieve), just never via push.
 func (ix *Index) eligibleDF(ctx context.Context, tok string) (int, error) {
 	var sb strings.Builder
-	sb.WriteString(`SELECT count(*) FROM records_fts m JOIN records r ON r.id = m.id
-		 WHERE records_fts MATCH ? AND r.status = 'validated'`)
+	sb.WriteString(validatedDFQuery)
 	args := appendEligibleFilter(&sb, []any{ftsPhrase(tok)})
 	var n int
 	if err := ix.db.QueryRowContext(ctx, sb.String(), args...).Scan(&n); err != nil {
@@ -720,12 +785,8 @@ func (ix *Index) fingerprintHits(ctx context.Context, q Query, k int) ([]Hit, er
 	args := fps
 	sb.WriteString(`SELECT DISTINCT r.id, r.kind, r.status, r.title, r.summary, r.path
 		FROM fingerprints f JOIN records r ON r.id = f.record_id
-		WHERE f.fp IN (?` + strings.Repeat(",?", len(fps)-1) + `)`)
-	args = appendStatusFilter(&sb, args, q)
-	args = appendStackFilter(&sb, args, q)
-	if q.PushEligibleOnly {
-		args = appendEligibleFilter(&sb, args)
-	}
+		WHERE f.fp IN (` + placeholders(len(fps)) + `)`)
+	args = appendSearchFilters(&sb, args, q)
 	sb.WriteString(" ORDER BY r.id LIMIT ?")
 	args = append(args, k)
 
@@ -765,11 +826,7 @@ func (ix *Index) lexicalHits(ctx context.Context, q Query, k int) ([]Hit, error)
 		sb.WriteString(" AND m.s <= ?")
 		args = append(args, -q.Floor)
 	}
-	args = appendStatusFilter(&sb, args, q)
-	args = appendStackFilter(&sb, args, q)
-	if q.PushEligibleOnly {
-		args = appendEligibleFilter(&sb, args)
-	}
+	args = appendSearchFilters(&sb, args, q)
 	sb.WriteString(" ORDER BY m.s ASC, r.id LIMIT ?")
 	args = append(args, k)
 
@@ -793,13 +850,24 @@ func (ix *Index) lexicalHits(ctx context.Context, q Query, k int) ([]Hit, error)
 	return hits, rows.Err()
 }
 
-func appendStatusFilter(sb *strings.Builder, args []any, q Query) []any {
+// appendSearchFilters appends the status, stack (ecosystem/package), and —
+// when requested — push-eligibility predicates shared by fingerprintHits and
+// lexicalHits, in the fixed order both already agreed on.
+func appendSearchFilters(sb *strings.Builder, args []any, q Query) []any {
+	appendStatusFilter(sb, q)
+	args = appendStackFilter(sb, args, q)
+	if q.PushEligibleOnly {
+		args = appendEligibleFilter(sb, args)
+	}
+	return args
+}
+
+func appendStatusFilter(sb *strings.Builder, q Query) {
 	if q.IncludeQuarantined {
 		sb.WriteString(" AND r.status IN ('validated','quarantined')")
 	} else {
 		sb.WriteString(" AND r.status = 'validated'")
 	}
-	return args
 }
 
 func appendStackFilter(sb *strings.Builder, args []any, q Query) []any {
