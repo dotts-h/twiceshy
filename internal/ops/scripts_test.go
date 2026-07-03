@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -56,7 +57,7 @@ func TestCorpusStallAlarmReportsOpenRedPR(t *testing.T) {
 		t.Fatalf("exit code = %d, want 1; stdout: %s stderr: %s", result.ExitCode, result.Stdout, result.Stderr)
 	}
 	call := requireSingleAlert(t, result, alertURL, "stall-token")
-	if !containsArg(call.Args, "corpus-stall-alarm: corpus pipeline STALLED — 1 import/validate PR(s) open past 120m or red; the corpus may be frozen. Investigate + drain:\n#77 validate/run-red (age 3m, ci=failure)") {
+	if !containsArg(call.Args, "corpus-stall-alarm: corpus pipeline STALLED — 1 pipeline PR(s) open past 120m or red; the corpus may be frozen. Investigate + drain:\n#77 validate/run-red (age 3m, ci=failure)") {
 		t.Errorf("notification does not name PR #77: %q", call.Args)
 	}
 }
@@ -278,6 +279,170 @@ esac`)
 	alerts := result.callsTo("curl", "http://ntfy.invalid/import")
 	if len(alerts) != 1 || !containsArg(alerts[0].Args, "twiceshy: import PR #42 (1 fixture records) left OPEN — auto-merge refused (CI red or timeout); needs attention") {
 		t.Fatalf("merge failure was not observable in notification; calls: %s", formatCalls(alerts))
+	}
+}
+
+// TestScheduledImportPinsForgejoCIMinRunsToOneForCorpusRepo covers the
+// scheduled-import.sh repo-derived FORGEJO_CI_MIN_RUNS export: when
+// TWICESHY_FORGEJO_REPO targets the corpus repo (claude/twiceshy-corpus),
+// which has exactly ONE workflow, the script must export FORGEJO_CI_MIN_RUNS=1
+// before forgejo-ci-merge runs. Without this, forgejo-ci-merge falls back to its
+// historical default of 3 terminal runs (see TestForgejoCIMergeMinRuns) and every
+// corpus import PR times out unmerged because a 1-workflow repo can never produce
+// 3 terminal runs.
+func TestScheduledImportPinsForgejoCIMinRunsToOneForCorpusRepo(t *testing.T) {
+	h := newShellHarness(t)
+	h.fake("git", `
+case "$*" in
+  *"status --porcelain -- experience/"*) echo '?? experience/record.md' ;;
+  *"config --get remote.origin.url"*) echo 'http://user:forge-token@forge/owner/repo' ;;
+  *"rev-parse --verify"*) exit 1 ;;
+  *"rev-parse HEAD"*) echo 'head-sha' ;;
+esac`)
+	h.fake("curl", `case "$*" in *"/pulls"*) echo '{"number":42}' ;; esac`)
+	h.fake("jq", `case "$*" in *"-nc"*) echo '{}' ;; *) echo 42 ;; esac`)
+	minRunsSeen := filepath.Join(h.root, "min_runs_seen")
+	h.fake("forgejo-ci-merge", fmt.Sprintf(`printf '%%s' "${FORGEJO_CI_MIN_RUNS:-unset}" > %q; exit 0`, minRunsSeen))
+	bin := h.fake("twiceshy", ":")
+	h.set("TWICESHY_REPO", h.root)
+	h.set("TWICESHY_BIN", bin)
+	h.set("TWICESHY_IMPORT_SOURCE", "fixture")
+	h.set("TWICESHY_FORGEJO_REPO", "claude/twiceshy-corpus")
+
+	result := h.run("scheduled-import.sh")
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout: %s stderr: %s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if len(result.Invocations["forgejo-ci-merge"]) != 1 {
+		t.Fatalf("forgejo-ci-merge calls = %s, want exactly one", formatCalls(result.Invocations["forgejo-ci-merge"]))
+	}
+
+	seen, err := os.ReadFile(minRunsSeen)
+	if err != nil {
+		t.Fatalf("reading recorded FORGEJO_CI_MIN_RUNS: %v", err)
+	}
+	if got := string(seen); got != "1" {
+		t.Errorf("FORGEJO_CI_MIN_RUNS observed by forgejo-ci-merge = %q, want %q (corpus repo has exactly 1 workflow)", got, "1")
+	}
+
+	// A second, differently-shaped assertion so this test can't be satisfied by
+	// a fake that just always writes "1" regardless of what actually ran: the
+	// rest of the merge flow (PR number resolution, success notification text)
+	// must still complete normally once forgejo-ci-merge reports success.
+	wantDone := "done: 1 records, PR #42"
+	if !strings.Contains(result.Stdout, wantDone) {
+		t.Errorf("stdout = %q, want it to contain %q", result.Stdout, wantDone)
+	}
+}
+
+func TestScheduledRetroPinsForgejoCIMinRunsToOneForCorpusRepo(t *testing.T) {
+	h := newShellHarness(t)
+	configureCommonGit(h)
+	h.fake("git", `
+case "$*" in
+  *"status --porcelain -- experience/"*) echo '?? experience/record.md' ;;
+  *"config --get remote.origin.url"*) echo 'http://user:forge-token@forge/owner/repo' ;;
+  *"rev-parse --verify"*) exit 1 ;;
+  *"rev-parse HEAD"*) echo 'head-sha' ;;
+esac`)
+	h.fake("curl", `case "$*" in *"/pulls"*) echo '{"number":42}' ;; esac`)
+	h.fake("jq", `case "$*" in *"-nc"*) echo '{}' ;; *) echo 42 ;; esac`)
+	minRunsSeen := filepath.Join(h.root, "min_runs_seen")
+	h.fake("forgejo-ci-merge", fmt.Sprintf(`printf '%%s' "${FORGEJO_CI_MIN_RUNS:-unset}" > %q; exit 0`, minRunsSeen))
+	bin := h.fake("twiceshy", `echo 'retro ok'`)
+	h.set("TWICESHY_REPO", h.root)
+	h.set("TWICESHY_BIN", bin)
+	h.set("TWICESHY_RETRO_URL", "http://retro.invalid")
+	h.set("TWICESHY_FORGEJO_REPO", "claude/twiceshy-corpus")
+
+	result := h.run("scheduled-retro.sh")
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout: %s stderr: %s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if len(result.Invocations["forgejo-ci-merge"]) != 1 {
+		t.Fatalf("forgejo-ci-merge calls = %s, want exactly one", formatCalls(result.Invocations["forgejo-ci-merge"]))
+	}
+
+	seen, err := os.ReadFile(minRunsSeen)
+	if err != nil {
+		t.Fatalf("reading recorded FORGEJO_CI_MIN_RUNS: %v", err)
+	}
+	if got := string(seen); got != "1" {
+		t.Errorf("FORGEJO_CI_MIN_RUNS observed by forgejo-ci-merge = %q, want %q", got, "1")
+	}
+}
+
+func TestScheduledValidateMergeDuePinsForgejoCIMinRunsToOneForCorpusRepo(t *testing.T) {
+	h := newShellHarness(t)
+	configureCommonGit(h)
+	now := time.Now().Unix()
+	h.fake("curl", `
+case "$*" in
+  *"/pulls?state=open"*) echo '[fixture pull JSON]' ;;
+esac`)
+	h.fake("jq", fmt.Sprintf(`cat <<'EOF'
+2 validate/eligible sha-eligible %d false
+EOF`, now-1000))
+	minRunsSeen := filepath.Join(h.root, "min_runs_seen")
+	h.fake("forgejo-ci-merge", fmt.Sprintf(`printf '%%s' "${FORGEJO_CI_MIN_RUNS:-unset}" > %q; exit 0`, minRunsSeen))
+	bin := h.fake("twiceshy", ":")
+	h.set("TWICESHY_REPO", h.root)
+	h.set("TWICESHY_BIN", bin)
+	h.set("TWICESHY_JUDGE_URL", "http://judge.invalid")
+	h.set("TWICESHY_SOAK_SECONDS", "100")
+	h.set("TWICESHY_FORGEJO_REPO", "claude/twiceshy-corpus")
+
+	result := h.run("scheduled-validate.sh")
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d; stdout: %s stderr: %s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if len(result.Invocations["forgejo-ci-merge"]) != 1 {
+		t.Fatalf("forgejo-ci-merge calls = %s, want exactly one merge_due call", formatCalls(result.Invocations["forgejo-ci-merge"]))
+	}
+
+	seen, err := os.ReadFile(minRunsSeen)
+	if err != nil {
+		t.Fatalf("reading recorded FORGEJO_CI_MIN_RUNS: %v", err)
+	}
+	if got := string(seen); got != "1" {
+		t.Errorf("FORGEJO_CI_MIN_RUNS observed by forgejo-ci-merge = %q, want %q", got, "1")
+	}
+}
+
+func TestScheduledValidateMergeDueDoesNotPinForgejoCIMinRunsForEngineRepo(t *testing.T) {
+	h := newShellHarness(t)
+	configureCommonGit(h)
+	now := time.Now().Unix()
+	h.fake("curl", `
+case "$*" in
+  *"/pulls?state=open"*) echo '[fixture pull JSON]' ;;
+esac`)
+	h.fake("jq", fmt.Sprintf(`cat <<'EOF'
+2 validate/eligible sha-eligible %d false
+EOF`, now-1000))
+	minRunsSeen := filepath.Join(h.root, "min_runs_seen")
+	h.fake("forgejo-ci-merge", fmt.Sprintf(`printf '%%s' "${FORGEJO_CI_MIN_RUNS:-unset}" > %q; exit 0`, minRunsSeen))
+	bin := h.fake("twiceshy", ":")
+	h.set("TWICESHY_REPO", h.root)
+	h.set("TWICESHY_BIN", bin)
+	h.set("TWICESHY_JUDGE_URL", "http://judge.invalid")
+	h.set("TWICESHY_SOAK_SECONDS", "100")
+	h.set("TWICESHY_FORGEJO_REPO", "claude/twiceshy")
+
+	result := h.run("scheduled-validate.sh")
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d; stdout: %s stderr: %s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if len(result.Invocations["forgejo-ci-merge"]) != 1 {
+		t.Fatalf("forgejo-ci-merge calls = %s, want exactly one merge_due call", formatCalls(result.Invocations["forgejo-ci-merge"]))
+	}
+
+	seen, err := os.ReadFile(minRunsSeen)
+	if err != nil {
+		t.Fatalf("reading recorded FORGEJO_CI_MIN_RUNS: %v", err)
+	}
+	if got := string(seen); got != "unset" {
+		t.Errorf("FORGEJO_CI_MIN_RUNS observed by forgejo-ci-merge = %q, want %q (engine repo must not pin)", got, "unset")
 	}
 }
 

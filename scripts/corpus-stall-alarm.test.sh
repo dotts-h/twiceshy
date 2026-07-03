@@ -54,6 +54,13 @@ main; rc=$?
 check "red PR returns non-zero" "$rc" "1"
 if contains "$ALERTS" "301"; then ok "open-and-red PR is alarmed"; else bad "red PR must alarm: $ALERTS"; fi
 
+# ---- a stalled retro/* PR (open past threshold) -> alarm -----------------------
+reset; PRS="401|retro/capture-x|180|success"
+main; rc=$?
+check "stalled retro PR returns non-zero" "$rc" "1"
+if contains "$ALERTS" "401"; then ok "stalled retro PR is alarmed"; else bad "stalled retro PR must alarm: $ALERTS"; fi
+if contains "$ALERTS" "pipeline PR(s)"; then ok "alarm uses pipeline PR wording"; else bad "alarm must say pipeline PR(s): $ALERTS"; fi
+
 # ---- many stalled PRs (the real backlog) -> one alarm naming the count ----------
 reset; PRS="$(printf '309|validate/a|180|success\n301|validate/b|200|failure\n296|validate/c|220|success')"
 main; rc=$?

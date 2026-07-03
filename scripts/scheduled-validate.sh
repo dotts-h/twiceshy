@@ -65,6 +65,11 @@ NTFY_TOKEN="${NTFY_TOKEN:-}"
 # build-from-source; the decoupled deployment sets TWICESHY_FORGEJO_REPO=claude/twiceshy-corpus
 # and TWICESHY_BIN=<prebuilt> so this runs against a data-only corpus clone (ADR-0021).
 FORGEJO_REPO="${TWICESHY_FORGEJO_REPO:-claude/twiceshy}"
+# The corpus repo has exactly ONE CI workflow (the engine repo has three), so
+# forgejo-ci-merge's default wait-for-3-terminal-runs gate would never fire
+# there and every PR would time out unmerged (issue 0105 pile-up). Derive the
+# gate from the repo; an explicit FORGEJO_CI_MIN_RUNS in the env still wins.
+case "$FORGEJO_REPO" in */twiceshy-corpus) export FORGEJO_CI_MIN_RUNS="${FORGEJO_CI_MIN_RUNS:-1}";; esac
 BIN="${TWICESHY_BIN:-}"
 API="http://192.168.50.244:3030/api/v1/repos/${FORGEJO_REPO}"
 
