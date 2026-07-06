@@ -46,6 +46,14 @@ type Config struct {
 	// TokenStore, when set, enables tok_ tenant tokens with per-token quotas
 	// and rate limits (#0125). nil = operator-token-only.
 	TokenStore TokenStore
+	// TokenIssuer, when set, lets POST /signup mint new tenant tokens (#0127);
+	// its method set matches *index.Index. Required when SignupEnabled is true.
+	TokenIssuer TokenIssuer
+	// SignupEnabled registers a working POST /signup (#0127): public, like
+	// /healthz, but behind the global rate limiter and its own per-IP daily cap.
+	// Default false — the LAN instance never sets it. When false, /signup still
+	// resolves to the route but answers 404, never revealing whether it is wired.
+	SignupEnabled bool
 	// Repo, when set, lets fingerprint matching also use app-scoped
 	// fingerprints for that repository identifier.
 	Repo string
@@ -124,13 +132,16 @@ func New(cfg Config) (*Server, error) {
 	if cfg.Token == "" {
 		return nil, errors.New("server: a bearer token is required; there is no unauthenticated mode")
 	}
+	if cfg.SignupEnabled && cfg.TokenIssuer == nil {
+		return nil, errors.New("server: SignupEnabled requires a TokenIssuer")
+	}
 
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	}
 
-	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, retroQueue: cfg.RetroQueue, issueQueue: cfg.IssueQueue, corpus: cfg.Corpus, telemetry: cfg.Telemetry, queryText: cfg.TelemetryQueryText}
+	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, retroQueue: cfg.RetroQueue, issueQueue: cfg.IssueQueue, corpus: cfg.Corpus, telemetry: cfg.Telemetry, queryText: cfg.TelemetryQueryText, signupEnabled: cfg.SignupEnabled, signupIssuer: cfg.TokenIssuer, signupLimiter: newSignupIPLimiter(time.Now)}
 	h.recordCount.Store(int64(cfg.RecordCount))
 	h.usage = newUsageRecorder(cfg.Index, logger, time.Now)
 	srv := mcp.NewServer(&mcp.Implementation{
@@ -174,6 +185,10 @@ func New(cfg Config) (*Server, error) {
 	outer := http.NewServeMux()
 	outer.HandleFunc("/healthz", h.healthz)
 	outer.HandleFunc("/readyz", h.readyz)
+	// /signup (#0127) is public like the probes above (no bearer), but a self-serve
+	// token mint is real work, so it still sits behind the global rate limiter
+	// (shared with the authed path) plus its own per-IP daily cap in signupHTTP.
+	outer.Handle("/signup", withRateLimit(logger, limiter, http.HandlerFunc(h.signupHTTP)))
 	outer.Handle("/", authed)
 	return &Server{Handler: outer, h: h}, nil
 }
@@ -214,6 +229,10 @@ type handlers struct {
 	corpus      string              // corpus root for robust id allocation against the source of truth (#0059)
 	telemetry   *telemetry.Recorder // optional; per-query gate-decision log (#0067)
 	queryText   bool                // opt-in raw query text on gate-decision telemetry, truncated (#0109); no-op if telemetry is nil
+
+	signupEnabled bool             // gates POST /signup; false answers 404 (#0127)
+	signupIssuer  TokenIssuer      // mints tokens for /signup; required when signupEnabled
+	signupLimiter *signupIPLimiter // per-IP daily signup cap, independent of the global limiter
 
 	idMu   sync.Mutex // serializes record-id allocation (#0089)
 	lastID int        // high-water mark of ids handed out this process; 0 = none yet
