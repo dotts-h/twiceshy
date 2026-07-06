@@ -27,3 +27,10 @@ unchanged; deploy is compose + the existing systemd timer patterns.
 Blast-radius rule from ADR-0030: nothing on the public host may reach the LAN.
 One-way corpus publishing (LAN validated set → public instance) is the only
 link, via the existing git-based corpus sync pattern.
+
+## Status 2026-07-06
+
+Deploy artifacts and runbook shipped in PR #517 (`deploy/public-alpha/`,
+`docs/DEPLOY-public-alpha.md`). BLOCKED on two operator decisions — hosting
+provider and domain — see the runbook's OPEN DECISIONS section. Actual
+stand-up of the public host cannot proceed until those are made.

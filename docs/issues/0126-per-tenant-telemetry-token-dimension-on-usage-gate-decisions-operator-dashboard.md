@@ -1,14 +1,14 @@
 ---
 id: 0126
 title: Per-tenant telemetry: token dimension on usage + gate decisions, operator dashboard
-status: open
+status: closed
 severity: medium
 group: 0124
 depends_on: []
 forgejo:
 links:
   adr:
-  prs: []
+  prs: [516]
   issues: []
   regression:
 assets: []
@@ -28,3 +28,9 @@ dependency budget applies).
 Alarm on floods and on throughput-zero, not just errors (the #0122/#0123
 lesson). Per-tenant data is also the future billing meter — keep the schema
 aggregation-friendly.
+
+## Close-out (2026-07-06, PR #516)
+
+Shipped: the `tenant_usage` table, the `/statz` operator endpoint, and the
+web/dashboard page. The digest (#0116) per-tenant section is deferred — not
+built in this PR; tracked as follow-up work, not blocking the alpha launch.

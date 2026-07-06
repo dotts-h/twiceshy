@@ -1,14 +1,14 @@
 ---
 id: 0130
 title: Contribution data-license terms + privacy policy for the hosted alpha
-status: open
+status: closed
 severity: medium
 group: 0124
 depends_on: []
 forgejo:
 links:
   adr:
-  prs: []
+  prs: [519]
   issues: []
   regression:
 assets: []
@@ -27,3 +27,9 @@ Accepted at signup (#0127 checkbox); versioned in-repo like ADRs.
 Not legal-perfect for alpha, but explicit: people are submitting engineering
 failure data — say plainly what we do with it, that secrets must not be
 submitted, and that submissions become part of a public validated corpus.
+
+## Close-out (2026-07-06, PR #519)
+
+Shipped: alpha terms & data policy v1 as `web/landing/terms.html`, linked
+from both signup forms. Not legal-perfect — revisit the wording before the
+write path opens publicly (see #0128's phase-2 gate).
