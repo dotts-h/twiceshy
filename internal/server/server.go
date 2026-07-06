@@ -144,17 +144,18 @@ func New(cfg Config) (*Server, error) {
 	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, retroQueue: cfg.RetroQueue, issueQueue: cfg.IssueQueue, corpus: cfg.Corpus, telemetry: cfg.Telemetry, queryText: cfg.TelemetryQueryText, signupEnabled: cfg.SignupEnabled, signupIssuer: cfg.TokenIssuer, signupLimiter: newSignupIPLimiter(time.Now)}
 	h.recordCount.Store(int64(cfg.RecordCount))
 	h.usage = newUsageRecorder(cfg.Index, logger, time.Now)
+	h.tenantCalls = cfg.Index
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "twiceshy",
 		Title:   "twiceshy experience service",
 		Version: Version,
 	}, nil)
-	mcp.AddTool(srv, &mcp.Tool{Name: "search_experience", Description: searchDescription}, h.search)
-	mcp.AddTool(srv, &mcp.Tool{Name: "get_experience", Description: getDescription}, h.get)
-	mcp.AddTool(srv, &mcp.Tool{Name: "record_experience", Description: recordDescription}, h.record)
-	mcp.AddTool(srv, &mcp.Tool{Name: "report_outcome", Description: reportDescription}, h.reportOutcome)
-	mcp.AddTool(srv, &mcp.Tool{Name: "report_issue", Description: issueDescription}, h.reportIssue)
-	mcp.AddTool(srv, &mcp.Tool{Name: "confirm_helpful", Description: confirmDescription}, h.confirmHelpful)
+	mcp.AddTool(srv, &mcp.Tool{Name: "search_experience", Description: searchDescription}, withTenantTelemetry(h, "search_experience", h.search))
+	mcp.AddTool(srv, &mcp.Tool{Name: "get_experience", Description: getDescription}, withTenantTelemetry(h, "get_experience", h.get))
+	mcp.AddTool(srv, &mcp.Tool{Name: "record_experience", Description: recordDescription}, withTenantTelemetry(h, "record_experience", h.record))
+	mcp.AddTool(srv, &mcp.Tool{Name: "report_outcome", Description: reportDescription}, withTenantTelemetry(h, "report_outcome", h.reportOutcome))
+	mcp.AddTool(srv, &mcp.Tool{Name: "report_issue", Description: issueDescription}, withTenantTelemetry(h, "report_issue", h.reportIssue))
+	mcp.AddTool(srv, &mcp.Tool{Name: "confirm_helpful", Description: confirmDescription}, withTenantTelemetry(h, "confirm_helpful", h.confirmHelpful))
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return srv }, nil)
@@ -166,6 +167,11 @@ func New(cfg Config) (*Server, error) {
 	// Same rationale (exp-0006): /retro is registered unqualified, not "POST
 	// /retro", so a non-POST returns 405 from retroHTTP instead of falling through.
 	mux.HandleFunc("/retro", h.retroHTTP)
+	// /statz (#0126) is the operator-only stats dashboard endpoint: registered
+	// unqualified like /push and /retro so a non-GET gets a clean 405 from
+	// statzHTTP itself. It sits behind tenantAuth like every other route here —
+	// statzHTTP additionally rejects any non-operator (tok_) tenant with 403.
+	mux.HandleFunc("/statz", h.statzHTTP)
 	mux.Handle("/", mcpHandler)
 
 	// Middleware chain (outermost first): access log, then reject unauthenticated
@@ -229,6 +235,8 @@ type handlers struct {
 	corpus      string              // corpus root for robust id allocation against the source of truth (#0059)
 	telemetry   *telemetry.Recorder // optional; per-query gate-decision log (#0067)
 	queryText   bool                // opt-in raw query text on gate-decision telemetry, truncated (#0109); no-op if telemetry is nil
+
+	tenantCalls tenantCallRecorder // per-tenant per-tool call counter (#0126); nil in unit tests that construct handlers directly
 
 	signupEnabled bool             // gates POST /signup; false answers 404 (#0127)
 	signupIssuer  TokenIssuer      // mints tokens for /signup; required when signupEnabled

@@ -177,6 +177,23 @@ func (ix *Index) CountTokenCall(id string, now time.Time) (int, error) {
 	return calls, nil
 }
 
+// CountTenantCall atomically increments today's per-tenant, per-tool call
+// counter (#0126): tokenID is "operator" or a tok_ id, tool is the MCP tool
+// name or "push"/"retro". This is a telemetry counter, distinct from
+// CountTokenCall's quota enforcement — callers must log and continue on error,
+// never fail the request over it.
+func (ix *Index) CountTenantCall(tokenID, tool string, now time.Time) error {
+	day := now.UTC().Format("2006-01-02")
+	if _, err := ix.db.Exec(
+		`INSERT INTO tenant_usage (token_id, day, tool, calls) VALUES (?, ?, ?, 1)
+		 ON CONFLICT(token_id, day, tool) DO UPDATE SET calls = calls + 1`,
+		tokenID, day, tool,
+	); err != nil {
+		return fmt.Errorf("count tenant call: %w", err)
+	}
+	return nil
+}
+
 func parseTokenFull(full string) (id, secret string, ok bool) {
 	if !strings.HasPrefix(full, "tok_") {
 		return "", "", false
