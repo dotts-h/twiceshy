@@ -43,6 +43,9 @@ type Config struct {
 	// Token is the bearer token required on every request. Required:
 	// there is no unauthenticated mode (CONVENTIONS.md, Security).
 	Token string
+	// TokenStore, when set, enables tok_ tenant tokens with per-token quotas
+	// and rate limits (#0125). nil = operator-token-only.
+	TokenStore TokenStore
 	// Repo, when set, lets fingerprint matching also use app-scoped
 	// fingerprints for that repository identifier.
 	Repo string
@@ -160,7 +163,8 @@ func New(cfg Config) (*Server, error) {
 	hardened := withRateLimit(logger, limiter,
 		withTimeout(requestTimeout,
 			withMaxBytes(maxRequestBytes, mux)))
-	authed := withRequestLog(logger, bearerAuth(logger, cfg.Token, hardened))
+	authed := tenantAuth(logger, cfg.Token, cfg.TokenStore,
+		withRequestLog(logger, hardened))
 
 	// Health probes bypass auth + rate-limit so a container HEALTHCHECK and an
 	// external uptime monitor can reach them unauthenticated: /healthz = liveness
@@ -468,26 +472,8 @@ func (h *handlers) logToolError(tool string, start time.Time, err error, extra .
 	}
 }
 
-// bearerAuth enforces a constant-time bearer-token check on every request.
-// The token is never logged.
-func bearerAuth(logger *slog.Logger, token string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		const prefix = "Bearer "
-		got := r.Header.Get("Authorization")
-		reason := bearerRejectReason(got, token, prefix)
-		if reason != "" {
-			logger.Warn("auth rejected",
-				slog.String("reason", reason),
-				slog.String("remote_addr", r.RemoteAddr),
-			)
-			w.Header().Set("WWW-Authenticate", `Bearer realm="twiceshy"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
+// bearerRejectReason returns an audit reason for a rejected Authorization header.
+// "" means accept. Used by tenantAuth for scheme/prefix failures on the operator path.
 func bearerRejectReason(got, token, prefix string) string {
 	if got == "" {
 		return "missing_bearer"

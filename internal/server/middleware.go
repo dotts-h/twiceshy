@@ -167,6 +167,7 @@ func withRequestLog(logger *slog.Logger, next http.Handler) http.Handler {
 			slog.Int64("http_duration_ms", time.Since(start).Milliseconds()),
 			slog.String("remote_addr", r.RemoteAddr),
 			slog.String("mcp_session_id", sessionID),
+			slog.String("tenant", TenantFromContext(r.Context())),
 		)
 	})
 }
