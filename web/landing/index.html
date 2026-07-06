@@ -3,438 +3,823 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>twiceshy — validated engineering experience for coding agents</title>
-<meta name="description" content="Once bitten, twice shy — validated engineering traps, served to your coding agent at decision time.">
+<title>twiceshy — every mistake your agent makes, someone already made</title>
+<meta name="description" content="twiceshy is a shared memory of validated dead-ends and fixes. Your agent checks it before walking into a trap — and skips straight to what works.">
 <style>
-  /* Dark theme is the default; light is offered via prefers-color-scheme only —
-     no toggle, no JS-driven theme state. One accent color throughout (amber, the
-     "twice shy" sting), system font stack, no gradients, no stock imagery. */
+  /* twiceshy landing v2 — warm paper world, one dark machine-moment (the demo
+     panel). Hazard livery (amber/ink) used structurally, sparingly. */
   :root {
-    --bg: #0b0d10;
-    --bg-raised: #14171b;
-    --fg: #e9e6e0;
-    --fg-muted: #a7a29a;
-    --border: #2a2e33;
-    --accent: #f2ad33;
-    --accent-fg: #1a1200;
-    --code-bg: #0f1113;
-    --danger: #ff8a80;
-    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --paper: #FBF7EC;
+    --ink: #241C12;
+    --amber: #F5A800;
+    --amber-deep: #B27300;
+    --amber-ink: #9B6400; /* darkened amber-deep, same hue/sat, for NORMAL-size text on paper: 4.65:1 vs amber-deep's 3.67:1 */
+    --terminal: #1A150D;
+    --sting: #C8442C;
+    --paper-soft: rgba(251, 247, 236, 0.72);
+    --ink-soft: rgba(36, 28, 18, 0.65);
+    --ink-hair: rgba(36, 28, 18, 0.14);
+    --font-display: "Iowan Old Style", Georgia, "Times New Roman", serif;
+    --font-body: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
-  }
-
-  @media (prefers-color-scheme: light) {
-    :root {
-      --bg: #faf8f5;
-      --bg-raised: #ffffff;
-      --fg: #1c1a17;
-      --fg-muted: #5b564d;
-      --border: #ded8cd;
-      --accent: #a8590a;
-      --accent-fg: #ffffff;
-      --code-bg: #f1ede4;
-      --danger: #a3231a;
-    }
   }
 
   * { box-sizing: border-box; }
 
-  html, body {
-    margin: 0;
-    padding: 0;
-  }
+  html { -webkit-text-size-adjust: 100%; }
 
   body {
-    background: var(--bg);
-    color: var(--fg);
-    font-family: var(--font-sans);
-    line-height: 1.55;
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 1.06rem;
+    line-height: 1.65;
     -webkit-font-smoothing: antialiased;
   }
 
-  a { color: var(--accent); }
-  a:hover, a:focus { text-decoration: underline; }
+  img, svg { max-width: 100%; }
 
   .wrap {
-    max-width: 780px;
+    max-width: 1080px;
     margin: 0 auto;
     padding: 0 1.25rem;
   }
 
-  section {
-    padding: 3rem 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  section:last-of-type { border-bottom: none; }
-
-  h1, h2, h3 { line-height: 1.25; }
-
-  h2 {
-    font-size: 1.4rem;
-    margin: 0 0 1.5rem;
-  }
-
-  /* Hero */
-  .hero { padding-top: 4rem; }
-
-  .wordmark {
-    font-size: 2.25rem;
+  h1, h2 {
+    font-family: var(--font-display);
     font-weight: 700;
-    margin: 0 0 0.75rem;
-    letter-spacing: -0.01em;
-  }
-
-  .wordmark .sting { color: var(--accent); }
-
-  .tagline {
-    font-size: 1.25rem;
+    line-height: 1.05;
     margin: 0 0 1rem;
-    max-width: 42rem;
   }
 
-  .sub {
-    color: var(--fg-muted);
-    max-width: 42rem;
+  h1 { font-size: clamp(2.4rem, 6vw, 4.2rem); }
+
+  h2 { font-size: clamp(1.4rem, 4.5vw, 1.8rem); }
+
+  p { margin: 0 0 1rem; }
+
+  a {
+    color: var(--amber-ink);
+    font-weight: 700;
+  }
+
+  a:hover { text-decoration-thickness: 2px; }
+
+  :focus-visible {
+    outline: 2px solid var(--amber-deep);
+    outline-offset: 3px;
+  }
+
+  section { padding: 3rem 0; }
+
+  /* Hazard chevron device — 4px repeating stripe, used sparingly (<=3x):
+     demo panel top edge, one section divider, trap-card top edge. */
+  .hazard-strip {
+    height: 4px;
+    background: repeating-linear-gradient(
+      45deg,
+      var(--amber) 0 8px,
+      var(--ink) 8px 16px
+    );
+    border: none;
     margin: 0;
   }
 
-  /* How it works */
-  .steps {
+  /* ---------- Hero ---------- */
+  .hero { padding: 3rem 0 2.5rem; }
+
+  .hero-inner {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1.5rem;
+    grid-template-columns: 1fr;
+    gap: 2.5rem;
+    align-items: center;
   }
 
-  .step h3 {
-    font-size: 1.05rem;
-    margin: 0 0 0.4rem;
+  @media (min-width: 900px) {
+    .hero-inner {
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 3rem;
+    }
   }
 
-  .step p {
-    color: var(--fg-muted);
-    margin: 0;
+  .eyebrow {
+    font-family: var(--font-body);
+    font-size: 0.875rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: var(--amber-ink);
+    text-transform: uppercase;
+    margin: 0 0 0.75rem;
   }
 
-  /* Sample card */
-  .card {
-    background: var(--code-bg);
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--accent);
+  .hero-sub {
+    max-width: 34rem;
+    color: var(--ink-soft);
+  }
+
+  /* ---------- Signup form (shared: hero + repeat) ---------- */
+  .signup-block { max-width: 30rem; }
+
+  .signup-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+  }
+
+  .signup-email {
+    flex: 1 1 12rem;
+    min-width: 0;
+    padding: 0.7rem 0.8rem;
+    border: 1px solid var(--ink-hair);
     border-radius: 6px;
-    padding: 1.25rem 1.5rem;
-    font-family: var(--font-mono);
-    font-size: 0.85rem;
-    white-space: pre-wrap;
-    word-break: break-word;
-    overflow-x: auto;
-  }
-
-  .card .card-meta { color: var(--fg-muted); }
-  .card .card-title { color: var(--fg); font-weight: 600; }
-  .card .card-label { color: var(--accent); }
-
-  .caption {
-    color: var(--fg-muted);
-    font-size: 0.9rem;
-    margin: 0.75rem 0 0;
-  }
-
-  /* Onboarding */
-  pre.code-block {
-    background: var(--code-bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 1rem 1.25rem;
-    font-family: var(--font-mono);
-    font-size: 0.85rem;
-    overflow-x: auto;
-  }
-
-  .note {
-    color: var(--fg-muted);
-    font-size: 0.9rem;
-  }
-
-  /* Signup form */
-  form.signup {
-    display: grid;
-    gap: 1rem;
-    max-width: 26rem;
-  }
-
-  label { font-size: 0.95rem; }
-
-  input[type="email"] {
-    width: 100%;
-    padding: 0.6rem 0.7rem;
-    background: var(--bg-raised);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    color: var(--fg);
+    background: #fff;
+    color: var(--ink);
     font-size: 1rem;
+    font-family: var(--font-body);
   }
 
-  input[type="email"]:focus, button:focus, input[type="text"]:focus {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
+  .btn-primary {
+    background: var(--amber);
+    color: var(--ink);
+    border: none;
+    border-radius: 6px;
+    padding: 0.75rem 1.25rem;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
   }
 
-  .terms-row {
+  .btn-primary:hover { background: var(--amber-deep); color: var(--paper); }
+
+  .btn-primary:disabled { opacity: 0.6; cursor: default; }
+
+  .btn-secondary {
+    background: transparent;
+    color: var(--paper);
+    border: 1px solid var(--paper-soft);
+    border-radius: 6px;
+    padding: 0.45rem 0.85rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+
+  .signup-terms {
     display: flex;
     align-items: flex-start;
     gap: 0.5rem;
     font-size: 0.9rem;
-    color: var(--fg-muted);
+    color: var(--ink-soft);
+    margin-top: 0.75rem;
+    max-width: 26rem;
   }
 
-  .terms-row input { margin-top: 0.2rem; }
-
-  button.primary {
-    background: var(--accent);
-    color: var(--accent-fg);
-    border: none;
-    border-radius: 4px;
-    padding: 0.65rem 1.25rem;
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    justify-self: start;
-  }
-
-  button.primary:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
-
-  button.secondary {
-    background: transparent;
-    color: var(--fg);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 0.4rem 0.8rem;
-    font-size: 0.9rem;
-    cursor: pointer;
-  }
+  .signup-terms input { margin-top: 0.25rem; }
 
   .signup-error {
-    color: var(--danger);
+    color: var(--sting);
     font-size: 0.9rem;
+    font-weight: 700;
+    margin-top: 0.75rem;
+  }
+
+  .signup-micro {
+    font-size: 0.88rem;
+    color: var(--ink-soft);
+    margin: 0.75rem 0 0;
   }
 
   .signup-result {
-    max-width: 26rem;
-    padding: 1rem;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg-raised);
+    background: var(--terminal);
+    color: var(--paper);
+    border-radius: 8px;
+    padding: 1.25rem 1.4rem;
+    margin-top: 0.5rem;
   }
 
-  .signup-result p { margin: 0 0 0.6rem; }
+  .signup-warning {
+    color: var(--amber);
+    font-weight: 700;
+    margin: 0 0 0.75rem;
+  }
 
   .token-row {
     display: flex;
-    gap: 0.5rem;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    align-items: center;
+    margin-bottom: 0.9rem;
   }
 
-  .token-row input {
-    flex: 1;
+  .signup-token {
     font-family: var(--font-mono);
     font-size: 0.85rem;
-    padding: 0.5rem 0.6rem;
-    background: var(--code-bg);
-    border: 1px solid var(--border);
+    background: rgba(251, 247, 236, 0.08);
+    border: 1px solid rgba(251, 247, 236, 0.2);
     border-radius: 4px;
-    color: var(--fg);
+    padding: 0.5rem 0.65rem;
+    word-break: break-all;
+    flex: 1 1 12rem;
+  }
+
+  .signup-next {
+    font-size: 0.9rem;
+    color: var(--paper-soft);
+    margin: 0 0 0.5rem;
+  }
+
+  .signup-snippet {
+    background: rgba(251, 247, 236, 0.06);
+    border: 1px solid rgba(251, 247, 236, 0.15);
+    border-radius: 6px;
+    padding: 0.75rem 0.9rem;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    overflow-x: auto;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
 
   [hidden] { display: none !important; }
 
-  footer {
-    padding: 2rem 0 3rem;
-    color: var(--fg-muted);
-    font-size: 0.85rem;
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 
-  footer a { color: var(--fg-muted); text-decoration: underline; }
-  footer a:hover, footer a:focus { color: var(--accent); }
+  /* ---------- Demo panel (the signature) ---------- */
+  .demo-panel {
+    position: relative;
+    background: var(--terminal);
+    color: var(--paper);
+    border-radius: 10px;
+    padding: 1.75rem 1.25rem 1.25rem;
+    font-family: var(--font-mono);
+    font-size: 14px;
+    line-height: 1.6;
+    overflow: hidden;
+    box-shadow: 0 0 0 1px rgba(245, 168, 0, 0.18), 0 24px 60px -24px rgba(245, 168, 0, 0.45);
+  }
 
-  @media (max-width: 420px) {
-    .wordmark { font-size: 1.75rem; }
-    .tagline { font-size: 1.1rem; }
-    section { padding: 2rem 0; }
+  .demo-panel::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: repeating-linear-gradient(
+      45deg,
+      var(--amber) 0 8px,
+      var(--ink) 8px 16px
+    );
+  }
+
+  .demo-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin: 0;
+  }
+
+  .demo-line { margin: 0; opacity: 1; }
+
+  .demo-prompt {
+    color: var(--amber);
+    font-weight: 700;
+    margin-right: 0.4em;
+  }
+
+  .demo-line--sting { color: var(--sting); }
+
+  .demo-ok { color: #7fbf6a; margin-left: 0.5em; opacity: 1; }
+
+  .demo-cursor {
+    display: inline-block;
+    width: 0.55em;
+    height: 1em;
+    margin-left: 0.15em;
+    background: var(--amber);
+    vertical-align: text-bottom;
+    opacity: 0;
+  }
+
+  .demo-card {
+    background: var(--terminal);
+    border-left: 3px solid var(--amber);
+    padding: 0.65rem 0.85rem;
+    margin: 0.15rem 0;
+    opacity: 1;
+  }
+
+  .demo-card p { margin: 0 0 0.3rem; }
+  .demo-card p:last-child { margin-bottom: 0; }
+
+  .demo-card__title { color: var(--amber); font-weight: 700; }
+
+  .demo-replay {
+    background: none;
+    border: none;
+    color: var(--paper-soft);
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    cursor: pointer;
+    padding: 0;
+    margin-top: 0.9rem;
+  }
+
+  .demo-replay:hover { color: var(--amber); }
+
+  .demo-caption {
+    font-size: 0.9rem;
+    color: var(--ink-soft);
+    margin: 0.9rem 0 0;
+  }
+
+  /* Playing state: line-by-line reveal via animation-delay */
+  @keyframes demoReveal {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  @keyframes demoCardIn {
+    from { opacity: 0; transform: translateX(28px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  @keyframes demoBlink { 50% { opacity: 0; } }
+
+  @keyframes demoCursorHide { to { opacity: 0; } }
+
+  .demo-panel.is-playing .demo-line,
+  .demo-panel.is-playing .demo-card { opacity: 0; }
+
+  .demo-panel.is-playing .demo-line { animation: demoReveal 0.5s ease forwards; }
+  .demo-panel.is-playing .demo-line--1 { animation-delay: 0s; }
+  .demo-panel.is-playing .demo-line--2 { animation-delay: 2s; }
+  .demo-panel.is-playing .demo-line--3 { animation-delay: 3s; }
+  .demo-panel.is-playing .demo-line--5 { animation-delay: 6.5s; }
+
+  .demo-panel.is-playing .demo-card {
+    animation: demoCardIn 0.6s ease forwards;
+    animation-delay: 4.5s;
+  }
+
+  .demo-panel.is-playing .demo-ok {
+    opacity: 0;
+    animation: demoReveal 0.5s ease forwards;
+    animation-delay: 7.3s;
+  }
+
+  .demo-panel.is-playing .demo-cursor {
+    opacity: 1;
+    animation: demoBlink 0.8s steps(1) infinite, demoCursorHide 0.01s linear forwards;
+    animation-delay: 0s, 2s;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .demo-panel .demo-line,
+    .demo-panel .demo-card,
+    .demo-panel .demo-ok {
+      animation: none !important;
+      opacity: 1 !important;
+      transform: none !important;
+    }
+    .demo-panel .demo-cursor { animation: none !important; opacity: 0 !important; }
+  }
+
+  /* ---------- Stat strip ---------- */
+  .stat-strip {
+    border-top: 1px solid var(--ink-hair);
+    border-bottom: 1px solid var(--ink-hair);
+    padding: 1.1rem 0;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--ink);
+  }
+
+  .stat-strip p { margin: 0; }
+
+  /* ---------- Pain vignettes ---------- */
+  .pains-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 1.5rem;
+  }
+
+  @media (min-width: 700px) {
+    .pains-list { grid-template-columns: repeat(3, 1fr); }
+  }
+
+  .pain-item { display: flex; gap: 0.65rem; align-items: flex-start; }
+
+  .pain-mark {
+    color: var(--sting);
+    font-weight: 700;
+    line-height: 1.65;
+    flex: none;
+  }
+
+  .pain-item h3 {
+    font-family: var(--font-body);
+    font-size: 1rem;
+    margin: 0 0 0.3rem;
+  }
+
+  .pain-item p { margin: 0; color: var(--ink-soft); }
+
+  /* ---------- Trap card section ---------- */
+  .trap-card {
+    position: relative;
+    background: var(--terminal);
+    color: var(--paper);
+    border-radius: 8px;
+    padding: 1.5rem 1.4rem 1.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+  }
+
+  .trap-card::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: repeating-linear-gradient(
+      45deg,
+      var(--amber) 0 8px,
+      var(--ink) 8px 16px
+    );
+    border-radius: 8px 8px 0 0;
+  }
+
+  .trap-card__meta {
+    color: var(--paper-soft);
+    font-size: 0.78rem;
+    letter-spacing: 0.05em;
+    margin: 0.4rem 0 0.75rem;
+  }
+
+  .trap-card__title {
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+    font-weight: 700;
+    line-height: 1.5;
+    margin: 0 0 0.9rem;
+  }
+
+  .trap-card p { margin: 0 0 0.75rem; }
+  .trap-card p:last-child { margin-bottom: 0; }
+  .trap-card strong { color: var(--amber); }
+
+  .trap-annotations {
+    display: grid;
+    gap: 0.75rem;
+    margin: 1.25rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .trap-annotations li {
+    position: relative;
+    padding-left: 1.4rem;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--amber-ink);
+  }
+
+  .trap-annotations li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.55em;
+    width: 1rem;
+    height: 1px;
+    background: var(--amber-deep);
+  }
+
+  /* ---------- Install section ---------- */
+  .snippet-block {
+    background: var(--terminal);
+    color: var(--paper);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    overflow-x: auto;
+    margin: 0;
+    white-space: pre;
+  }
+
+  /* ---------- Trust section ---------- */
+  .trust p { max-width: 42rem; }
+
+  /* ---------- CTA repeat ---------- */
+  .cta-repeat { text-align: center; }
+  .cta-repeat .signup-block { margin: 0 auto; text-align: left; }
+
+  /* ---------- Footer ---------- */
+  footer {
+    padding: 2rem 0 3rem;
+    color: var(--ink-soft);
+    font-size: 0.88rem;
+  }
+
+  footer a { color: var(--ink-soft); text-decoration: underline; font-weight: 700; }
+  footer a:hover { color: var(--amber-ink); }
+
+  @media (max-width: 480px) {
+    section { padding: 2.25rem 0; }
+    .demo-panel { font-size: 13px; }
   }
 </style>
 </head>
 <body>
-<div class="wrap">
 
-  <header class="hero">
-    <p class="wordmark">twice<span class="sting">shy</span></p>
-    <p class="tagline">Once bitten, twice shy — validated engineering traps, served to your coding agent at decision time.</p>
-    <p class="sub">A self-hosted experience service: real dead-ends, root causes and fixes from real sessions — retrieved by your agent exactly when it's about to repeat one.</p>
-  </header>
+<header class="hero">
+  <div class="wrap hero-inner">
+    <div>
+      <p class="eyebrow">For everyone who builds with AI agents</p>
+      <h1>Every mistake your agent makes, someone already made.</h1>
+      <p class="hero-sub">twiceshy is a shared memory of validated dead-ends and fixes. Your agent checks it before walking into a trap — and skips straight to what works.</p>
 
-  <section id="how-it-works">
-    <h2>How it works</h2>
-    <div class="steps">
-      <div class="step">
-        <h3>1. Your agent hits a wall</h3>
-        <p>a failing test, a cryptic error, a retry loop.</p>
+      <div class="signup-block" id="signup-hero">
+        <form class="signup-form" novalidate>
+          <div class="signup-row">
+            <label class="visually-hidden" for="hero-email">Email</label>
+            <input type="email" id="hero-email" name="email" class="signup-email" required autocomplete="email" placeholder="you@example.com">
+            <button type="submit" class="btn-primary signup-submit">Get your agent a memory</button>
+          </div>
+          <label class="signup-terms">
+            <input type="checkbox" name="accept_terms" class="signup-terms-check" required>
+            <span>I accept the <a href="/terms">alpha terms &amp; data policy</a></span>
+          </label>
+          <p class="signup-error" role="alert" hidden></p>
+        </form>
+        <p class="signup-micro">Free alpha · no credit card · token in 5 seconds</p>
+        <div class="signup-result" hidden>
+          <p class="signup-warning">Shown once — store it now.</p>
+          <div class="token-row">
+            <code class="signup-token"></code>
+            <button type="button" class="btn-secondary signup-copy">Copy</button>
+          </div>
+          <p class="signup-next">Next step — give your agent the memory:</p>
+          <pre class="signup-snippet"><code></code></pre>
+        </div>
       </div>
-      <div class="step">
-        <h3>2. It asks twiceshy</h3>
-        <p><code>search_experience</code> over a corpus of validated traps: symptom, root cause, dead-ends already tried, the guarding test.</p>
-      </div>
-      <div class="step">
-        <h3>3. It skips the dead-end</h3>
-        <p>the fix that worked, with provenance — not a guess.</p>
-      </div>
+    </div>
+
+    <div>
+      <aside class="demo-panel" id="demo-panel" aria-label="Demo: a trap card catching an agent mid-retry">
+        <div class="demo-lines">
+          <p class="demo-line demo-line--1"><span class="demo-prompt">agent</span>Passing search query straight to FTS5 MATCH…<span class="demo-cursor" aria-hidden="true"></span></p>
+          <p class="demo-line demo-line--2 demo-line--sting">✗ fts5: syntax error near '.'</p>
+          <p class="demo-line demo-line--3"><span class="demo-prompt">agent</span>Retrying with different escaping…</p>
+          <div class="demo-card">
+            <p class="demo-card__title">⚠ twiceshy · trap card</p>
+            <p>FTS5 MATCH treats input as query syntax.</p>
+            <p>Escape: quote every token — quoted strings are never operators.</p>
+          </div>
+          <p class="demo-line demo-line--5"><span class="demo-prompt">agent</span>Known dead-end. Quoting tokens instead.<span class="demo-ok">✓ tests pass</span></p>
+        </div>
+        <button type="button" class="demo-replay" id="demo-replay">↻ replay</button>
+      </aside>
+      <p class="demo-caption">A real card, served in milliseconds — before the third retry, not after the thirtieth.</p>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="stat-strip">
+    <div class="wrap">
+      <p>4,346 traps recorded · every card judged by two independent AI models + a human veto window · works with Claude Code, Cursor, Windsurf, VS Code</p>
     </div>
   </section>
 
-  <section id="sample">
-    <h2>A real record</h2>
-    <div class="card" role="img" aria-label="Sample experience card exp-0001, as served to a coding agent">
-      <span class="card-meta">[ID: exp-0001  TRUST: validated]</span>
-      <br>
-      <span class="card-label">Title:</span> <span class="card-title">SQLite FTS5 MATCH treats user input as query syntax — dots, dashes and quotes error out or change semantics</span>
-      <br><br>
-      <span class="card-label">The trap:</span> You build search on SQLite FTS5, dutifully use a bound parameter (<code>WHERE t MATCH ?</code>), test it with <code>hello world</code>, and ship. The first real query containing a package name, version string, or error message — <code>modernc.org/sqlite</code>, <code>utf-8</code>, <code>exit code 1</code> — either throws <code>fts5: syntax error near "."</code> or quietly does something else than searching for those words. On autopilot, an agent "fixes" the syntax error by stripping punctuation, which destroys exactly the identifier-heavy tokens that make error-message search work.
-      <br><br>
-      <span class="card-label">The escape:</span> Treat user text as data by construction: tokenize on whitespace, double any embedded <code>"</code> inside each token, wrap each token in double quotes, join with spaces (implicit AND). Inside double quotes there are no operators. If OR-semantics are wanted, join the quoted tokens with <code>OR</code> explicitly — that's then <em>your</em> operator, not the user's.
-    </div>
-    <p class="caption">An actual card, as your agent receives it.</p>
-  </section>
-
-  <section id="onboarding">
-    <h2>Onboarding</h2>
-    <p>No install. If your agent speaks MCP, it already speaks twiceshy.</p>
-    <pre class="code-block">claude mcp add -t http twiceshy https://api.twiceshy.dev \
-  --header "Authorization: Bearer YOUR_TOKEN"</pre>
-    <p class="note">Works in Cursor, Windsurf, VS Code, Codex CLI too.</p>
-  </section>
-
-  <section id="signup">
-    <h2>Get an alpha token</h2>
-    <form class="signup" id="signup-form">
-      <div>
-        <label for="signup-email">Email</label>
-        <input type="email" id="signup-email" name="email" required autocomplete="email" placeholder="you@example.com">
-      </div>
-      <div class="terms-row">
-        <input type="checkbox" id="signup-terms" name="accept_terms" required>
-        <label for="signup-terms">I accept the alpha terms &amp; data policy</label>
-      </div>
-      <button type="submit" class="primary" id="signup-submit">Get an alpha token</button>
-      <p class="signup-error" id="signup-error" hidden></p>
-    </form>
-    <div class="signup-result" id="signup-result" hidden>
-      <p><strong>Shown once — store it now.</strong></p>
-      <div class="token-row">
-        <input type="text" id="signup-token" readonly aria-label="Your alpha token">
-        <button type="button" class="secondary" id="signup-copy">Copy</button>
-      </div>
+  <section id="pains">
+    <div class="wrap">
+      <h2>You've watched this happen</h2>
+      <ul class="pains-list">
+        <li class="pain-item">
+          <span class="pain-mark" aria-hidden="true">✗</span>
+          <div>
+            <h3>The confident loop</h3>
+            <p>Your agent retries the same failing build six different ways. Every attempt sounds sure. None of them work.</p>
+          </div>
+        </li>
+        <li class="pain-item">
+          <span class="pain-mark" aria-hidden="true">✗</span>
+          <div>
+            <h3>The invisible wall</h3>
+            <p>The bug it's fighting was documented three years ago. Your agent has no way to know that.</p>
+          </div>
+        </li>
+        <li class="pain-item">
+          <span class="pain-mark" aria-hidden="true">✗</span>
+          <div>
+            <h3>The bill</h3>
+            <p>Dead-ends cost tokens, minutes, and your patience — every session, starting from zero.</p>
+          </div>
+        </li>
+      </ul>
     </div>
   </section>
 
-  <section id="corpus-honestly">
-    <h2>The corpus, honestly</h2>
-    <p class="sub">About 1,000 validated records today, and growing. Every record passes a cross-model judge panel and a human veto window before it can ever be served — a quarantined submission can never reach serving. The alpha is pull-only: <code>search_experience</code> and <code>get_experience</code>.</p>
+  <hr class="hazard-strip">
+
+  <section id="trap">
+    <div class="wrap">
+      <h2>One card changes the session</h2>
+      <div class="trap-card" role="img" aria-label="Sample experience card exp-0001, as served to a coding agent">
+        <p class="trap-card__meta">EXP-0001 · TRAP CARD</p>
+        <p class="trap-card__title">SQLite FTS5 MATCH treats user input as query syntax — dots, dashes and quotes error out or change semantics</p>
+        <p><strong>The trap:</strong> passing raw text to MATCH errors on punctuation or silently changes meaning.</p>
+        <p><strong>The escape:</strong> quote every token — quoted strings are always plain terms.</p>
+      </div>
+      <ul class="trap-annotations">
+        <li>the trap, in plain words</li>
+        <li>the escape that actually worked</li>
+        <li>validated before it can ever reach your agent</li>
+      </ul>
+    </div>
   </section>
 
-  <footer>
-    <p>
-      twiceshy is licensed <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0-only</a> —
-      <a href="https://github.com/twiceshy/twiceshy">source</a>. Self-hosting is free, forever.
-    </p>
-    <p>
-      Terms: <a href="/terms">alpha terms &amp; data policy</a>. Questions:
-      <a href="mailto:hello@twiceshy.dev">hello@twiceshy.dev</a>.
-    </p>
-  </footer>
+  <section id="install">
+    <div class="wrap">
+      <h2>No install. No new app.</h2>
+      <p>If your coding agent speaks MCP — Claude Code, Cursor, Windsurf, VS Code and friends already do — paste one line and every session after that has the memory.</p>
+      <pre class="snippet-block"><code>claude mcp add -t http twiceshy https://api.twiceshy.dev \
+  --header "Authorization: Bearer YOUR_TOKEN"</code></pre>
+    </div>
+  </section>
 
-</div>
+  <section id="trust" class="trust">
+    <div class="wrap">
+      <h2>Why trust these cards?</h2>
+      <p>Every record runs a gauntlet before your agent can ever see it: two AI judges from different vendors must independently approve it, then it soaks in a human review window. Records that fail stay quarantined — permanently. The corpus grows nightly; nothing reaches you unvalidated.</p>
+    </div>
+  </section>
+
+  <section id="cta-repeat" class="cta-repeat">
+    <div class="wrap">
+      <h2>Give your agent a memory.</h2>
+      <div class="signup-block" id="signup-repeat">
+        <form class="signup-form" novalidate>
+          <div class="signup-row">
+            <label class="visually-hidden" for="repeat-email">Email</label>
+            <input type="email" id="repeat-email" name="email" class="signup-email" required autocomplete="email" placeholder="you@example.com">
+            <button type="submit" class="btn-primary signup-submit">Get your agent a memory</button>
+          </div>
+          <label class="signup-terms">
+            <input type="checkbox" name="accept_terms" class="signup-terms-check" required>
+            <span>I accept the <a href="/terms">alpha terms &amp; data policy</a></span>
+          </label>
+          <p class="signup-error" role="alert" hidden></p>
+        </form>
+        <div class="signup-result" hidden>
+          <p class="signup-warning">Shown once — store it now.</p>
+          <div class="token-row">
+            <code class="signup-token"></code>
+            <button type="button" class="btn-secondary signup-copy">Copy</button>
+          </div>
+          <p class="signup-next">Next step — give your agent the memory:</p>
+          <pre class="signup-snippet"><code></code></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Open source (<a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a>) · self-hosting is free, forever · alpha <a href="/terms">terms &amp; data policy</a> · built by people tired of watching agents repeat themselves.</p>
+  </div>
+</footer>
 
 <script>
 (function () {
   "use strict";
 
-  var form = document.getElementById("signup-form");
-  var emailInput = document.getElementById("signup-email");
-  var termsInput = document.getElementById("signup-terms");
-  var submitBtn = document.getElementById("signup-submit");
-  var errorBox = document.getElementById("signup-error");
-  var resultBox = document.getElementById("signup-result");
-  var tokenField = document.getElementById("signup-token");
-  var copyBtn = document.getElementById("signup-copy");
+  var reduceMotion = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
-  function showError(message) {
-    errorBox.textContent = message;
-    errorBox.hidden = false;
+  // ---------- Signature demo animation ----------
+  var demoPanel = document.getElementById("demo-panel");
+  var demoReplay = document.getElementById("demo-replay");
+
+  function playDemo() {
+    if (!demoPanel || reduceMotion) { return; }
+    demoPanel.classList.remove("is-playing");
+    void demoPanel.offsetWidth; // force reflow so the animation restarts
+    demoPanel.classList.add("is-playing");
   }
 
-  function showResult(token) {
-    form.hidden = true;
-    tokenField.value = token;
-    resultBox.hidden = false;
+  if (demoPanel && !reduceMotion) {
+    playDemo();
+  }
+  if (demoReplay) {
+    demoReplay.addEventListener("click", playDemo);
   }
 
-  form.addEventListener("submit", function (evt) {
-    evt.preventDefault();
-    errorBox.hidden = true;
-    submitBtn.disabled = true;
-    submitBtn.textContent = "Requesting…";
+  // ---------- Signup forms (hero + repeat) ----------
+  function initSignupForm(block) {
+    var form = block.querySelector(".signup-form");
+    var emailInput = block.querySelector(".signup-email");
+    var termsInput = block.querySelector(".signup-terms-check");
+    var submitBtn = block.querySelector(".signup-submit");
+    var errorBox = block.querySelector(".signup-error");
+    var resultBox = block.querySelector(".signup-result");
+    var tokenField = block.querySelector(".signup-token");
+    var snippetCode = block.querySelector(".signup-snippet code");
+    var copyBtn = block.querySelector(".signup-copy");
 
-    fetch("/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: emailInput.value,
-        accept_terms: termsInput.checked
-      })
-    })
-      .then(function (resp) {
-        if (resp.status === 429) {
-          throw new Error("Alpha signups are limited per day — try tomorrow.");
-        }
-        if (!resp.ok) {
-          return resp.json()
-            .catch(function () { return {}; })
-            .then(function (body) {
-              if (body.error === "terms_not_accepted") {
-                throw new Error("You must accept the alpha terms & data policy.");
-              }
-              throw new Error("Signup failed — check your email and try again.");
-            });
-        }
-        return resp.json();
-      })
-      .then(function (data) {
-        showResult(data.token);
-      })
-      .catch(function (err) {
-        showError(err.message);
-      })
-      .finally(function () {
-        submitBtn.disabled = false;
-        submitBtn.textContent = "Get an alpha token";
-      });
-  });
-
-  copyBtn.addEventListener("click", function () {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(tokenField.value).then(function () {
-        copyBtn.textContent = "Copied";
-        setTimeout(function () { copyBtn.textContent = "Copy"; }, 1500);
-      });
-    } else {
-      tokenField.select();
-      document.execCommand("copy");
-      copyBtn.textContent = "Copied";
-      setTimeout(function () { copyBtn.textContent = "Copy"; }, 1500);
+    function showError(message) {
+      errorBox.textContent = message;
+      errorBox.hidden = false;
     }
-  });
+
+    function showResult(token) {
+      form.hidden = true;
+      var micro = block.querySelector(".signup-micro");
+      if (micro) { micro.hidden = true; }
+      tokenField.textContent = token;
+      snippetCode.textContent = "claude mcp add -t http twiceshy https://api.twiceshy.dev \\\n  --header \"Authorization: Bearer " + token + "\"";
+      resultBox.hidden = false;
+    }
+
+    form.addEventListener("submit", function (evt) {
+      evt.preventDefault();
+      errorBox.hidden = true;
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Requesting…";
+
+      fetch("/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: emailInput.value,
+          accept_terms: termsInput.checked
+        })
+      })
+        .then(function (resp) {
+          if (resp.status === 429) {
+            throw new Error("Alpha signups are limited each day — try again tomorrow.");
+          }
+          if (!resp.ok) {
+            throw new Error("Something broke on our side — try again in a minute.");
+          }
+          return resp.json();
+        })
+        .then(function (data) {
+          showResult(data.token);
+        })
+        .catch(function (err) {
+          showError(err.message);
+        })
+        .finally(function () {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Get your agent a memory";
+        });
+    });
+
+    if (copyBtn) {
+      copyBtn.addEventListener("click", function () {
+        var text = tokenField.textContent;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () {
+            copyBtn.textContent = "Copied";
+            setTimeout(function () { copyBtn.textContent = "Copy"; }, 1500);
+          });
+        } else {
+          var range = document.createRange();
+          range.selectNodeContents(tokenField);
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          document.execCommand("copy");
+          sel.removeAllRanges();
+          copyBtn.textContent = "Copied";
+          setTimeout(function () { copyBtn.textContent = "Copy"; }, 1500);
+        }
+      });
+    }
+  }
+
+  var signupBlocks = document.querySelectorAll(".signup-block");
+  for (var i = 0; i < signupBlocks.length; i++) {
+    initSignupForm(signupBlocks[i]);
+  }
 })();
 </script>
 </body>
