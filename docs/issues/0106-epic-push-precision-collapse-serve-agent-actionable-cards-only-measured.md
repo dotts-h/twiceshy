@@ -78,3 +78,7 @@ IDF endgame these children bridge to).
 ## Notes
 Diagnosed in the 2026-07-01 deep-analysis session (orchestrator: Claude).
 ADR-0028 records the policy; ADR-0017 remains the endgame for specificity.
+
+## Evidence: labeled full-day sample, 2026-07-06 (cross-domain misfire)
+
+A full engineering day on an unrelated project (market-data publishing, TapeWire) produced a clean relevance-labeled sample, reported by the session's agent: ~12 push injections across debugging/API-integration/design-review/research prompts — React peer-deps, SQLite FTS5, CSS flexbox cards — **zero relevant to the domain**, while the two valuable twiceshy interactions were both deliberate pull-side (a keep-alive-socket trap deposit with a good fingerprint, and a tooling note). Two readings: (a) the misfires are CROSS-DOMAIN, arguing for repo/domain-scoped push eligibility before finer ranking work; (b) deposits with strong fingerprints are a leading indicator the confirmed-helpful metric does not count. The session also nearly disabled the push hook believing it was drift (a stale "push is deferred pending #0005" config note) — worth a docs sweep when push ships for real.
