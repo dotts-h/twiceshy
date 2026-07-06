@@ -1,0 +1,12 @@
+[Unit]
+Description=twiceshy public-alpha corpus refresh — pull-only mirror of the public corpus repo into the twiceshy-data volume, then SIGHUP reload (#0129, #0060)
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=twiceshy
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=TWICESHY_CORPUS_CLONE=/opt/twiceshy-public-alpha/corpus-src
+ExecStart=/opt/twiceshy-public-alpha/repo/deploy/public-alpha/corpus-refresh.sh

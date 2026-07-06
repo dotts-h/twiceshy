@@ -1,0 +1,74 @@
+# deploy/public-alpha/Caddyfile — public-alpha TLS + static landing + reverse
+# proxy (#0129, ADR-0030). Must stay consistent with compose.yaml (service name
+# `twiceshy`, port 8722) and docs/DEPLOY-public-alpha.md.
+#
+# OPEN DECISION (domain — see the runbook): twiceshy.dev / api.twiceshy.dev are
+# PLACEHOLDERS. Substitute the real domain(s) before deploy; Caddy issues
+# Let's Encrypt certs automatically for whatever hostnames are configured here.
+#
+# Two site blocks:
+#   - twiceshy.dev / www — the marketing + self-serve domain: serves
+#     web/landing/ as a static root (/, /docs, /terms map to the *.html files),
+#     and reverse-proxies POST /signup + GET /statz to twiceshy:8722 so the
+#     landing page's own signup form (fetch("/signup")) stays same-origin.
+#   - api.twiceshy.dev — the MCP domain: everything here is non-static, so the
+#     whole vhost reverse-proxies to twiceshy:8722 (this is what MCP clients
+#     configure; /healthz, /readyz, /signup, /statz are reachable here too).
+#
+# X-Forwarded-For: reverse_proxy sets this by default. KNOWN LIMITATION at
+# launch (#0131): the signup per-IP daily cap keys on RemoteAddr, so every
+# client behind this proxy shares Caddy's IP — the cap is effectively
+# global-3/day until trusted-proxy XFF handling lands server-side.
+{
+	# Let's Encrypt account contact — OPEN DECISION placeholder, set to a real inbox.
+	email admin@twiceshy.dev
+}
+
+twiceshy.dev, www.twiceshy.dev {
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+
+	root * /srv/landing
+
+	handle /docs {
+		rewrite * /docs.html
+		file_server
+	}
+
+	handle /terms {
+		rewrite * /terms.html
+		file_server
+	}
+
+	handle /signup {
+		reverse_proxy twiceshy:8722
+	}
+
+	handle /statz {
+		reverse_proxy twiceshy:8722
+	}
+
+	handle / {
+		file_server
+	}
+
+	# Catch-all: anything else non-static (/push, /retro, MCP, …) to twiceshy.
+	handle {
+		reverse_proxy twiceshy:8722
+	}
+}
+
+api.twiceshy.dev {
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+
+	# Everything is non-static on this vhost — the MCP endpoint (mounted at "/"
+	# in the server) plus /healthz, /readyz, /signup, /statz.
+	reverse_proxy twiceshy:8722
+}

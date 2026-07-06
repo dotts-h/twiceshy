@@ -1,0 +1,10 @@
+[Unit]
+Description=twiceshy public-alpha corpus refresh heartbeat (mirror the corpus repo's main into the twiceshy-data volume, #0129)
+
+[Timer]
+OnCalendar=*:0/30
+RandomizedDelaySec=2m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
