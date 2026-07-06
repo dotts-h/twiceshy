@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>twiceshy — validated engineering experience for coding agents</title>
+<meta name="description" content="Once bitten, twice shy — validated engineering traps, served to your coding agent at decision time.">
+<style>
+  /* Dark theme is the default; light is offered via prefers-color-scheme only —
+     no toggle, no JS-driven theme state. One accent color throughout (amber, the
+     "twice shy" sting), system font stack, no gradients, no stock imagery. */
+  :root {
+    --bg: #0b0d10;
+    --bg-raised: #14171b;
+    --fg: #e9e6e0;
+    --fg-muted: #a7a29a;
+    --border: #2a2e33;
+    --accent: #f2ad33;
+    --accent-fg: #1a1200;
+    --code-bg: #0f1113;
+    --danger: #ff8a80;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #faf8f5;
+      --bg-raised: #ffffff;
+      --fg: #1c1a17;
+      --fg-muted: #5b564d;
+      --border: #ded8cd;
+      --accent: #a8590a;
+      --accent-fg: #ffffff;
+      --code-bg: #f1ede4;
+      --danger: #a3231a;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: var(--accent); }
+  a:hover, a:focus { text-decoration: underline; }
+
+  .wrap {
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 0 1.25rem;
+  }
+
+  section {
+    padding: 3rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  section:last-of-type { border-bottom: none; }
+
+  h1, h2, h3 { line-height: 1.25; }
+
+  h2 {
+    font-size: 1.4rem;
+    margin: 0 0 1.5rem;
+  }
+
+  /* Hero */
+  .hero { padding-top: 4rem; }
+
+  .wordmark {
+    font-size: 2.25rem;
+    font-weight: 700;
+    margin: 0 0 0.75rem;
+    letter-spacing: -0.01em;
+  }
+
+  .wordmark .sting { color: var(--accent); }
+
+  .tagline {
+    font-size: 1.25rem;
+    margin: 0 0 1rem;
+    max-width: 42rem;
+  }
+
+  .sub {
+    color: var(--fg-muted);
+    max-width: 42rem;
+    margin: 0;
+  }
+
+  /* How it works */
+  .steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1.5rem;
+  }
+
+  .step h3 {
+    font-size: 1.05rem;
+    margin: 0 0 0.4rem;
+  }
+
+  .step p {
+    color: var(--fg-muted);
+    margin: 0;
+  }
+
+  /* Sample card */
+  .card {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    padding: 1.25rem 1.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-x: auto;
+  }
+
+  .card .card-meta { color: var(--fg-muted); }
+  .card .card-title { color: var(--fg); font-weight: 600; }
+  .card .card-label { color: var(--accent); }
+
+  .caption {
+    color: var(--fg-muted);
+    font-size: 0.9rem;
+    margin: 0.75rem 0 0;
+  }
+
+  /* Onboarding */
+  pre.code-block {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    overflow-x: auto;
+  }
+
+  .note {
+    color: var(--fg-muted);
+    font-size: 0.9rem;
+  }
+
+  /* Signup form */
+  form.signup {
+    display: grid;
+    gap: 1rem;
+    max-width: 26rem;
+  }
+
+  label { font-size: 0.95rem; }
+
+  input[type="email"] {
+    width: 100%;
+    padding: 0.6rem 0.7rem;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--fg);
+    font-size: 1rem;
+  }
+
+  input[type="email"]:focus, button:focus, input[type="text"]:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .terms-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--fg-muted);
+  }
+
+  .terms-row input { margin-top: 0.2rem; }
+
+  button.primary {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border: none;
+    border-radius: 4px;
+    padding: 0.65rem 1.25rem;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    justify-self: start;
+  }
+
+  button.primary:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  button.secondary {
+    background: transparent;
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.4rem 0.8rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+
+  .signup-error {
+    color: var(--danger);
+    font-size: 0.9rem;
+  }
+
+  .signup-result {
+    max-width: 26rem;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-raised);
+  }
+
+  .signup-result p { margin: 0 0 0.6rem; }
+
+  .token-row {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .token-row input {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    padding: 0.5rem 0.6rem;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--fg);
+  }
+
+  [hidden] { display: none !important; }
+
+  footer {
+    padding: 2rem 0 3rem;
+    color: var(--fg-muted);
+    font-size: 0.85rem;
+  }
+
+  footer a { color: var(--fg-muted); text-decoration: underline; }
+  footer a:hover, footer a:focus { color: var(--accent); }
+
+  @media (max-width: 420px) {
+    .wordmark { font-size: 1.75rem; }
+    .tagline { font-size: 1.1rem; }
+    section { padding: 2rem 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <p class="wordmark">twice<span class="sting">shy</span></p>
+    <p class="tagline">Once bitten, twice shy — validated engineering traps, served to your coding agent at decision time.</p>
+    <p class="sub">A self-hosted experience service: real dead-ends, root causes and fixes from real sessions — retrieved by your agent exactly when it's about to repeat one.</p>
+  </header>
+
+  <section id="how-it-works">
+    <h2>How it works</h2>
+    <div class="steps">
+      <div class="step">
+        <h3>1. Your agent hits a wall</h3>
+        <p>a failing test, a cryptic error, a retry loop.</p>
+      </div>
+      <div class="step">
+        <h3>2. It asks twiceshy</h3>
+        <p><code>search_experience</code> over a corpus of validated traps: symptom, root cause, dead-ends already tried, the guarding test.</p>
+      </div>
+      <div class="step">
+        <h3>3. It skips the dead-end</h3>
+        <p>the fix that worked, with provenance — not a guess.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="sample">
+    <h2>A real record</h2>
+    <div class="card" role="img" aria-label="Sample experience card exp-0001, as served to a coding agent">
+      <span class="card-meta">[ID: exp-0001  TRUST: validated]</span>
+      <br>
+      <span class="card-label">Title:</span> <span class="card-title">SQLite FTS5 MATCH treats user input as query syntax — dots, dashes and quotes error out or change semantics</span>
+      <br><br>
+      <span class="card-label">The trap:</span> You build search on SQLite FTS5, dutifully use a bound parameter (<code>WHERE t MATCH ?</code>), test it with <code>hello world</code>, and ship. The first real query containing a package name, version string, or error message — <code>modernc.org/sqlite</code>, <code>utf-8</code>, <code>exit code 1</code> — either throws <code>fts5: syntax error near "."</code> or quietly does something else than searching for those words. On autopilot, an agent "fixes" the syntax error by stripping punctuation, which destroys exactly the identifier-heavy tokens that make error-message search work.
+      <br><br>
+      <span class="card-label">The escape:</span> Treat user text as data by construction: tokenize on whitespace, double any embedded <code>"</code> inside each token, wrap each token in double quotes, join with spaces (implicit AND). Inside double quotes there are no operators. If OR-semantics are wanted, join the quoted tokens with <code>OR</code> explicitly — that's then <em>your</em> operator, not the user's.
+    </div>
+    <p class="caption">An actual card, as your agent receives it.</p>
+  </section>
+
+  <section id="onboarding">
+    <h2>Onboarding</h2>
+    <p>No install. If your agent speaks MCP, it already speaks twiceshy.</p>
+    <pre class="code-block">claude mcp add -t http twiceshy https://api.twiceshy.dev \
+  --header "Authorization: Bearer YOUR_TOKEN"</pre>
+    <p class="note">Works in Cursor, Windsurf, VS Code, Codex CLI too.</p>
+  </section>
+
+  <section id="signup">
+    <h2>Get an alpha token</h2>
+    <form class="signup" id="signup-form">
+      <div>
+        <label for="signup-email">Email</label>
+        <input type="email" id="signup-email" name="email" required autocomplete="email" placeholder="you@example.com">
+      </div>
+      <div class="terms-row">
+        <input type="checkbox" id="signup-terms" name="accept_terms" required>
+        <label for="signup-terms">I accept the alpha terms &amp; data policy</label>
+      </div>
+      <button type="submit" class="primary" id="signup-submit">Get an alpha token</button>
+      <p class="signup-error" id="signup-error" hidden></p>
+    </form>
+    <div class="signup-result" id="signup-result" hidden>
+      <p><strong>Shown once — store it now.</strong></p>
+      <div class="token-row">
+        <input type="text" id="signup-token" readonly aria-label="Your alpha token">
+        <button type="button" class="secondary" id="signup-copy">Copy</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="corpus-honestly">
+    <h2>The corpus, honestly</h2>
+    <p class="sub">About 1,000 validated records today, and growing. Every record passes a cross-model judge panel and a human veto window before it can ever be served — a quarantined submission can never reach serving. The alpha is pull-only: <code>search_experience</code> and <code>get_experience</code>.</p>
+  </section>
+
+  <footer>
+    <p>
+      twiceshy is licensed <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0-only</a> —
+      <a href="https://github.com/twiceshy/twiceshy">source</a>. Self-hosting is free, forever.
+    </p>
+    <p>
+      Terms: <a href="/terms">alpha terms &amp; data policy</a>. Questions:
+      <a href="mailto:hello@twiceshy.dev">hello@twiceshy.dev</a>.
+    </p>
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var form = document.getElementById("signup-form");
+  var emailInput = document.getElementById("signup-email");
+  var termsInput = document.getElementById("signup-terms");
+  var submitBtn = document.getElementById("signup-submit");
+  var errorBox = document.getElementById("signup-error");
+  var resultBox = document.getElementById("signup-result");
+  var tokenField = document.getElementById("signup-token");
+  var copyBtn = document.getElementById("signup-copy");
+
+  function showError(message) {
+    errorBox.textContent = message;
+    errorBox.hidden = false;
+  }
+
+  function showResult(token) {
+    form.hidden = true;
+    tokenField.value = token;
+    resultBox.hidden = false;
+  }
+
+  form.addEventListener("submit", function (evt) {
+    evt.preventDefault();
+    errorBox.hidden = true;
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Requesting…";
+
+    fetch("/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: emailInput.value,
+        accept_terms: termsInput.checked
+      })
+    })
+      .then(function (resp) {
+        if (resp.status === 429) {
+          throw new Error("Alpha signups are limited per day — try tomorrow.");
+        }
+        if (!resp.ok) {
+          return resp.json()
+            .catch(function () { return {}; })
+            .then(function (body) {
+              if (body.error === "terms_not_accepted") {
+                throw new Error("You must accept the alpha terms & data policy.");
+              }
+              throw new Error("Signup failed — check your email and try again.");
+            });
+        }
+        return resp.json();
+      })
+      .then(function (data) {
+        showResult(data.token);
+      })
+      .catch(function (err) {
+        showError(err.message);
+      })
+      .finally(function () {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Get an alpha token";
+      });
+  });
+
+  copyBtn.addEventListener("click", function () {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(tokenField.value).then(function () {
+        copyBtn.textContent = "Copied";
+        setTimeout(function () { copyBtn.textContent = "Copy"; }, 1500);
+      });
+    } else {
+      tokenField.select();
+      document.execCommand("copy");
+      copyBtn.textContent = "Copied";
+      setTimeout(function () { copyBtn.textContent = "Copy"; }, 1500);
+    }
+  });
+})();
+</script>
+</body>
+</html>

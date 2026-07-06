@@ -431,7 +431,11 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 		defer func() { _ = tele.Close() }()
 	}
 
-	handler, err := server.New(server.Config{Index: ix, RecordCount: n, Token: token, TokenStore: ix, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue, RetroQueue: *retroQueue, IssueQueue: *issueQueue, Logger: logger, Corpus: c.corpus, Telemetry: tele, TelemetryQueryText: *telemetryQueryText})
+	// TWICESHY_SIGNUP=1 turns on the public POST /signup self-serve alpha token
+	// endpoint (#0127); default off, like TWICESHY_PAUSE — the LAN instance never
+	// sets it.
+	signupEnabled := guard.Truthy(getenv("TWICESHY_SIGNUP"))
+	handler, err := server.New(server.Config{Index: ix, RecordCount: n, Token: token, TokenStore: ix, TokenIssuer: ix, SignupEnabled: signupEnabled, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue, RetroQueue: *retroQueue, IssueQueue: *issueQueue, Logger: logger, Corpus: c.corpus, Telemetry: tele, TelemetryQueryText: *telemetryQueryText})
 	if err != nil {
 		alerter.Alert(ctx, "serve-fatal", fmt.Sprintf("serve could not build the handler: %v", err))
 		return err
