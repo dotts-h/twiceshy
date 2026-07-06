@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>twiceshy — operator dashboard</title>
+<meta name="robots" content="noindex, nofollow">
+<style>
+  /* Same design tokens as web/landing (#0126): operator-only surface, not
+     linked from the landing page, but visually the same warm-paper world. */
+  :root {
+    --paper: #FBF7EC;
+    --ink: #241C12;
+    --amber: #F5A800;
+    --amber-deep: #B27300;
+    --amber-ink: #9B6400;
+    --terminal: #1A150D;
+    --sting: #C8442C;
+    --paper-soft: rgba(251, 247, 236, 0.72);
+    --ink-soft: rgba(36, 28, 18, 0.65);
+    --ink-hair: rgba(36, 28, 18, 0.14);
+    --font-display: "Iowan Old Style", Georgia, "Times New Roman", serif;
+    --font-body: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 1rem;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(1.6rem, 4vw, 2.4rem);
+    margin: 0 0 1.5rem;
+  }
+
+  h2 {
+    font-family: var(--font-body);
+    font-size: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--amber-ink);
+    margin: 2rem 0 0.75rem;
+  }
+
+  .load-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+
+  #token {
+    flex: 1 1 20rem;
+    min-width: 0;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--ink-hair);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+  }
+
+  #load {
+    background: var(--amber);
+    color: var(--ink);
+    border: none;
+    border-radius: 6px;
+    padding: 0.65rem 1.1rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  #load:hover { background: var(--amber-deep); color: var(--paper); }
+
+  #status {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--ink-soft);
+    margin: 0 0 1rem;
+  }
+
+  #status.error { color: var(--sting); font-weight: 700; }
+
+  .stat-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    gap: 0.75rem;
+  }
+
+  .stat-card {
+    border: 1px solid var(--ink-hair);
+    border-radius: 8px;
+    padding: 0.9rem 1rem;
+    background: #fff;
+  }
+
+  .stat-card .n {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .stat-card .label {
+    font-size: 0.78rem;
+    color: var(--ink-soft);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.6rem;
+    border-bottom: 1px solid var(--ink-hair);
+  }
+
+  th {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-soft);
+  }
+
+  td.num, th.num { font-family: var(--font-mono); text-align: right; }
+
+  .revoked { color: var(--sting); font-weight: 700; }
+
+  [hidden] { display: none !important; }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  #dashboard { max-width: 100%; overflow-x: auto; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>twiceshy — operator dashboard</h1>
+
+  <div class="load-row">
+    <label class="visually-hidden" for="token">Operator token</label>
+    <input type="password" id="token" placeholder="operator bearer token" autocomplete="off">
+    <button type="button" id="load">Load</button>
+  </div>
+  <p id="status"></p>
+
+  <div id="dashboard" hidden>
+    <h2>Corpus</h2>
+    <div class="stat-cards" id="records-cards"></div>
+
+    <h2>Usage totals</h2>
+    <div class="stat-cards" id="usage-cards"></div>
+
+    <h2>Tenants</h2>
+    <table id="tenants-table">
+      <thead>
+        <tr>
+          <th>ID</th><th>Label</th><th class="num">Quota</th>
+          <th class="num">Today</th><th class="num">7d</th><th>Top tool</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <h2>Top records</h2>
+    <table id="top-records-table">
+      <thead>
+        <tr><th>ID</th><th>Title</th><th class="num">Retrieved</th><th class="num">Pushed</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var STORAGE_KEY = "twiceshy_operator_token";
+  var REFRESH_MS = 60000;
+
+  var tokenInput = document.getElementById("token");
+  var loadBtn = document.getElementById("load");
+  var statusEl = document.getElementById("status");
+  var dashboard = document.getElementById("dashboard");
+  var recordsCards = document.getElementById("records-cards");
+  var usageCards = document.getElementById("usage-cards");
+  var tenantsBody = document.querySelector("#tenants-table tbody");
+  var topRecordsBody = document.querySelector("#top-records-table tbody");
+  var refreshTimer = null;
+
+  var savedToken = "";
+  try { savedToken = sessionStorage.getItem(STORAGE_KEY) || ""; } catch (e) { /* storage unavailable */ }
+  if (savedToken) { tokenInput.value = savedToken; }
+
+  function statCard(label, n) {
+    var div = document.createElement("div");
+    div.className = "stat-card";
+    var num = document.createElement("span");
+    num.className = "n";
+    num.textContent = n;
+    var lbl = document.createElement("span");
+    lbl.className = "label";
+    lbl.textContent = label;
+    div.appendChild(num);
+    div.appendChild(lbl);
+    return div;
+  }
+
+  function topTool(tools) {
+    var best = "", bestN = -1;
+    for (var k in tools) {
+      if (Object.prototype.hasOwnProperty.call(tools, k) && tools[k] > bestN) {
+        best = k;
+        bestN = tools[k];
+      }
+    }
+    return best ? (best + " (" + bestN + ")") : "—";
+  }
+
+  function render(data) {
+    recordsCards.innerHTML = "";
+    recordsCards.appendChild(statCard("validated", data.records.validated));
+    recordsCards.appendChild(statCard("quarantined", data.records.quarantined));
+    recordsCards.appendChild(statCard("total", data.records.total));
+
+    usageCards.innerHTML = "";
+    usageCards.appendChild(statCard("pushed", data.usage_totals.pushed));
+    usageCards.appendChild(statCard("retrieved", data.usage_totals.retrieved));
+    usageCards.appendChild(statCard("confirmed helpful", data.usage_totals.confirmed_helpful));
+
+    tenantsBody.innerHTML = "";
+    (data.tenants || []).forEach(function (t) {
+      var tr = document.createElement("tr");
+      var idTd = document.createElement("td");
+      idTd.textContent = t.id;
+      if (t.revoked) {
+        idTd.classList.add("revoked");
+        idTd.textContent += " (revoked)";
+      }
+      tr.appendChild(idTd);
+      [t.label, t.daily_quota, t.calls_today, t.calls_7d].forEach(function (v, i) {
+        var td = document.createElement("td");
+        if (i > 0) { td.classList.add("num"); }
+        td.textContent = v;
+        tr.appendChild(td);
+      });
+      var toolsTd = document.createElement("td");
+      toolsTd.textContent = topTool(t.top_tools || {});
+      tr.appendChild(toolsTd);
+      tenantsBody.appendChild(tr);
+    });
+
+    topRecordsBody.innerHTML = "";
+    (data.top_records || []).forEach(function (r) {
+      var tr = document.createElement("tr");
+      [r.id, r.title, r.retrieved, r.pushed].forEach(function (v, i) {
+        var td = document.createElement("td");
+        if (i >= 2) { td.classList.add("num"); }
+        td.textContent = v;
+        tr.appendChild(td);
+      });
+      topRecordsBody.appendChild(tr);
+    });
+
+    dashboard.hidden = false;
+  }
+
+  function showStatus(message, isError) {
+    statusEl.textContent = message;
+    statusEl.classList.toggle("error", !!isError);
+  }
+
+  function stopRefresh() {
+    if (refreshTimer) {
+      clearInterval(refreshTimer);
+      refreshTimer = null;
+    }
+  }
+
+  function load() {
+    var token = tokenInput.value.trim();
+    if (!token) {
+      showStatus("Enter an operator token.", true);
+      return;
+    }
+    try { sessionStorage.setItem(STORAGE_KEY, token); } catch (e) { /* storage unavailable */ }
+
+    fetch("/statz", { headers: { "Authorization": "Bearer " + token } })
+      .then(function (resp) {
+        if (resp.status === 401) {
+          stopRefresh();
+          throw new Error("Unauthorized — check the token.");
+        }
+        if (resp.status === 403) {
+          stopRefresh();
+          throw new Error("Forbidden — this token is not the operator token.");
+        }
+        if (!resp.ok) {
+          throw new Error("Request failed (" + resp.status + ").");
+        }
+        return resp.json();
+      })
+      .then(function (data) {
+        render(data);
+        showStatus("Loaded " + new Date().toLocaleTimeString() + ". Auto-refreshing every 60s.");
+        if (!refreshTimer) {
+          refreshTimer = setInterval(load, REFRESH_MS);
+        }
+      })
+      .catch(function (err) {
+        showStatus(err.message, true);
+      });
+  }
+
+  loadBtn.addEventListener("click", load);
+  tokenInput.addEventListener("keydown", function (evt) {
+    if (evt.key === "Enter") { load(); }
+  });
+
+  if (savedToken) { load(); }
+})();
+</script>
+</body>
+</html>

@@ -82,6 +82,7 @@ func (h *handlers) pushHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	h.recordTenantCall(ctx, "push")
 	// Push channel: embedding-free retrieval only (ADR-0001 §4). RetrievePushTraced
 	// applies the discriminative-token gate so off-topic prompts inject nothing, and
 	// never surfaces quarantined records; its trace feeds per-query telemetry (#0067).

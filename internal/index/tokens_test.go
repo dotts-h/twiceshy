@@ -3,6 +3,7 @@
 package index_test
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"sync"
@@ -174,6 +175,74 @@ func TestRevokeTokenUnknownFails(t *testing.T) {
 	err := ix.RevokeToken("tok_nosuch00", now)
 	if !errors.Is(err, index.ErrTokenUnknown) {
 		t.Fatalf("RevokeToken unknown: got %v, want ErrTokenUnknown", err)
+	}
+}
+
+// TestCountTenantCallUpsertsPerTool guards the upsert math via TenantStats: two
+// calls for one tool must increment together, a different tool for the same
+// tenant must keep its own separate counter.
+func TestCountTenantCallUpsertsPerTool(t *testing.T) {
+	ix := tokenIndex(t)
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+	_, id, err := ix.IssueToken("carol", 1000, 60, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := ix.CountTenantCall(id, "search_experience", now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ix.CountTenantCall(id, "push", now); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := ix.TenantStats(context.Background(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats) != 1 {
+		t.Fatalf("TenantStats len = %d, want 1", len(stats))
+	}
+	got := stats[0]
+	if got.TopTools["search_experience"] != 2 {
+		t.Fatalf("search_experience calls = %d, want 2", got.TopTools["search_experience"])
+	}
+	if got.TopTools["push"] != 1 {
+		t.Fatalf("push calls = %d, want 1 (per-tool separation)", got.TopTools["push"])
+	}
+}
+
+func TestCountTenantCallConcurrentIncrements(t *testing.T) {
+	ix := tokenIndex(t)
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+	_, id, err := ix.IssueToken("dana", 1000, 60, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const goroutines, perG = 8, 25
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < perG; i++ {
+				if err := ix.CountTenantCall(id, "search_experience", now); err != nil {
+					t.Errorf("CountTenantCall: %v", err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	stats, err := ix.TenantStats(context.Background(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats) != 1 || stats[0].TopTools["search_experience"] != goroutines*perG {
+		t.Fatalf("TenantStats = %+v, want search_experience=%d", stats, goroutines*perG)
 	}
 }
 
