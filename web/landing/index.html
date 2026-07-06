@@ -6,7 +6,7 @@
 <title>twiceshy — every mistake your agent makes, someone already made</title>
 <meta name="description" content="twiceshy is a shared memory of validated dead-ends and fixes. Your agent checks it before walking into a trap — and skips straight to what works.">
 <style>
-  /* twiceshy landing v2 — warm paper world, one dark machine-moment (the demo
+  /* twiceshy landing v3 — warm paper world, one dark machine-moment (the demo
      panel). Hazard livery (amber/ink) used structurally, sparingly. */
   :root {
     --paper: #FBF7EC;
@@ -73,21 +73,63 @@
 
   section { padding: 3rem 0; }
 
-  /* Hazard chevron device — 4px repeating stripe, used sparingly (<=3x):
-     demo panel top edge, one section divider, trap-card top edge. */
-  .hazard-strip {
-    height: 4px;
-    background: repeating-linear-gradient(
-      45deg,
-      var(--amber) 0 8px,
-      var(--ink) 8px 16px
-    );
-    border: none;
-    margin: 0;
+  /* ---------- Nav ---------- */
+  .site-nav {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--paper);
+    border-bottom: 1px solid var(--ink-hair);
+  }
+
+  .nav-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 0;
+  }
+
+  .nav-word {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.2rem;
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+  }
+
+  .nav-links a:not(.btn-nav-cta) {
+    color: var(--ink);
+    font-weight: 700;
+    font-size: 0.95rem;
+    text-decoration: none;
+  }
+
+  .nav-links a:not(.btn-nav-cta):hover { color: var(--amber-ink); }
+
+  .btn-nav-cta {
+    display: inline-block;
+    background: var(--amber);
+    color: var(--ink);
+    border-radius: 6px;
+    padding: 0.45rem 0.9rem;
+    font-size: 0.85rem;
+    text-decoration: none;
+  }
+
+  .btn-nav-cta:hover { background: var(--amber-deep); color: var(--paper); }
+
+  @media (max-width: 699px) {
+    .nav-links a:not(.btn-nav-cta) { display: none; }
   }
 
   /* ---------- Hero ---------- */
-  .hero { padding: 3rem 0 2.5rem; }
+  .hero { padding: 2.5rem 0 2.5rem; }
 
   .hero-inner {
     display: grid;
@@ -116,6 +158,29 @@
   .hero-sub {
     max-width: 34rem;
     color: var(--ink-soft);
+  }
+
+  /* ---------- Pain trio ---------- */
+  .pain-trio {
+    list-style: none;
+    margin: 0 0 1.5rem;
+    padding: 0;
+    display: grid;
+    gap: 0.35rem;
+    max-width: 34rem;
+  }
+
+  .pain-trio li {
+    display: flex;
+    gap: 0.5rem;
+    font-size: 0.92rem;
+    color: var(--ink-soft);
+  }
+
+  .pain-trio li span {
+    color: var(--sting);
+    font-weight: 700;
+    flex: none;
   }
 
   /* ---------- Signup form (shared: hero + repeat) ---------- */
@@ -397,138 +462,82 @@
     .demo-panel .demo-cursor { animation: none !important; opacity: 0 !important; }
   }
 
-  /* ---------- Stat strip ---------- */
-  .stat-strip {
+  /* ---------- Trust strip ---------- */
+  .trust-strip {
     border-top: 1px solid var(--ink-hair);
     border-bottom: 1px solid var(--ink-hair);
     padding: 1.1rem 0;
+  }
+
+  .trust-strip ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.5rem;
     font-family: var(--font-mono);
     font-size: 0.85rem;
     color: var(--ink);
   }
 
-  .stat-strip p { margin: 0; }
-
-  /* ---------- Pain vignettes ---------- */
-  .pains-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: grid;
-    gap: 1.5rem;
-  }
-
-  @media (min-width: 700px) {
-    .pains-list { grid-template-columns: repeat(3, 1fr); }
-  }
-
-  .pain-item { display: flex; gap: 0.65rem; align-items: flex-start; }
-
-  .pain-mark {
-    color: var(--sting);
-    font-weight: 700;
-    line-height: 1.65;
-    flex: none;
-  }
-
-  .pain-item h3 {
-    font-family: var(--font-body);
-    font-size: 1rem;
-    margin: 0 0 0.3rem;
-  }
-
-  .pain-item p { margin: 0; color: var(--ink-soft); }
-
-  /* ---------- Trap card section ---------- */
-  .trap-card {
-    position: relative;
-    background: var(--terminal);
-    color: var(--paper);
-    border-radius: 8px;
-    padding: 1.5rem 1.4rem 1.25rem;
-    font-family: var(--font-mono);
-    font-size: 0.9rem;
-  }
-
-  .trap-card::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 4px;
-    background: repeating-linear-gradient(
-      45deg,
-      var(--amber) 0 8px,
-      var(--ink) 8px 16px
-    );
-    border-radius: 8px 8px 0 0;
-  }
-
-  .trap-card__meta {
-    color: var(--paper-soft);
-    font-size: 0.78rem;
-    letter-spacing: 0.05em;
-    margin: 0.4rem 0 0.75rem;
-  }
-
-  .trap-card__title {
-    font-family: var(--font-mono);
-    font-size: 0.95rem;
-    font-weight: 700;
-    line-height: 1.5;
+  /* ---------- Integrations ---------- */
+  .integrations-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
     margin: 0 0 0.9rem;
-  }
-
-  .trap-card p { margin: 0 0 0.75rem; }
-  .trap-card p:last-child { margin-bottom: 0; }
-  .trap-card strong { color: var(--amber); }
-
-  .trap-annotations {
-    display: grid;
-    gap: 0.75rem;
-    margin: 1.25rem 0 0;
     padding: 0;
     list-style: none;
   }
 
-  .trap-annotations li {
-    position: relative;
-    padding-left: 1.4rem;
-    font-size: 0.85rem;
-    font-weight: 700;
-    color: var(--amber-ink);
-  }
-
-  .trap-annotations li::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 0.55em;
-    width: 1rem;
-    height: 1px;
-    background: var(--amber-deep);
-  }
-
-  /* ---------- Install section ---------- */
-  .snippet-block {
-    background: var(--terminal);
-    color: var(--paper);
-    border-radius: 8px;
-    padding: 1rem 1.25rem;
+  .integration-badge {
+    border: 1px solid var(--ink-hair);
+    border-radius: 999px;
+    padding: 0.35rem 0.9rem;
     font-family: var(--font-mono);
     font-size: 0.85rem;
-    overflow-x: auto;
-    margin: 0;
-    white-space: pre;
+    color: var(--ink);
   }
 
-  /* ---------- Trust section ---------- */
-  .trust p { max-width: 42rem; }
+  .integrations-caption {
+    font-size: 0.9rem;
+    color: var(--ink-soft);
+    margin: 0;
+  }
 
   /* ---------- CTA repeat ---------- */
   .cta-repeat { text-align: center; }
   .cta-repeat .signup-block { margin: 0 auto; text-align: left; }
+
+  /* ---------- Sticky mobile CTA ---------- */
+  .sticky-cta {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    background: var(--terminal);
+    padding: 0.75rem 0 calc(0.75rem + env(safe-area-inset-bottom));
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+  }
+
+  .sticky-cta-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .sticky-cta-label {
+    color: var(--paper);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+  }
+
+  @media (min-width: 700px) {
+    .sticky-cta { display: none !important; }
+  }
 
   /* ---------- Footer ---------- */
   footer {
@@ -548,12 +557,29 @@
 </head>
 <body>
 
+<nav class="site-nav">
+  <div class="wrap nav-inner">
+    <a href="index.html" class="nav-word">twiceshy</a>
+    <div class="nav-links">
+      <a href="docs.html">Docs</a>
+      <a href="https://github.com/twiceshy/twiceshy">GitHub</a>
+      <a href="#signup-hero" class="btn-nav-cta">Get an alpha token</a>
+    </div>
+  </div>
+</nav>
+
 <header class="hero">
   <div class="wrap hero-inner">
     <div>
       <p class="eyebrow">For everyone who builds with AI agents</p>
       <h1>Every mistake your agent makes, someone already made.</h1>
       <p class="hero-sub">twiceshy is a shared memory of validated dead-ends and fixes. Your agent checks it before walking into a trap — and skips straight to what works.</p>
+
+      <ul class="pain-trio">
+        <li><span aria-hidden="true">✗</span> Retries the same failing build six ways</li>
+        <li><span aria-hidden="true">✗</span> Fights a bug documented years ago</li>
+        <li><span aria-hidden="true">✗</span> Burns tokens rediscovering dead-ends</li>
+      </ul>
 
       <div class="signup-block" id="signup-hero">
         <form class="signup-form" novalidate>
@@ -564,7 +590,7 @@
           </div>
           <label class="signup-terms">
             <input type="checkbox" name="accept_terms" class="signup-terms-check" required>
-            <span>I accept the <a href="/terms">alpha terms &amp; data policy</a></span>
+            <span>I accept the <a href="terms.html">alpha terms &amp; data policy</a></span>
           </label>
           <p class="signup-error" role="alert" hidden></p>
         </form>
@@ -602,73 +628,26 @@
 </header>
 
 <main>
-  <section class="stat-strip">
+  <section class="trust-strip">
     <div class="wrap">
-      <p>4,346 traps recorded · every card judged by two independent AI models + a human veto window · works with Claude Code, Cursor, Windsurf, VS Code</p>
-    </div>
-  </section>
-
-  <section id="pains">
-    <div class="wrap">
-      <h2>You've watched this happen</h2>
-      <ul class="pains-list">
-        <li class="pain-item">
-          <span class="pain-mark" aria-hidden="true">✗</span>
-          <div>
-            <h3>The confident loop</h3>
-            <p>Your agent retries the same failing build six different ways. Every attempt sounds sure. None of them work.</p>
-          </div>
-        </li>
-        <li class="pain-item">
-          <span class="pain-mark" aria-hidden="true">✗</span>
-          <div>
-            <h3>The invisible wall</h3>
-            <p>The bug it's fighting was documented three years ago. Your agent has no way to know that.</p>
-          </div>
-        </li>
-        <li class="pain-item">
-          <span class="pain-mark" aria-hidden="true">✗</span>
-          <div>
-            <h3>The bill</h3>
-            <p>Dead-ends cost tokens, minutes, and your patience — every session, starting from zero.</p>
-          </div>
-        </li>
+      <ul>
+        <li>Open source (AGPL) — self-hosting is free forever</li>
+        <li>4,346 traps recorded · validated nightly by a cross-model judge panel</li>
+        <li>Free while in alpha — fair pricing later</li>
       </ul>
     </div>
   </section>
 
-  <hr class="hazard-strip">
-
-  <section id="trap">
+  <section id="integrations">
     <div class="wrap">
-      <h2>One card changes the session</h2>
-      <div class="trap-card" role="img" aria-label="Sample experience card exp-0001, as served to a coding agent">
-        <p class="trap-card__meta">EXP-0001 · TRAP CARD</p>
-        <p class="trap-card__title">SQLite FTS5 MATCH treats user input as query syntax — dots, dashes and quotes error out or change semantics</p>
-        <p><strong>The trap:</strong> passing raw text to MATCH errors on punctuation or silently changes meaning.</p>
-        <p><strong>The escape:</strong> quote every token — quoted strings are always plain terms.</p>
-      </div>
-      <ul class="trap-annotations">
-        <li>the trap, in plain words</li>
-        <li>the escape that actually worked</li>
-        <li>validated before it can ever reach your agent</li>
+      <ul class="integrations-row">
+        <li class="integration-badge">Claude Code</li>
+        <li class="integration-badge">Cursor</li>
+        <li class="integration-badge">Windsurf</li>
+        <li class="integration-badge">VS Code</li>
+        <li class="integration-badge">any MCP client</li>
       </ul>
-    </div>
-  </section>
-
-  <section id="install">
-    <div class="wrap">
-      <h2>No install. No new app.</h2>
-      <p>If your coding agent speaks MCP — Claude Code, Cursor, Windsurf, VS Code and friends already do — paste one line and every session after that has the memory.</p>
-      <pre class="snippet-block"><code>claude mcp add -t http twiceshy https://api.twiceshy.dev \
-  --header "Authorization: Bearer YOUR_TOKEN"</code></pre>
-    </div>
-  </section>
-
-  <section id="trust" class="trust">
-    <div class="wrap">
-      <h2>Why trust these cards?</h2>
-      <p>Every record runs a gauntlet before your agent can ever see it: two AI judges from different vendors must independently approve it, then it soaks in a human review window. Records that fail stay quarantined — permanently. The corpus grows nightly; nothing reaches you unvalidated.</p>
+      <p class="integrations-caption">One line to connect. See the <a href="docs.html">docs</a>.</p>
     </div>
   </section>
 
@@ -684,7 +663,7 @@
           </div>
           <label class="signup-terms">
             <input type="checkbox" name="accept_terms" class="signup-terms-check" required>
-            <span>I accept the <a href="/terms">alpha terms &amp; data policy</a></span>
+            <span>I accept the <a href="terms.html">alpha terms &amp; data policy</a></span>
           </label>
           <p class="signup-error" role="alert" hidden></p>
         </form>
@@ -704,9 +683,16 @@
 
 <footer>
   <div class="wrap">
-    <p>Open source (<a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a>) · self-hosting is free, forever · alpha <a href="/terms">terms &amp; data policy</a> · built by people tired of watching agents repeat themselves.</p>
+    <p>Open source (<a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a>) · self-hosting is free, forever · alpha <a href="terms.html">terms &amp; data policy</a> · built by people tired of watching agents repeat themselves.</p>
   </div>
 </footer>
+
+<div class="sticky-cta" id="sticky-cta" hidden>
+  <div class="wrap sticky-cta-inner">
+    <span class="sticky-cta-label">Give your agent a memory</span>
+    <button type="button" class="btn-primary" id="sticky-cta-btn">Get an alpha token</button>
+  </div>
+</div>
 
 <script>
 (function () {
@@ -819,6 +805,58 @@
   var signupBlocks = document.querySelectorAll(".signup-block");
   for (var i = 0; i < signupBlocks.length; i++) {
     initSignupForm(signupBlocks[i]);
+  }
+
+  // ---------- Sticky mobile CTA ----------
+  var stickyCta = document.getElementById("sticky-cta");
+  var stickyCtaBtn = document.getElementById("sticky-cta-btn");
+  var heroEl = document.querySelector(".hero");
+  var mobileQuery = window.matchMedia("(max-width: 699px)");
+
+  if (stickyCta && heroEl && window.IntersectionObserver) {
+    var pastHero = false;
+    var formOnScreen = false;
+
+    function refreshSticky() {
+      var shouldShow = mobileQuery.matches && pastHero && !formOnScreen;
+      stickyCta.hidden = !shouldShow;
+    }
+
+    var heroObserver = new IntersectionObserver(function (entries) {
+      pastHero = !entries[0].isIntersecting;
+      refreshSticky();
+    }, { threshold: 0 });
+    heroObserver.observe(heroEl);
+
+    var formObserver = new IntersectionObserver(function (entries) {
+      for (var j = 0; j < entries.length; j++) {
+        if (entries[j].isIntersecting) { formOnScreen = true; refreshSticky(); return; }
+      }
+      formOnScreen = false;
+      refreshSticky();
+    }, { threshold: 0 });
+    for (var k = 0; k < signupBlocks.length; k++) {
+      formObserver.observe(signupBlocks[k]);
+    }
+
+    if (mobileQuery.addEventListener) {
+      mobileQuery.addEventListener("change", refreshSticky);
+    }
+
+    if (stickyCtaBtn) {
+      stickyCtaBtn.addEventListener("click", function () {
+        var nearest = null;
+        var nearestDist = Infinity;
+        for (var m = 0; m < signupBlocks.length; m++) {
+          var rect = signupBlocks[m].getBoundingClientRect();
+          var dist = Math.abs(rect.top);
+          if (dist < nearestDist) { nearestDist = dist; nearest = signupBlocks[m]; }
+        }
+        if (nearest) {
+          nearest.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
+        }
+      });
+    }
   }
 })();
 </script>

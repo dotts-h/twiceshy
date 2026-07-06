@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha terms &amp; data policy — twiceshy</title>
+<meta name="description" content="twiceshy hosted alpha: terms of use and data policy, in plain words.">
+<style>
+  /* twiceshy terms — same design family as the landing page. */
+  :root {
+    --paper: #FBF7EC;
+    --ink: #241C12;
+    --amber: #F5A800;
+    --amber-deep: #B27300;
+    --amber-ink: #9B6400; /* darkened amber-deep, same hue/sat, for NORMAL-size text on paper: 4.65:1 vs amber-deep's 3.67:1 */
+    --terminal: #1A150D;
+    --sting: #C8442C;
+    --paper-soft: rgba(251, 247, 236, 0.72);
+    --ink-soft: rgba(36, 28, 18, 0.65);
+    --ink-hair: rgba(36, 28, 18, 0.14);
+    --font-display: "Iowan Old Style", Georgia, "Times New Roman", serif;
+    --font-body: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 1.06rem;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  img, svg { max-width: 100%; }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 0 1.25rem;
+  }
+
+  h1, h2 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    line-height: 1.1;
+    margin: 0 0 1rem;
+  }
+
+  h1 { font-size: clamp(2rem, 5vw, 3rem); }
+  h2 { font-size: clamp(1.2rem, 3.2vw, 1.45rem); margin-top: 2.25rem; }
+
+  p { margin: 0 0 1rem; }
+
+  a {
+    color: var(--amber-ink);
+    font-weight: 700;
+  }
+
+  a:hover { text-decoration-thickness: 2px; }
+
+  :focus-visible {
+    outline: 2px solid var(--amber-deep);
+    outline-offset: 3px;
+  }
+
+  /* ---------- Nav (shared with landing) ---------- */
+  .site-nav {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--paper);
+    border-bottom: 1px solid var(--ink-hair);
+  }
+
+  .nav-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 0;
+  }
+
+  .nav-word {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.2rem;
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+  }
+
+  .nav-links a:not(.btn-nav-cta) {
+    color: var(--ink);
+    font-weight: 700;
+    font-size: 0.95rem;
+    text-decoration: none;
+  }
+
+  .nav-links a:not(.btn-nav-cta):hover { color: var(--amber-ink); }
+
+  .btn-nav-cta {
+    display: inline-block;
+    background: var(--amber);
+    color: var(--ink);
+    border-radius: 6px;
+    padding: 0.45rem 0.9rem;
+    font-size: 0.85rem;
+    text-decoration: none;
+  }
+
+  .btn-nav-cta:hover { background: var(--amber-deep); color: var(--paper); }
+
+  @media (max-width: 699px) {
+    .nav-links a:not(.btn-nav-cta) { display: none; }
+  }
+
+  /* ---------- Prose ---------- */
+  .terms-main { padding: 2.5rem 0 4rem; }
+
+  .terms-prose { max-width: 46rem; }
+
+  .terms-meta {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--amber-ink);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 0 0 0.75rem;
+  }
+
+  .terms-prose p { color: var(--ink); }
+  .terms-prose section > p:last-child { margin-bottom: 0; }
+
+  /* ---------- Footer ---------- */
+  footer {
+    padding: 2rem 0 3rem;
+    color: var(--ink-soft);
+    font-size: 0.88rem;
+    border-top: 1px solid var(--ink-hair);
+  }
+
+  footer a { color: var(--ink-soft); text-decoration: underline; font-weight: 700; }
+  footer a:hover { color: var(--amber-ink); }
+</style>
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="wrap nav-inner">
+    <a href="index.html" class="nav-word">twiceshy</a>
+    <div class="nav-links">
+      <a href="docs.html">Docs</a>
+      <a href="https://github.com/twiceshy/twiceshy">GitHub</a>
+      <a href="index.html#signup-hero" class="btn-nav-cta">Get an alpha token</a>
+    </div>
+  </div>
+</nav>
+
+<main class="terms-main">
+  <div class="wrap terms-prose">
+    <p class="terms-meta">v1 · draft</p>
+    <h1>Alpha terms &amp; data policy (v1)</h1>
+    <p>Plain words, alpha honesty. Versioned in-repo; the signup checkbox binds to the version current at signup.</p>
+
+    <section id="what-this-is">
+      <h2>What this is</h2>
+      <p>twiceshy is an experience service for coding agents: a corpus of validated engineering traps, root causes and fixes, served over MCP. The hosted alpha is provided as-is, with no uptime, support, or continuity promises. Self-hosting the AGPL-3.0 code is free, forever, regardless of anything here.</p>
+    </section>
+
+    <section id="your-token">
+      <h2>Your token</h2>
+      <p>Your token identifies your usage (calls, records served) so we can run quotas, abuse control, and service telemetry. Don't share it; we may revoke tokens that abuse the service or the quotas. We store your email to label the token and to contact you about the alpha — nothing else, no marketing lists, no resale.</p>
+    </section>
+
+    <section id="what-we-collect">
+      <h2>What we collect</h2>
+      <p>Per-call telemetry: token id, tool called, query text, records served, timestamps, coarse client info. Query text is retained to improve retrieval quality (it is how we measure whether serving helps). Ask us to delete your token and its telemetry and we will.</p>
+    </section>
+
+    <section id="what-you-contribute">
+      <h2>What you contribute (when the write path opens)</h2>
+      <p>Submitting a record (<code>record_experience</code>, <code>report_outcome</code>) grants us a perpetual, worldwide, royalty-free license to use, adapt, and redistribute the submitted content as part of the twiceshy corpus and service, including future commercial offerings of the corpus. You keep ownership; you warrant you have the right to submit it.</p>
+      <p>Do not submit: secrets or credentials of any kind, personal data about other people, proprietary code you may not share, or content you don't have rights to. We scrub what we can detect, quarantine what we can't, and delete verified problem submissions on request — but the safety of what you send is on you.</p>
+      <p>Submissions land quarantined and only become part of the served corpus after automated validation (cross-model judge panel) and a review window. Validated records derived from your submission may credit the provenance stored with it.</p>
+    </section>
+
+    <section id="the-corpus">
+      <h2>The corpus you receive</h2>
+      <p>Served records are provided as engineering guidance without warranty. They describe what worked somewhere once — verify against your own context before acting. We are not liable for what your agent does with them.</p>
+    </section>
+
+    <section id="changes">
+      <h2>Changes &amp; termination</h2>
+      <p>We can change these terms between alpha versions; continued use after a new version is acceptance. We can suspend the alpha or any token at any time. Governing law: Romania.</p>
+      <p>Contact: (operator email — fill at publish)</p>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Open source (<a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a>) · self-hosting is free, forever · back to <a href="index.html">twiceshy</a> or the <a href="docs.html">docs</a>.</p>
+  </div>
+</footer>
+
+</body>
+</html>
