@@ -732,6 +732,12 @@ func appendEligibleFilter(sb *strings.Builder, args []any) []any {
 	for _, o := range importerOrigins {
 		args = append(args, o)
 	}
+	// Alpha-tier tenants (#0128, ADR-0030 phase 2): an "alpha:<token_id>" origin
+	// is excluded from push EVEN AFTER validation — defense in depth over the
+	// quarantine floor, since a low-trust submission must never reach the
+	// mid-prompt injection channel regardless of what promoted it.
+	sb.WriteString(" AND r.origin NOT LIKE ?")
+	args = append(args, record.AlphaOriginPrefix+"%")
 	return args
 }
 

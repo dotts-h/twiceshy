@@ -194,6 +194,24 @@ func (ix *Index) CountTenantCall(tokenID, tool string, now time.Time) error {
 	return nil
 }
 
+// TenantToolCallsToday returns tokenID's already-recorded tenant_usage count
+// for tool today (UTC), WITHOUT incrementing — the read side of #0126's
+// tool-keyed counter, reused by the alpha-tenant contribution-quota gate
+// (#0128). withTenantTelemetry bumps this same counter via CountTenantCall
+// before every tool handler runs, so by the time a handler reads it here, the
+// current call is already included in the count.
+func (ix *Index) TenantToolCallsToday(tokenID, tool string, now time.Time) (int, error) {
+	day := now.UTC().Format("2006-01-02")
+	var calls int
+	if err := ix.db.QueryRow(
+		`SELECT COALESCE((SELECT calls FROM tenant_usage WHERE token_id = ? AND day = ? AND tool = ?), 0)`,
+		tokenID, day, tool,
+	).Scan(&calls); err != nil {
+		return 0, fmt.Errorf("tenant tool calls today: %w", err)
+	}
+	return calls, nil
+}
+
 func parseTokenFull(full string) (id, secret string, ok bool) {
 	if !strings.HasPrefix(full, "tok_") {
 		return "", "", false

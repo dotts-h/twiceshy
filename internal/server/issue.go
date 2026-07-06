@@ -56,11 +56,15 @@ type IssueResult struct {
 // a fresh number); otherwise it returns a PR-ready docs/issues markdown so the
 // submission is never silently lost. It writes no docs/issues file directly and
 // never auto-actions — an agent-submitted issue is triage-flagged (#0066).
-func (h *handlers) reportIssue(_ context.Context, _ *mcp.CallToolRequest, args IssueArgs) (*mcp.CallToolResult, IssueResult, error) {
+func (h *handlers) reportIssue(ctx context.Context, _ *mcp.CallToolRequest, args IssueArgs) (*mcp.CallToolResult, IssueResult, error) {
 	start := time.Now()
 	const tool = "report_issue"
 
 	if err := validateIssueSize(args); err != nil {
+		h.logToolError(tool, start, err)
+		return nil, IssueResult{}, err
+	}
+	if err := h.checkContributionQuota(ctx, tool, alphaReportDailyQuota); err != nil {
 		h.logToolError(tool, start, err)
 		return nil, IssueResult{}, err
 	}
