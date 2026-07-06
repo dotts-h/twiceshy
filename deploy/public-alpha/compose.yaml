@@ -1,0 +1,70 @@
+# deploy/public-alpha/compose.yaml — the hosted public alpha (ADR-0030, #0129).
+#
+# Blast-radius rule (ADR-0030): this host NEVER reaches the LAN. The only data
+# link is a one-way PULL — corpus-refresh.sh clones/pulls the public corpus
+# repo over HTTPS from git.radulescu.app on a timer; no SSH keys to the LAN
+# live here. See docs/DEPLOY-public-alpha.md for the bring-up runbook.
+#
+# Two services: `twiceshy` (this repo's Dockerfile, distroless nonroot, its
+# OWN token store + fresh index — NOT the LAN db) and `caddy` (TLS, static
+# landing, reverse proxy — see ./Caddyfile, which must stay consistent with
+# the routes below).
+#
+# Secrets/config: copy .env.example to .env (0600, never committed) first.
+
+services:
+  twiceshy:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: twiceshy:public-alpha
+    container_name: twiceshy
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Fixed by ADR-0030 for this deployment — not operator-tunable via .env.
+      TWICESHY_SIGNUP: "1" # public alpha: self-serve token signup (#0127)
+    volumes:
+      - twiceshy-data:/data # corpus + this instance's OWN sqlite index/tokens (fresh; not the LAN db)
+    expose:
+      - "8722" # internal only — Caddy is the sole public listener (80/443)
+    mem_limit: 1g
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: twiceshy-caddy
+    restart: unless-stopped
+    depends_on:
+      - twiceshy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../web/landing:/srv/landing:ro
+      - caddy-data:/data # ACME account + certificates (persist across restarts)
+      - caddy-config:/config
+    mem_limit: 256m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  # Explicit names so corpus-refresh.sh can `docker run -v twiceshy-data:/data …`
+  # without depending on the compose project name.
+  twiceshy-data:
+    name: twiceshy-data
+  caddy-data:
+    name: twiceshy-caddy-data
+  caddy-config:
+    name: twiceshy-caddy-config
