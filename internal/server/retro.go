@@ -67,6 +67,7 @@ func (h *handlers) retroHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "transcript must be non-empty", http.StatusBadRequest)
 		return
 	}
+	h.recordTenantCall(r.Context(), "retro")
 
 	// Screen at the edge: a secret-bearing transcript is refused and never spooled
 	// (fail-closed). harmful-code / pii findings are expected in a coding transcript
