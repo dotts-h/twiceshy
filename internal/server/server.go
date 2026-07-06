@@ -163,8 +163,8 @@ func New(cfg Config) (*Server, error) {
 	hardened := withRateLimit(logger, limiter,
 		withTimeout(requestTimeout,
 			withMaxBytes(maxRequestBytes, mux)))
-	authed := tenantAuth(logger, cfg.Token, cfg.TokenStore,
-		withRequestLog(logger, hardened))
+	authed := withRequestLog(logger,
+		tenantAuth(logger, cfg.Token, cfg.TokenStore, hardened))
 
 	// Health probes bypass auth + rate-limit so a container HEALTHCHECK and an
 	// external uptime monitor can reach them unauthenticated: /healthz = liveness

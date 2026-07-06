@@ -3,6 +3,7 @@
 package server
 
 import (
+	"bytes"
 	"io"
 	"log/slog"
 	"net/http"
@@ -208,5 +209,42 @@ func TestSecondsUntilUTCMidnight(t *testing.T) {
 	got := secondsUntilUTCMidnight(now)
 	if got != 30*60 {
 		t.Fatalf("secondsUntilUTCMidnight = %d, want %d", got, 30*60)
+	}
+}
+
+// TestRejectedRequestStillAccessLogged guards the middleware order (review
+// finding, PR #511): withRequestLog wraps tenantAuth, so a 401 emits the
+// "http request" access-log line — on a public endpoint the rejected traffic
+// is exactly what monitoring must count. The tenant attr rides the holder that
+// tenantAuth fills on success (empty on a reject).
+func TestRejectedRequestStillAccessLogged(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	h := withRequestLog(logger, tenantAuth(logger, tenantOpToken, nil, inner))
+
+	// Rejected: no bearer at all.
+	resp := authGet(t, h, "")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+	logs := buf.String()
+	if !strings.Contains(logs, `"msg":"http request"`) || !strings.Contains(logs, `"status":401`) {
+		t.Fatalf("401 must produce the access-log line, got: %s", logs)
+	}
+
+	// Accepted: operator token; the access log carries the tenant.
+	buf.Reset()
+	resp = authGet(t, h, tenantOpToken)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	logs = buf.String()
+	if !strings.Contains(logs, `"tenant":"operator"`) {
+		t.Fatalf("access log must carry the tenant on success, got: %s", logs)
 	}
 }

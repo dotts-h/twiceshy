@@ -34,7 +34,29 @@ func TenantFromContext(ctx context.Context) string {
 	return ""
 }
 
+// tenantHolder carries the tenant id upstream to the access logger: withRequestLog
+// runs outside tenantAuth (so rejects are logged), but a context value set by the
+// inner middleware is invisible to the outer one — the holder bridges that. Same
+// request goroutine writes then reads, so a plain field suffices.
+type tenantHolder struct{ v string }
+
+func (t *tenantHolder) get() string {
+	if t == nil {
+		return ""
+	}
+	return t.v
+}
+
+type tenantHolderKey struct{}
+
+func withTenantHolder(ctx context.Context, h *tenantHolder) context.Context {
+	return context.WithValue(ctx, tenantHolderKey{}, h)
+}
+
 func withTenant(ctx context.Context, tenant string) context.Context {
+	if h, ok := ctx.Value(tenantHolderKey{}).(*tenantHolder); ok {
+		h.v = tenant
+	}
 	return context.WithValue(ctx, tenantKey{}, tenant)
 }
 
