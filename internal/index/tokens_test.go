@@ -1,0 +1,205 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package index_test
+
+import (
+	"errors"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/dotts-h/twiceshy/internal/index"
+)
+
+func tokenIndex(t *testing.T) *index.Index {
+	t.Helper()
+	ix, err := index.Open(filepath.Join(t.TempDir(), "ix.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = ix.Close() })
+	return ix
+}
+
+func TestIssueAuthenticateRoundtrip(t *testing.T) {
+	ix := tokenIndex(t)
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+
+	full, id, err := ix.IssueToken("alice", 1000, 60, now)
+	if err != nil {
+		t.Fatalf("IssueToken: %v", err)
+	}
+	if id == "" || full == "" {
+		t.Fatal("IssueToken must return non-empty id and full token")
+	}
+	if full[:len(id)] != id {
+		t.Fatalf("full token %q must start with id %q", full, id)
+	}
+
+	info, err := ix.AuthenticateToken(full, now)
+	if err != nil {
+		t.Fatalf("AuthenticateToken: %v", err)
+	}
+	if info.ID != id || info.Label != "alice" || info.DailyQuota != 1000 || info.RatePerMin != 60 {
+		t.Fatalf("AuthenticateToken = %+v, want id=%s label=alice quota=1000 rate=60", info, id)
+	}
+	if info.RevokedAt != nil {
+		t.Fatalf("new token must not be revoked, got %v", info.RevokedAt)
+	}
+}
+
+func TestAuthenticateWrongSecretFails(t *testing.T) {
+	ix := tokenIndex(t)
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+
+	full, id, err := ix.IssueToken("", 0, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := full[:len(full)-1] + "x"
+	if bad == full {
+		t.Fatal("bad token must differ from full")
+	}
+	_, err = ix.AuthenticateToken(bad, now)
+	if !errors.Is(err, index.ErrTokenUnknown) {
+		t.Fatalf("wrong secret: got %v, want ErrTokenUnknown", err)
+	}
+	// id prefix alone must not authenticate.
+	_, err = ix.AuthenticateToken(id, now)
+	if !errors.Is(err, index.ErrTokenUnknown) {
+		t.Fatalf("id-only: got %v, want ErrTokenUnknown", err)
+	}
+}
+
+func TestAuthenticateRevokedFails(t *testing.T) {
+	ix := tokenIndex(t)
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+
+	full, id, err := ix.IssueToken("bob", 0, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ix.RevokeToken(id, now.Add(time.Minute)); err != nil {
+		t.Fatalf("RevokeToken: %v", err)
+	}
+	_, err = ix.AuthenticateToken(full, now.Add(time.Minute))
+	if !errors.Is(err, index.ErrTokenRevoked) {
+		t.Fatalf("revoked token: got %v, want ErrTokenRevoked", err)
+	}
+}
+
+func TestAuthenticateUnknownIDFails(t *testing.T) {
+	ix := tokenIndex(t)
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+
+	_, err := ix.AuthenticateToken("tok_deadbeef_"+stringsRepeat("a", 32), now)
+	if !errors.Is(err, index.ErrTokenUnknown) {
+		t.Fatalf("unknown id: got %v, want ErrTokenUnknown", err)
+	}
+}
+
+func stringsRepeat(s string, n int) string {
+	out := make([]byte, n)
+	for i := range out {
+		out[i] = s[0]
+	}
+	return string(out)
+}
+
+func TestCountTokenCallIncrementsAtomically(t *testing.T) {
+	ix := tokenIndex(t)
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+
+	_, id, err := ix.IssueToken("", 0, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const goroutines, perG = 8, 25
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < perG; i++ {
+				if _, err := ix.CountTokenCall(id, now); err != nil {
+					t.Errorf("CountTokenCall: %v", err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	list, err := ix.ListTokens(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].CallsToday != goroutines*perG {
+		t.Fatalf("calls today = %d, want %d", list[0].CallsToday, goroutines*perG)
+	}
+}
+
+func TestCountTokenCallDayRolloverUTC(t *testing.T) {
+	ix := tokenIndex(t)
+	day1 := time.Date(2026, 7, 6, 23, 59, 0, 0, time.UTC)
+	day2 := time.Date(2026, 7, 7, 0, 1, 0, 0, time.UTC)
+
+	_, id, err := ix.IssueToken("", 0, 0, day1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c1, err := ix.CountTokenCall(id, day1)
+	if err != nil || c1 != 1 {
+		t.Fatalf("day1 count = %d err=%v, want 1", c1, err)
+	}
+	c2, err := ix.CountTokenCall(id, day2)
+	if err != nil || c2 != 1 {
+		t.Fatalf("day2 count = %d err=%v, want 1 (UTC day rollover)", c2, err)
+	}
+
+	tokens, err := ix.ListTokens(day2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tokens) != 1 || tokens[0].CallsToday != 1 {
+		t.Fatalf("ListTokens day2 = %+v, want calls_today=1", tokens)
+	}
+}
+
+func TestRevokeTokenUnknownFails(t *testing.T) {
+	ix := tokenIndex(t)
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+	err := ix.RevokeToken("tok_nosuch00", now)
+	if !errors.Is(err, index.ErrTokenUnknown) {
+		t.Fatalf("RevokeToken unknown: got %v, want ErrTokenUnknown", err)
+	}
+}
+
+func TestListTokensIncludesTodayCalls(t *testing.T) {
+	ix := tokenIndex(t)
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+
+	_, id, err := ix.IssueToken("carol", 500, 30, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if _, err := ix.CountTokenCall(id, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	list, err := ix.ListTokens(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("ListTokens len = %d, want 1", len(list))
+	}
+	tok := list[0]
+	if tok.ID != id || tok.Label != "carol" || tok.CallsToday != 3 || tok.DailyQuota != 500 || tok.RatePerMin != 30 {
+		t.Fatalf("ListTokens = %+v, want id=%s label=carol calls=3", tok, id)
+	}
+}

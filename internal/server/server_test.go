@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"gopkg.in/yaml.v3"
@@ -230,6 +231,49 @@ func TestBearerAuthAcceptsCaseFoldedScheme(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusUnauthorized {
 		t.Errorf("case-folded scheme must authenticate (strings.EqualFold), got 401")
+	}
+}
+
+func TestTenantTokenAuthenticatesViaServer(t *testing.T) {
+	ix, err := index.Open(filepath.Join(t.TempDir(), "ix.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ix.Close() })
+	recs, err := record.LoadCorpus(testcorpus.Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ix.Rebuild(context.Background(), recs, testRepo); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+	full, _, err := ix.IssueToken("mcp-test", 10000, 10000, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := server.New(server.Config{Index: ix, Token: token, TokenStore: ix, Repo: testRepo, RecordCount: len(recs)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(h)
+	t.Cleanup(ts.Close)
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "twiceshy-test", Version: "0"}, nil)
+	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
+		Endpoint:   ts.URL,
+		HTTPClient: &http.Client{Transport: bearerTransport{token: full}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("MCP connect with tenant token: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+	tools, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools.Tools) == 0 {
+		t.Fatal("tenant token must reach MCP tools")
 	}
 }
 

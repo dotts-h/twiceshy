@@ -142,11 +142,17 @@ func newRequestID() string {
 }
 
 // withRequestLog emits one access-log line per request after the handler returns.
+// It runs OUTSIDE tenantAuth so rejected requests (401/429) are logged too — on a
+// public endpoint that is exactly the traffic to count. The tenant id is written
+// by the inner tenantAuth into a holder seeded here, because a context value set
+// downstream is invisible upstream.
 func withRequestLog(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		reqID := newRequestID()
 		rec := &responseRecorder{ResponseWriter: w}
+		holder := &tenantHolder{}
+		r = r.WithContext(withTenantHolder(r.Context(), holder))
 		next.ServeHTTP(rec, r)
 
 		sessionID := r.Header.Get("Mcp-Session-Id")
@@ -167,6 +173,7 @@ func withRequestLog(logger *slog.Logger, next http.Handler) http.Handler {
 			slog.Int64("http_duration_ms", time.Since(start).Milliseconds()),
 			slog.String("remote_addr", r.RemoteAddr),
 			slog.String("mcp_session_id", sessionID),
+			slog.String("tenant", holder.get()),
 		)
 	})
 }

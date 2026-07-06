@@ -197,7 +197,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|learned|draft|promote|repromote|adapt|intake-reports|intake-issues|retro-intake|screen|report|pack|doctor|eval|usage-flush|gold-add|judge-eval|prospect|corpus-merge-check|corpus-pr-paths|nextid> [flags]")
+		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|learned|draft|promote|repromote|adapt|intake-reports|intake-issues|retro-intake|screen|report|pack|doctor|eval|usage-flush|gold-add|judge-eval|prospect|corpus-merge-check|corpus-pr-paths|nextid|token> [flags]")
 	}
 	switch args[0] {
 	case "index":
@@ -256,8 +256,10 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runNextID(ctx, args[1:], out)
 	case "idf-build":
 		return runIdfBuild(args[1:], out)
+	case "token":
+		return runToken(ctx, args[1:], out)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, learned, draft, promote, repromote, adapt, intake-reports, intake-issues, retro-intake, screen, report, pack, doctor, eval, usage-flush, gold-add, judge-eval, prospect, self-audit, similarity, author, corpus-merge-check, corpus-pr-paths, nextid, or idf-build)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, learned, draft, promote, repromote, adapt, intake-reports, intake-issues, retro-intake, screen, report, pack, doctor, eval, usage-flush, gold-add, judge-eval, prospect, self-audit, similarity, author, corpus-merge-check, corpus-pr-paths, nextid, token, or idf-build)", args[0])
 	}
 }
 
@@ -429,7 +431,7 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 		defer func() { _ = tele.Close() }()
 	}
 
-	handler, err := server.New(server.Config{Index: ix, RecordCount: n, Token: token, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue, RetroQueue: *retroQueue, IssueQueue: *issueQueue, Logger: logger, Corpus: c.corpus, Telemetry: tele, TelemetryQueryText: *telemetryQueryText})
+	handler, err := server.New(server.Config{Index: ix, RecordCount: n, Token: token, TokenStore: ix, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue, RetroQueue: *retroQueue, IssueQueue: *issueQueue, Logger: logger, Corpus: c.corpus, Telemetry: tele, TelemetryQueryText: *telemetryQueryText})
 	if err != nil {
 		alerter.Alert(ctx, "serve-fatal", fmt.Sprintf("serve could not build the handler: %v", err))
 		return err

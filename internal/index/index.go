@@ -329,6 +329,21 @@ CREATE TABLE IF NOT EXISTS usage (
   confirmed_helpful INTEGER NOT NULL DEFAULT 0,
   last_hit          TEXT
 );
+CREATE TABLE IF NOT EXISTS tokens (
+  id           TEXT PRIMARY KEY,
+  secret_hash  BLOB NOT NULL,
+  label        TEXT NOT NULL DEFAULT '',
+  created_at   TEXT NOT NULL,
+  revoked_at   TEXT,
+  daily_quota  INTEGER NOT NULL DEFAULT 1000,
+  rate_per_min INTEGER NOT NULL DEFAULT 60
+);
+CREATE TABLE IF NOT EXISTS token_usage (
+  token_id TEXT NOT NULL,
+  day      TEXT NOT NULL,
+  calls    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (token_id, day)
+);
 `
 
 // migrations are additive, idempotent in-place schema changes for index files
