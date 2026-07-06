@@ -62,6 +62,40 @@ func TestEligibleDFRestrictsToKindAndOrigin(t *testing.T) {
 	}
 }
 
+// TestEligibleDFZeroWhenOnlyAlphaOriginCarriesToken is #0128's unit-level
+// pin: a token that lives only in an "alpha:<token_id>"-origin trap/fix
+// record (even validated) must never be discriminative — the defense-in-depth
+// exclusion over the quarantine floor for untrusted alpha-tenant submissions.
+func TestEligibleDFZeroWhenOnlyAlphaOriginCarriesToken(t *testing.T) {
+	ctx := context.Background()
+	recs := []*record.Record{
+		eligRec("exp-0303", "trap", "alpha:tok_00000001", "a rare trap about zibbernaut overload"),
+		eligRec("exp-0304", "trap", "horia", "an eligible trap handling zibbernaut cascade"),
+	}
+	ix, err := Open(filepath.Join(t.TempDir(), "elig4.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ix.Close() })
+	if err := ix.Rebuild(ctx, recs, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if vdf, err := ix.validatedDF(ctx, "zibbernaut"); err != nil {
+		t.Fatal(err)
+	} else if vdf != 2 {
+		t.Fatalf("validatedDF(zibbernaut) = %d, want 2 (unaffected by eligibility)", vdf)
+	}
+
+	edf, err := ix.eligibleDF(ctx, "zibbernaut")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edf != 1 {
+		t.Fatalf("eligibleDF(zibbernaut) = %d, want 1 (alpha-origin exp-0303 excluded, exp-0304 counted)", edf)
+	}
+}
+
 // TestEligibleDFZeroWhenOnlyImporterOriginCarriesToken is the acceptance case
 // named in #0106/#0107: a token living ONLY in importer-origin advisory material
 // must never be discriminative, however rare it is corpus-wide.

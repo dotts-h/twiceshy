@@ -59,6 +59,10 @@ func (h *handlers) reportOutcome(ctx context.Context, _ *mcp.CallToolRequest, ar
 		h.logToolError(tool, start, err)
 		return nil, ReportResult{}, err
 	}
+	if err := h.checkContributionQuota(ctx, tool, alphaReportDailyQuota); err != nil {
+		h.logToolError(tool, start, err)
+		return nil, ReportResult{}, err
+	}
 	if strings.TrimSpace(args.Outcome) == "" {
 		err := errors.New("outcome must be non-empty")
 		h.logToolError(tool, start, err)

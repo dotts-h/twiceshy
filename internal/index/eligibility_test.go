@@ -96,6 +96,42 @@ func TestPushEligibilityExcludesImporterOriginAndIneligibleKind(t *testing.T) {
 	}
 }
 
+// TestPushEligibilityExcludesAlphaOriginEvenValidated is #0128's defense-in-depth
+// acceptance case (ADR-0030 phase 2): a VALIDATED trap/fix record whose origin
+// is "alpha:<token_id>" (an untrusted alpha tenant's contribution) must never
+// be served on the push channel, however discriminative its terms are — the
+// low-trust tier stays excluded even after promotion, over and above the
+// ordinary quarantine floor. It stays reachable via pull (agent-initiated,
+// k<=3, floor), same as an importer-origin record.
+func TestPushEligibilityExcludesAlphaOriginEvenValidated(t *testing.T) {
+	ctx := context.Background()
+	alphaTrap := mkRecordKindOrigin(t, 502, "trap", "alpha:tok_deadbeef",
+		"Blorptastic queue starvation under load", "the blorptastic worker queue starves blorptastic blorptastic under load")
+	ix := openIndex(t, []*record.Record{alphaTrap})
+
+	dec, err := ix.RetrievePushTraced(ctx, index.Query{Text: "blorptastic", ErrorTrigger: true})
+	if err != nil {
+		t.Fatalf("RetrievePushTraced: %v", err)
+	}
+	if len(dec.Discriminative) != 0 || len(dec.Served) != 0 {
+		t.Errorf("push(blorptastic) = %+v, want a closed gate (alpha origin, even validated)", dec)
+	}
+
+	hits, err := ix.Retrieve(ctx, index.Query{Text: "blorptastic", Floor: index.FloorOff})
+	if err != nil {
+		t.Fatalf("Retrieve(blorptastic): %v", err)
+	}
+	found := false
+	for _, h := range hits {
+		if h.ID == "exp-0502" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("pull Retrieve(blorptastic) = %v, want exp-0502 reachable (push eligibility must not affect pull)", hits)
+	}
+}
+
 // pushCorroborationFixture builds four eligible (trap, non-importer) records:
 // a single-token record (frobnicator), two records that each carry ONE of a
 // pair of tokens (zeeble / quonk — no record has both, the specimen class),

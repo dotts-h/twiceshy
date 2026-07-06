@@ -197,6 +197,15 @@ type Source struct {
 	PR      *string `yaml:"pr"`
 }
 
+// AlphaOriginPrefix marks provenance.source.author as belonging to an
+// untrusted alpha tok_ tenant (ADR-0030 phase 2, #0128): stored as
+// "alpha:<token_id>". A caller-supplied author is never allowed to spoof a
+// trusted/importer origin — the server forces this prefix on for every tok_
+// tenant write, and the push-eligibility gate (internal/index) excludes any
+// origin carrying it even after validation (defense in depth over the
+// quarantine floor, ADR-0001 §4).
+const AlphaOriginPrefix = "alpha:"
+
 type Validity struct {
 	From  string  `yaml:"from"`
 	Until *string `yaml:"until"`

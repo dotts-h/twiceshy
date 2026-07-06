@@ -68,6 +68,62 @@ const (
 	maxSignatureBytes   = 4 << 10  // each signature is hashed and FTS-indexed
 )
 
+// Tighter input-size caps for alpha tok_ tenants (#0128, ADR-0030 phase 2):
+// untrusted contributors get a much smaller envelope than the operator's
+// trusted-channel guardrails above. title is already bounded to 8..120 runes
+// by record.Validate, so it needs no separate cap here.
+const (
+	alphaMaxBodyBytes      = 16 << 10 // 16 KiB
+	alphaMaxSummaryBytes   = 2 << 10  // 2 KiB
+	alphaMaxSignatures     = 10
+	alphaMaxSignatureBytes = 500
+)
+
+// alphaRecordDailyQuota is the per-token, per-UTC-day contribution quota for
+// record_experience (#0128) — separate from tenantAuth's per-call rate quota.
+const alphaRecordDailyQuota = 10
+
+// validateAlphaRecordSize applies the tighter alpha-tenant caps on top of
+// validateRecordSize's engine-wide guardrails.
+func validateAlphaRecordSize(args RecordArgs) error {
+	if len(args.Body) > alphaMaxBodyBytes {
+		return fmt.Errorf("body too large for an alpha tenant: %d bytes (max %d)", len(args.Body), alphaMaxBodyBytes)
+	}
+	if len(args.Summary) > alphaMaxSummaryBytes {
+		return fmt.Errorf("summary too large for an alpha tenant: %d bytes (max %d)", len(args.Summary), alphaMaxSummaryBytes)
+	}
+	if n := len(args.ErrorSignatures); n > alphaMaxSignatures {
+		return fmt.Errorf("too many error_signatures for an alpha tenant: %d (max %d)", n, alphaMaxSignatures)
+	}
+	for i, sig := range args.ErrorSignatures {
+		if len(sig) > alphaMaxSignatureBytes {
+			return fmt.Errorf("error_signatures[%d] too large for an alpha tenant: %d bytes (max %d)", i, len(sig), alphaMaxSignatureBytes)
+		}
+	}
+	return nil
+}
+
+// recordScanTexts gathers every free-text field of RecordArgs the safety gate
+// should see — the same field set redactRecordPII redacts — so the secret
+// check below runs BEFORE a record is ever built or an id allocated.
+func recordScanTexts(args RecordArgs) []string {
+	return append([]string{args.Title, args.Summary, args.RootCause, args.Fix, args.GuardingTest, args.Body, args.Ecosystem, args.Package},
+		args.ErrorSignatures...)
+}
+
+// secretFlags narrows findings to secret-category hazards, rendered as
+// "secret:rule" tags — reuses screen's existing detectors/rule names, never a
+// new pattern.
+func secretFlags(findings []screen.Finding) []string {
+	secrets := make([]screen.Finding, 0, len(findings))
+	for _, f := range findings {
+		if f.Category == "secret" {
+			secrets = append(secrets, f)
+		}
+	}
+	return screen.Flags(secrets)
+}
+
 // validateRecordSize rejects oversized inputs cheaply, before NextID allocation
 // and the per-signature dedup probes.
 func validateRecordSize(args RecordArgs) error {
@@ -125,14 +181,44 @@ func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args Reco
 	start := time.Now()
 	const tool = "record_experience"
 
+	tenant := TenantFromContext(ctx)
+	alpha := isAlphaTenant(tenant)
+
 	if err := validateRecordSize(args); err != nil {
 		h.logToolError(tool, start, err)
 		return nil, RecordResult{}, err
 	}
+	if alpha {
+		if err := validateAlphaRecordSize(args); err != nil {
+			h.logToolError(tool, start, err)
+			return nil, RecordResult{}, err
+		}
+		if err := h.checkContributionQuota(ctx, tool, alphaRecordDailyQuota); err != nil {
+			h.logToolError(tool, start, err)
+			return nil, RecordResult{}, err
+		}
+	}
 
+	// ADR-0030 phase 2 (#0128): an alpha tenant's redaction is FORCED on
+	// regardless of the caller-supplied arg — every submission is hostile
+	// until proven otherwise.
 	var redactedFlags []string
-	if args.RedactPII {
+	if args.RedactPII || alpha {
 		args, redactedFlags = redactRecordPII(args)
+	}
+
+	// Secret-shaped content is never redacted and, for an untrusted alpha
+	// tenant, never quarantined either: fail-closed, reject outright before a
+	// record is built or an id allocated — nothing lands on disk. (Operator
+	// behavior is unchanged: a secret from the trusted channel still just
+	// quarantines with a security_flags entry, as before.)
+	if alpha {
+		if findings := screen.Scan(recordScanTexts(args)...); screen.HasSecret(findings) {
+			err := fmt.Errorf("record_experience rejected: secret-shaped content detected (%s) — not stored",
+				strings.Join(secretFlags(findings), ", "))
+			h.logToolError(tool, start, err)
+			return nil, RecordResult{}, err
+		}
 	}
 
 	// Build the draft from args.
@@ -170,6 +256,20 @@ func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args Reco
 		}
 	}
 
+	// TENANT ORIGIN STAMPING (#0128, ADR-0030 phase 2): a tok_ tenant's draft
+	// provenance origin/author is FORCED to "alpha:<token_id>" — the trust key
+	// the push-eligibility gate keys off. A caller-supplied author is never
+	// allowed to spoof an importer/trusted origin; it is preserved only as a
+	// display note in the narrative body, never as provenance.source.author.
+	recordAuthor := args.Author
+	if alpha {
+		recordAuthor = record.AlphaOriginPrefix + tenant
+		if display := strings.TrimSpace(args.Author); display != "" {
+			draft.Body = fmt.Sprintf("_Submitted as: %s (untrusted alpha tenant; recorded origin: %s)_\n\n%s",
+				display, recordAuthor, draft.Body)
+		}
+	}
+
 	// Allocate a new ID against the source-of-truth corpus, robust to a live index
 	// that has drifted behind the committed records (#0059) AND to a prior allocation
 	// in this same server process (#0089 — two calls in one session must not collide).
@@ -182,7 +282,7 @@ func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args Reco
 	// Build metadata.
 	meta := ingest.Meta{
 		ID:     id,
-		Author: args.Author,
+		Author: recordAuthor,
 		Now:    time.Now().UTC().Format("2006-01-02"),
 	}
 	if args.Session != "" {
