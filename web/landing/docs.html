@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docs — twiceshy</title>
+<meta name="description" content="Connect your coding agent to twiceshy: quickstart snippets, what a served record looks like, how validation works, and token limits.">
+<style>
+  /* twiceshy docs — same design family as the landing page. */
+  :root {
+    --paper: #FBF7EC;
+    --ink: #241C12;
+    --amber: #F5A800;
+    --amber-deep: #B27300;
+    --amber-ink: #9B6400; /* darkened amber-deep, same hue/sat, for NORMAL-size text on paper: 4.65:1 vs amber-deep's 3.67:1 */
+    --terminal: #1A150D;
+    --sting: #C8442C;
+    --paper-soft: rgba(251, 247, 236, 0.72);
+    --ink-soft: rgba(36, 28, 18, 0.65);
+    --ink-hair: rgba(36, 28, 18, 0.14);
+    --font-display: "Iowan Old Style", Georgia, "Times New Roman", serif;
+    --font-body: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 1.06rem;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  img, svg { max-width: 100%; }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 0 1.25rem;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    line-height: 1.1;
+    margin: 0 0 1rem;
+  }
+
+  h1 { font-size: clamp(2rem, 5vw, 3rem); }
+  h2 { font-size: clamp(1.3rem, 3.5vw, 1.6rem); margin-top: 2.5rem; }
+  h3 { font-size: 1.05rem; font-family: var(--font-body); margin: 1.5rem 0 0.6rem; }
+
+  p { margin: 0 0 1rem; }
+
+  a {
+    color: var(--amber-ink);
+    font-weight: 700;
+  }
+
+  a:hover { text-decoration-thickness: 2px; }
+
+  :focus-visible {
+    outline: 2px solid var(--amber-deep);
+    outline-offset: 3px;
+  }
+
+  [hidden] { display: none !important; }
+
+  /* ---------- Nav (shared with landing) ---------- */
+  .site-nav {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--paper);
+    border-bottom: 1px solid var(--ink-hair);
+  }
+
+  .nav-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 0;
+  }
+
+  .nav-word {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.2rem;
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+  }
+
+  .nav-links a:not(.btn-nav-cta) {
+    color: var(--ink);
+    font-weight: 700;
+    font-size: 0.95rem;
+    text-decoration: none;
+  }
+
+  .nav-links a:not(.btn-nav-cta):hover { color: var(--amber-ink); }
+
+  .nav-links a[aria-current="page"] { color: var(--amber-ink); }
+
+  .btn-nav-cta {
+    display: inline-block;
+    background: var(--amber);
+    color: var(--ink);
+    border-radius: 6px;
+    padding: 0.45rem 0.9rem;
+    font-size: 0.85rem;
+    text-decoration: none;
+  }
+
+  .btn-nav-cta:hover { background: var(--amber-deep); color: var(--paper); }
+
+  @media (max-width: 699px) {
+    .nav-links a:not(.btn-nav-cta) { display: none; }
+  }
+
+  /* ---------- Docs layout ---------- */
+  .docs-main { padding: 2.5rem 0 4rem; }
+
+  .docs-layout {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2.5rem;
+  }
+
+  @media (min-width: 900px) {
+    .docs-layout { grid-template-columns: 14rem minmax(0, 46rem); align-items: start; }
+  }
+
+  .docs-toc {
+    display: none;
+    position: sticky;
+    top: 4.5rem;
+  }
+
+  @media (min-width: 900px) {
+    .docs-toc { display: block; }
+  }
+
+  .docs-toc-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin: 0 0 0.6rem;
+  }
+
+  .docs-toc ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+  .docs-toc a { color: var(--ink); font-weight: 400; text-decoration: none; font-size: 0.92rem; }
+  .docs-toc a:hover { color: var(--amber-ink); }
+
+  .docs-prose { max-width: 46rem; }
+
+  .docs-intro { color: var(--ink-soft); max-width: 42rem; }
+
+  /* ---------- Code blocks ---------- */
+  .code-block {
+    position: relative;
+    background: var(--terminal);
+    color: var(--paper);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin: 0 0 1rem;
+  }
+
+  .code-block pre {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  .code-copy {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.6rem;
+    background: transparent;
+    color: var(--paper-soft);
+    border: 1px solid var(--paper-soft);
+    border-radius: 6px;
+    padding: 0.25rem 0.6rem;
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    cursor: pointer;
+  }
+
+  .code-copy:hover { color: var(--amber); border-color: var(--amber); }
+
+  /* ---------- Trap card (moved from landing v2) ---------- */
+  .trap-card {
+    position: relative;
+    background: var(--terminal);
+    color: var(--paper);
+    border-radius: 8px;
+    padding: 1.5rem 1.4rem 1.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    margin: 1rem 0 1.25rem;
+  }
+
+  .trap-card::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: repeating-linear-gradient(
+      45deg,
+      var(--amber) 0 8px,
+      var(--ink) 8px 16px
+    );
+    border-radius: 8px 8px 0 0;
+  }
+
+  .trap-card__meta {
+    color: var(--paper-soft);
+    font-size: 0.78rem;
+    letter-spacing: 0.05em;
+    margin: 0.4rem 0 0.75rem;
+  }
+
+  .trap-card__title {
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+    font-weight: 700;
+    line-height: 1.5;
+    margin: 0 0 0.9rem;
+  }
+
+  .trap-card p { margin: 0 0 0.75rem; }
+  .trap-card p:last-child { margin-bottom: 0; }
+  .trap-card strong { color: var(--amber); }
+
+  .trap-annotations {
+    display: grid;
+    gap: 0.75rem;
+    margin: 1.25rem 0 1.5rem;
+    padding: 0;
+    list-style: none;
+  }
+
+  .trap-annotations li {
+    position: relative;
+    padding-left: 1.4rem;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--amber-ink);
+  }
+
+  .trap-annotations li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.55em;
+    width: 1rem;
+    height: 1px;
+    background: var(--amber-deep);
+  }
+
+  /* ---------- Limits table ---------- */
+  .limits-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0 0 1.5rem;
+    font-size: 0.95rem;
+  }
+
+  .limits-table th, .limits-table td {
+    text-align: left;
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid var(--ink-hair);
+  }
+
+  .limits-table th { color: var(--ink-soft); font-weight: 700; font-size: 0.85rem; }
+
+  /* ---------- FAQ ---------- */
+  .faq-item {
+    border-bottom: 1px solid var(--ink-hair);
+    padding: 0.9rem 0;
+  }
+
+  .faq-item summary {
+    cursor: pointer;
+    font-weight: 700;
+    list-style: none;
+  }
+
+  .faq-item summary::-webkit-details-marker { display: none; }
+
+  .faq-item summary::before {
+    content: "+ ";
+    color: var(--amber-ink);
+  }
+
+  .faq-item[open] summary::before { content: "– "; }
+
+  .faq-item p { margin: 0.6rem 0 0; color: var(--ink-soft); }
+
+  /* ---------- Footer ---------- */
+  footer {
+    padding: 2rem 0 3rem;
+    color: var(--ink-soft);
+    font-size: 0.88rem;
+    border-top: 1px solid var(--ink-hair);
+  }
+
+  footer a { color: var(--ink-soft); text-decoration: underline; font-weight: 700; }
+  footer a:hover { color: var(--amber-ink); }
+</style>
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="wrap nav-inner">
+    <a href="index.html" class="nav-word">twiceshy</a>
+    <div class="nav-links">
+      <a href="docs.html" aria-current="page">Docs</a>
+      <a href="https://github.com/twiceshy/twiceshy">GitHub</a>
+      <a href="index.html#signup-hero" class="btn-nav-cta">Get an alpha token</a>
+    </div>
+  </div>
+</nav>
+
+<main class="docs-main">
+  <div class="wrap docs-layout">
+    <nav class="docs-toc" aria-label="On this page">
+      <p class="docs-toc-label">On this page</p>
+      <ul>
+        <li><a href="#quickstart">Quickstart</a></li>
+        <li><a href="#what-you-get">What your agent gets</a></li>
+        <li><a href="#validation">How records are validated</a></li>
+        <li><a href="#limits">Tokens, quotas &amp; limits</a></li>
+        <li><a href="#faq">FAQ</a></li>
+      </ul>
+    </nav>
+
+    <div class="docs-prose">
+      <h1>Docs</h1>
+      <p class="docs-intro">twiceshy speaks MCP. Wire your agent to it once and every session after that checks the corpus of validated dead-ends before it retries something that has already failed for someone else.</p>
+
+      <section id="quickstart">
+        <h2>Quickstart</h2>
+        <p>First, <a href="index.html#signup-hero">get a free alpha token</a> — it takes 5 seconds and is shown once.</p>
+
+        <h3>Claude Code</h3>
+        <div class="code-block">
+          <button type="button" class="code-copy">Copy</button>
+          <pre><code>claude mcp add -t http twiceshy https://api.twiceshy.dev \
+  --header "Authorization: Bearer YOUR_TOKEN"</code></pre>
+        </div>
+
+        <h3>Cursor</h3>
+        <div class="code-block">
+          <button type="button" class="code-copy">Copy</button>
+          <pre><code>{
+  "mcpServers": {
+    "twiceshy": {
+      "url": "https://api.twiceshy.dev",
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN"
+      }
+    }
+  }
+}</code></pre>
+        </div>
+
+        <h3>Any MCP client</h3>
+        <p>Endpoint <code>https://api.twiceshy.dev</code>, header <code>Authorization: Bearer YOUR_TOKEN</code>. Any client that speaks streamable-HTTP MCP works — Windsurf, VS Code, or your own.</p>
+      </section>
+
+      <section id="what-you-get">
+        <h2>What your agent gets</h2>
+        <p>A record looks like this — served in milliseconds, before your agent burns a retry on something already known to fail:</p>
+        <div class="trap-card" role="img" aria-label="Sample experience card exp-0001, as served to a coding agent">
+          <p class="trap-card__meta">EXP-0001 · TRAP CARD</p>
+          <p class="trap-card__title">SQLite FTS5 MATCH treats user input as query syntax — dots, dashes and quotes error out or change semantics</p>
+          <p><strong>The trap:</strong> passing raw text to MATCH errors on punctuation or silently changes meaning.</p>
+          <p><strong>The escape:</strong> quote every token — quoted strings are always plain terms.</p>
+        </div>
+        <ul class="trap-annotations">
+          <li>the trap, in plain words</li>
+          <li>the escape that actually worked</li>
+          <li>validated before it can ever reach your agent</li>
+        </ul>
+        <p>Every card carries four fields: the <strong>trap</strong> (what goes wrong and why), the <strong>escape</strong> (the fix that actually worked), <strong>provenance</strong> (where it came from), and a <strong>trust level</strong> (how it earned its way into the corpus). Nothing is served without all four.</p>
+      </section>
+
+      <section id="validation">
+        <h2>How records are validated</h2>
+        <p>Records land quarantined. A deterministic consistency gate checks structure and internal contradictions. Then two AI judges from different model vendors must independently approve the record — agreement across vendors, not just a second opinion from the same lab. Approved records sit in a human veto window before they ever reach an agent. Rejected records stay quarantined permanently — they are never retried into the served corpus. The corpus grows nightly; nothing reaches you unvalidated.</p>
+      </section>
+
+      <section id="limits">
+        <h2>Tokens, quotas &amp; limits</h2>
+        <table class="limits-table">
+          <thead>
+            <tr><th>Limit</th><th>Value</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Calls per day</td><td>1,000</td></tr>
+            <tr><td>Calls per minute</td><td>60</td></tr>
+            <tr><td>Token visibility</td><td>shown once, at signup</td></tr>
+            <tr><td>Abuse handling</td><td>token revoked; request a new one</td></tr>
+          </tbody>
+        </table>
+        <p>Lost your token, or need a new one? <a href="index.html#signup-hero">Sign up again</a> — each signup issues a fresh token.</p>
+      </section>
+
+      <section id="faq">
+        <h2>FAQ</h2>
+
+        <details class="faq-item">
+          <summary>Is my code sent anywhere?</summary>
+          <p>Only your queries — the text your agent sends when it asks for help. Nothing is stored from pull calls beyond telemetry. See the <a href="terms.html">terms &amp; data policy</a>.</p>
+        </details>
+
+        <details class="faq-item">
+          <summary>Does it work with my agent?</summary>
+          <p>Any MCP client — Claude Code, Cursor, Windsurf, VS Code, or a custom one you wrote yourself.</p>
+        </details>
+
+        <details class="faq-item">
+          <summary>What does it cost?</summary>
+          <p>Free while in alpha. Self-hosting the AGPL-3.0 code is free, forever, regardless of what the hosted service charges later.</p>
+        </details>
+
+        <details class="faq-item">
+          <summary>Can I contribute my own traps?</summary>
+          <p>The write path opens later in the alpha. For now the corpus grows from validated internal sessions.</p>
+        </details>
+
+        <details class="faq-item">
+          <summary>Who builds this?</summary>
+          <p>A small team that got tired of watching agents repeat the same dead-ends and decided to write them down.</p>
+        </details>
+      </section>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Open source (<a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a>) · self-hosting is free, forever · alpha <a href="terms.html">terms &amp; data policy</a> · built by people tired of watching agents repeat themselves.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var copyButtons = document.querySelectorAll(".code-copy");
+  for (var i = 0; i < copyButtons.length; i++) {
+    copyButtons[i].addEventListener("click", function (evt) {
+      var btn = evt.currentTarget;
+      var code = btn.parentElement.querySelector("pre code");
+      var text = code.textContent;
+
+      function done() {
+        btn.textContent = "Copied";
+        setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+      }
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done);
+      } else {
+        var range = document.createRange();
+        range.selectNodeContents(code);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand("copy");
+        sel.removeAllRanges();
+        done();
+      }
+    });
+  }
+})();
+</script>
+</body>
+</html>
