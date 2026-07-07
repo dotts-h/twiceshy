@@ -8,7 +8,7 @@ depends_on: []
 forgejo:
 links:
   adr: ADR-0033
-  prs: []
+  prs: [545]
   issues: [0131]
   regression:
 assets: []
