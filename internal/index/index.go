@@ -351,6 +351,13 @@ CREATE TABLE IF NOT EXISTS tenant_usage (
   calls    INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (token_id, day, tool)
 );
+CREATE TABLE IF NOT EXISTS contribution_usage (
+  token_id TEXT NOT NULL,
+  day      TEXT NOT NULL,
+  tool     TEXT NOT NULL,
+  calls    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (token_id, day, tool)
+);
 `
 
 // migrations are additive, idempotent in-place schema changes for index files

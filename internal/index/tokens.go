@@ -216,12 +216,47 @@ func (ix *Index) CountTenantCall(tokenID, tool string, now time.Time) error {
 	return nil
 }
 
+// CountContributionCall atomically increments tokenID's per-tool contribution
+// counter for today (UTC), UNLESS it has already reached limit (<= 0 =
+// unlimited), in which case the row is left unchanged. This is the
+// enforcement-owned counterpart of CountTokenCall for the write-path
+// contribution quota (ADR-0032, #0131 finding 2's pattern): the cap check and
+// the increment live in the same conditional UPSERT, so there is no
+// read-then-write race window in Go. It is distinct from, and does not read,
+// the tenant_usage telemetry counter — that table stays pure best-effort
+// observation and never gates a request again. Returns the resulting
+// (possibly unchanged) total and whether this call was admitted.
+func (ix *Index) CountContributionCall(tokenID, tool string, limit int, now time.Time) (calls int, allowed bool, err error) {
+	day := now.UTC().Format("2006-01-02")
+	err = ix.db.QueryRow(
+		`INSERT INTO contribution_usage (token_id, day, tool, calls) VALUES (?, ?, ?, 1)
+		 ON CONFLICT(token_id, day, tool) DO UPDATE SET calls = calls + 1
+		 WHERE ? <= 0 OR calls < ?
+		 RETURNING calls`,
+		tokenID, day, tool, limit, limit,
+	).Scan(&calls)
+	if errors.Is(err, sql.ErrNoRows) {
+		// The conditional UPDATE was skipped: limit already reached today.
+		// Read the (unchanged) stored total back for the caller to report.
+		if selErr := ix.db.QueryRow(
+			`SELECT calls FROM contribution_usage WHERE token_id = ? AND day = ? AND tool = ?`,
+			tokenID, day, tool,
+		).Scan(&calls); selErr != nil {
+			return 0, false, fmt.Errorf("count contribution call: quota check: %w", selErr)
+		}
+		return calls, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("count contribution call: %w", err)
+	}
+	return calls, true, nil
+}
+
 // TenantToolCallsToday returns tokenID's already-recorded tenant_usage count
 // for tool today (UTC), WITHOUT incrementing — the read side of #0126's
-// tool-keyed counter, reused by the alpha-tenant contribution-quota gate
-// (#0128). withTenantTelemetry bumps this same counter via CountTenantCall
-// before every tool handler runs, so by the time a handler reads it here, the
-// current call is already included in the count.
+// tool-keyed counter, telemetry read side only (ADR-0032 moved contribution
+// quota enforcement to its own CountContributionCall/contribution_usage
+// table; this method no longer gates any request).
 func (ix *Index) TenantToolCallsToday(tokenID, tool string, now time.Time) (int, error) {
 	day := now.UTC().Format("2006-01-02")
 	var calls int

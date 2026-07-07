@@ -153,6 +153,7 @@ func New(cfg Config) (*Server, error) {
 	h.recordCount.Store(int64(cfg.RecordCount))
 	h.usage = newUsageRecorder(cfg.Index, logger, time.Now)
 	h.tenantCalls = cfg.Index
+	h.contribQuota = cfg.Index
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "twiceshy",
 		Title:   "twiceshy experience service",
@@ -251,6 +252,8 @@ type handlers struct {
 	queryText   bool                // opt-in raw query text on gate-decision telemetry, truncated (#0109); no-op if telemetry is nil
 
 	tenantCalls tenantCallRecorder // per-tenant per-tool call counter (#0126); nil in unit tests that construct handlers directly
+
+	contribQuota contributionQuota // enforcement-owned per-tenant, per-tool contribution-quota debit (ADR-0032); nil FAILS CLOSED for alpha tenants
 
 	signupEnabled  bool             // gates POST /signup; false answers 404 (#0127)
 	signupIssuer   TokenIssuer      // mints tokens for /signup; required when signupEnabled
