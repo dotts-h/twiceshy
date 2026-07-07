@@ -195,6 +195,42 @@ func ReadIssue(path string) (Issue, error) {
 	return i, nil
 }
 
+// RecordDraft is one queued contribution draft experience record (#0139).
+type RecordDraft struct {
+	Kind            string   `json:"kind"`
+	Title           string   `json:"title"`
+	Summary         string   `json:"summary"`
+	ErrorSignatures []string `json:"error_signatures,omitempty"`
+	Ecosystem       string   `json:"ecosystem,omitempty"`
+	Package         string   `json:"package,omitempty"`
+	RootCause       string   `json:"root_cause"`
+	Fix             string   `json:"fix"`
+	GuardingTest    string   `json:"guarding_test,omitempty"`
+	Body            string   `json:"body,omitempty"`
+	Author          string   `json:"author"`
+	Session         string   `json:"session,omitempty"`
+	ReportedAt      string   `json:"reported_at"`
+}
+
+// EnqueueRecord writes RecordDraft d as a JSON file in dir using the same atomic
+// temp-then-rename discipline as Enqueue, prefixed with ReportedAt for time order.
+func EnqueueRecord(dir string, d RecordDraft) (string, error) {
+	return enqueueJSON(dir, d.ReportedAt, d)
+}
+
+// ReadRecord decodes a queued record draft file.
+func ReadRecord(path string) (RecordDraft, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return RecordDraft{}, err
+	}
+	var d RecordDraft
+	if err := json.Unmarshal(data, &d); err != nil {
+		return RecordDraft{}, err
+	}
+	return d, nil
+}
+
 // Remove deletes a processed queue file.
 func Remove(path string) error { return os.Remove(path) }
 
