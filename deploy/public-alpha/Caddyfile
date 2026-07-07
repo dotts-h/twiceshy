@@ -20,8 +20,10 @@
 # which makes the signup per-IP cap per-visitor — set that env on the twiceshy
 # service or the cap degrades to keying on Caddy's own IP.
 {
-	# Let's Encrypt account contact (certificate expiry notices).
-	email horia.c.radulescu@gmail.com
+	# Let's Encrypt account contact (certificate expiry notices). Cloudflare
+	# Email Routing forwards this to the owner; the repo is public now so this
+	# is safe to publish.
+	email contact@twiceshy.app
 }
 
 twiceshy.app, www.twiceshy.app {
@@ -36,6 +38,12 @@ twiceshy.app, www.twiceshy.app {
 	log
 
 	root * /srv/landing
+
+	# Legacy/direct .html hits: permanent-redirect to the clean routes; anything
+	# not redirected or matched below falls through to the API proxy and 401s.
+	redir /index.html / permanent
+	redir /docs.html /docs permanent
+	redir /terms.html /terms permanent
 
 	# robots.txt / llms.txt / sitemap.xml are plain static files under
 	# web/landing/ — without this handle they'd fall through to the

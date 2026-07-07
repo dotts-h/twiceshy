@@ -5,7 +5,7 @@
 twiceshy is a corpus of validated experience records — symptom, root cause,
 fix, and a guarding test — served to coding agents via `search_experience`
 and `get_experience` over streamable-HTTP MCP. Tokens are self-serve
-(bearer auth). The engine is AGPL-3.0; self-hosting is free, forever.
+(bearer auth). The engine is AGPL-3.0 ([source](https://github.com/dotts-h/twiceshy)); self-hosting is free, forever.
 
 ## Docs
 
