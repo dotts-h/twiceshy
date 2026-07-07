@@ -37,6 +37,16 @@ artifacts and runbook but is blocked on two operator decisions (hosting
 provider, domain). The launch gate is now just those two decisions plus
 going live per the runbook.
 
+## Status 2026-07-07 — LAUNCH GATE MET
+
+0129 closed: **https://twiceshy.app is live** (Hetzner CX23, `twiceshy.app`
+via Cloudflare, both repos kept private with a scoped corpus-pull credential —
+see 0129's closing status for the as-built record). All launch-gate children
+(0125+0126+0127+0129+0130) are now closed. The epic stays open for the
+post-launch children: #0131 (review follow-ups incl. the signup XFF cap fix —
+now live-relevant) and #0132 (live demo box). 0128's write tools remain OFF
+for alpha tenants pending its enablement decision.
+
 ## Notes
 
 Cold-start honesty (ADR-0030 consequences): the measurement chain (#0067/#0069,

@@ -2,16 +2,16 @@
 # proxy (#0129, ADR-0030). Must stay consistent with compose.yaml (service name
 # `twiceshy`, port 8722) and docs/DEPLOY-public-alpha.md.
 #
-# OPEN DECISION (domain — see the runbook): twiceshy.dev / api.twiceshy.dev are
+# OPEN DECISION (domain — see the runbook): twiceshy.app / api.twiceshy.app are
 # PLACEHOLDERS. Substitute the real domain(s) before deploy; Caddy issues
 # Let's Encrypt certs automatically for whatever hostnames are configured here.
 #
 # Two site blocks:
-#   - twiceshy.dev / www — the marketing + self-serve domain: serves
+#   - twiceshy.app / www — the marketing + self-serve domain: serves
 #     web/landing/ as a static root (/, /docs, /terms map to the *.html files),
 #     and reverse-proxies POST /signup + GET /statz to twiceshy:8722 so the
 #     landing page's own signup form (fetch("/signup")) stays same-origin.
-#   - api.twiceshy.dev — the MCP domain: everything here is non-static, so the
+#   - api.twiceshy.app — the MCP domain: everything here is non-static, so the
 #     whole vhost reverse-proxies to twiceshy:8722 (this is what MCP clients
 #     configure; /healthz, /readyz, /signup, /statz are reachable here too).
 #
@@ -21,10 +21,10 @@
 # global-3/day until trusted-proxy XFF handling lands server-side.
 {
 	# Let's Encrypt account contact — OPEN DECISION placeholder, set to a real inbox.
-	email admin@twiceshy.dev
+	email horia.c.radulescu@gmail.com
 }
 
-twiceshy.dev, www.twiceshy.dev {
+twiceshy.app, www.twiceshy.app {
 	encode gzip
 
 	header {
@@ -61,7 +61,7 @@ twiceshy.dev, www.twiceshy.dev {
 	}
 }
 
-api.twiceshy.dev {
+api.twiceshy.app {
 	encode gzip
 
 	header {
