@@ -31,6 +31,7 @@ func TestResolveSignupClientIP(t *testing.T) {
 		name       string
 		remoteAddr string
 		xff        string
+		xffLines   []string // multiple X-Forwarded-For header LINES (Header.Add per entry); takes precedence over xff
 		trusted    []*net.IPNet
 		want       string
 	}{
@@ -76,13 +77,42 @@ func TestResolveSignupClientIP(t *testing.T) {
 			trusted:    trustedV6,
 			want:       "2001:db8::1",
 		},
+		{
+			// A client can send its own X-Forwarded-For header LINE and a proxy
+			// may append its value as a SEPARATE line rather than merging into
+			// one comma list — Header.Get returns only the first (attacker) line.
+			// The LAST line's last entry is the one the trusted proxy appended.
+			name:       "two XFF header lines: last LINE wins, not the first (spoofed) one",
+			remoteAddr: "10.0.0.1:5555",
+			xffLines:   []string{"6.6.6.6", "203.0.113.7"},
+			trusted:    trustedV4,
+			want:       "203.0.113.7",
+		},
+		{
+			name:       "two XFF header lines, last line multi-entry: its LAST entry wins",
+			remoteAddr: "10.0.0.1:5555",
+			xffLines:   []string{"6.6.6.6", "9.9.9.9, 203.0.113.7"},
+			trusted:    trustedV4,
+			want:       "203.0.113.7",
+		},
+		{
+			name:       "two XFF header lines, last line unparsable: falls back to RemoteAddr",
+			remoteAddr: "10.0.0.1:5555",
+			xffLines:   []string{"6.6.6.6", "not-an-ip"},
+			trusted:    trustedV4,
+			want:       "10.0.0.1",
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "http://example/signup", nil)
 			req.RemoteAddr = tc.remoteAddr
-			if tc.xff != "" {
+			if len(tc.xffLines) > 0 {
+				for _, line := range tc.xffLines {
+					req.Header.Add("X-Forwarded-For", line)
+				}
+			} else if tc.xff != "" {
 				req.Header.Set("X-Forwarded-For", tc.xff)
 			}
 			got := resolveSignupClientIP(req, tc.trusted)

@@ -161,10 +161,14 @@ func signupClientIP(r *http.Request) string {
 // honored when RemoteAddr itself matches a configured trusted proxy — an
 // untrusted caller can set that header to anything, so trusting it
 // unconditionally would let a spoofed value bypass the cap entirely. When
-// trusted, the LAST XFF entry is used: in a single-hop deployment that is the
-// proxy's own appended value (the real client); earlier entries are
-// client-supplied and spoofable. Any parse failure (unset trustedProxies,
-// RemoteAddr not trusted, missing/unparsable XFF) falls back to RemoteAddr.
+// trusted, the LAST XFF entry of the LAST header LINE is used: a client may
+// send its own X-Forwarded-For line and a proxy may append its value as a
+// SEPARATE header line rather than merging into one comma list — Header.Get
+// returns only that first, attacker-controlled line. The last entry of the
+// last line is the one the trusted proxy appended (the real client);
+// everything earlier is client-supplied and spoofable. Any parse failure
+// (unset trustedProxies, RemoteAddr not trusted, missing/unparsable XFF)
+// falls back to RemoteAddr.
 func resolveSignupClientIP(r *http.Request, trustedProxies []*net.IPNet) string {
 	remoteHost := signupClientIP(r)
 	if len(trustedProxies) == 0 {
@@ -174,11 +178,11 @@ func resolveSignupClientIP(r *http.Request, trustedProxies []*net.IPNet) string 
 	if remoteIP == nil || !ipTrusted(remoteIP, trustedProxies) {
 		return remoteHost
 	}
-	xff := r.Header.Get("X-Forwarded-For")
-	if xff == "" {
+	lines := r.Header.Values("X-Forwarded-For")
+	if len(lines) == 0 {
 		return remoteHost
 	}
-	parts := strings.Split(xff, ",")
+	parts := strings.Split(lines[len(lines)-1], ",")
 	last := strings.TrimSpace(parts[len(parts)-1])
 	if net.ParseIP(last) == nil {
 		return remoteHost
