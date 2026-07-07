@@ -60,11 +60,14 @@ func (h *handlers) reportIssue(ctx context.Context, _ *mcp.CallToolRequest, args
 	start := time.Now()
 	const tool = "report_issue"
 
+	tenant := TenantFromContext(ctx)
+	alpha := isAlphaTenant(tenant)
+
 	if err := validateIssueSize(args); err != nil {
 		h.logToolError(tool, start, err)
 		return nil, IssueResult{}, err
 	}
-	if err := h.checkContributionQuota(ctx, tool, alphaReportDailyQuota); err != nil {
+	if err := h.checkContributionQuota(ctx, tool, alphaContributionQuotas[tool]); err != nil {
 		h.logToolError(tool, start, err)
 		return nil, IssueResult{}, err
 	}
@@ -86,21 +89,54 @@ func (h *handlers) reportIssue(ctx context.Context, _ *mcp.CallToolRequest, args
 		return nil, IssueResult{}, err
 	}
 
+	// ADR-0031 full alpha posture (#0136): tighter size cap, then fail-closed
+	// secret rejection — BEFORE any rendering or spooling, so a rejected
+	// submission never lands anywhere.
+	description := args.Description
+	if alpha {
+		if len(description) > alphaMaxIssueDescriptionBytes {
+			err := fmt.Errorf("description too large for an alpha tenant: %d bytes (max %d)", len(description), alphaMaxIssueDescriptionBytes)
+			h.logToolError(tool, start, err)
+			return nil, IssueResult{}, err
+		}
+		if err := rejectAlphaSecrets(tool, title, description, args.Author, args.Session); err != nil {
+			h.logToolError(tool, start, err)
+			return nil, IssueResult{}, err
+		}
+	}
+
 	// Content screen (secrets/PII/harmful) — inherited like record_experience. An
 	// agent-submitted issue is mirrored to docs/issues + Forgejo, so flag risky
 	// content before it lands; the flags ride the message and the rendered Notes.
-	flags := screen.Flags(screen.Scan(title, args.Description))
+	flags := screen.Flags(screen.Scan(title, description))
 
-	md := renderIssueMarkdown(title, args.Description, cat, args.RelatedRecordID, args.Author, args.Session, time.Now().UTC(), flags)
+	// TENANT ORIGIN STAMPING (#0128, ADR-0031): a tok_ tenant's issue author is
+	// FORCED to "alpha:<token_id>" everywhere it is persisted — same trust key
+	// and display-note pattern as record_experience/report_outcome. The
+	// display note is prepended AFTER the secret scan above, and only when
+	// description is non-empty — empty descriptions are legal (validateIssueSize
+	// only caps size), and manufacturing non-empty content out of the note
+	// alone would misrepresent a bare submission as having a description.
+	issueAuthor := args.Author
+	if alpha {
+		var display string
+		issueAuthor, display = alphaStampAuthor(tenant, args.Author)
+		if display != "" && strings.TrimSpace(description) != "" {
+			description = fmt.Sprintf("_Submitted as: %s (untrusted alpha tenant; recorded origin: %s)_\n\n%s",
+				display, issueAuthor, description)
+		}
+	}
+
+	md := renderIssueMarkdown(title, description, cat, args.RelatedRecordID, issueAuthor, args.Session, time.Now().UTC(), flags)
 
 	queued := false
 	if h.issueQueue != "" {
 		if _, err := spool.EnqueueIssue(h.issueQueue, spool.Issue{
 			Title:           title,
-			Description:     args.Description,
+			Description:     description,
 			Category:        cat,
 			RelatedRecordID: args.RelatedRecordID,
-			Author:          args.Author,
+			Author:          issueAuthor,
 			Session:         args.Session,
 			ReportedAt:      time.Now().UTC().Format(time.RFC3339Nano),
 		}); err != nil {

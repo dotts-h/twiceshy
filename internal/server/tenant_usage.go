@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -50,18 +49,6 @@ func withTenantTelemetry[In, Out any](h *handlers, tool string, fn mcp.ToolHandl
 	}
 }
 
-// alphaReportDailyQuota is the per-token, per-UTC-day contribution quota for
-// report_outcome and report_issue (#0128) — separate from record_experience's
-// own, tighter quota and from tenantAuth's per-call rate quota.
-const alphaReportDailyQuota = 25
-
-// isAlphaTenant reports whether tenant is an untrusted alpha tok_ tenant
-// (ADR-0030 phase 2) as opposed to "operator". Shared by every write-path
-// hardening check added in #0128 so they all agree on the same predicate.
-func isAlphaTenant(tenant string) bool {
-	return strings.HasPrefix(tenant, "tok_")
-}
-
 // contributionQuota is the slice of the index the write-path contribution
 // quota needs (ADR-0032): an atomic, fail-closed per-tenant, per-tool debit.
 // Narrowed to an interface, like tenantCallRecorder/usageStore, so it is
@@ -72,16 +59,23 @@ type contributionQuota interface {
 }
 
 // checkContributionQuota enforces the per-tenant, per-tool CONTRIBUTION quota
-// (#0128) for the write-path tools (record_experience / report_outcome /
-// report_issue) — separate from tenantAuth's per-call rate quota (#0125).
-// Enforcement debits its own atomic, fail-closed counter via contribQuota
-// (ADR-0032); the tenant_usage telemetry counter (#0126) only observes calls
-// and never gates them. The operator tenant is never gated — this quota
-// exists for untrusted alpha tok_ tenants only.
+// (#0128) for the write-path tools declared in alphaContributionQuotas
+// (alpha_policy.go, ADR-0031) — separate from tenantAuth's per-call rate
+// quota (#0125). Enforcement debits its own atomic, fail-closed counter via
+// contribQuota (ADR-0032); the tenant_usage telemetry counter (#0126) only
+// observes calls and never gates them. The operator tenant is never gated —
+// this quota exists for untrusted alpha tok_ tenants only. A limit <= 0
+// (an undeclared tool, or a bug reading alphaContributionQuotas) fails
+// CLOSED with an error rather than silently admitting unlimited calls —
+// CountContributionCall's own semantics treat limit<=0 as unbounded, so this
+// seam refuses that outcome outright (ADR-0031).
 func (h *handlers) checkContributionQuota(ctx context.Context, tool string, limit int) error {
 	tenant := TenantFromContext(ctx)
 	if !isAlphaTenant(tenant) {
 		return nil
+	}
+	if limit <= 0 {
+		return fmt.Errorf("no contribution quota declared for %s", tool)
 	}
 	if h.contribQuota == nil {
 		return fmt.Errorf("checking %s contribution quota: no contribution-quota store wired", tool)

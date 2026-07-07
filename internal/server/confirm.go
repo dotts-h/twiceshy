@@ -45,6 +45,14 @@ func (h *handlers) confirmHelpful(ctx context.Context, _ *mcp.CallToolRequest, a
 		h.logToolError(tool, start, err)
 		return nil, ConfirmResult{}, err
 	}
+	// ADR-0031 (#0136): confirm_helpful mutates durable reinforcement state,
+	// so it is a write for quota purposes even though it stamps no
+	// provenance — a per-token, per-UTC-day contribution quota for alpha
+	// tok_ tenants, operator exempt (same seam as record_experience/report_*).
+	if err := h.checkContributionQuota(ctx, tool, alphaContributionQuotas[tool]); err != nil {
+		h.logToolError(tool, start, err)
+		return nil, ConfirmResult{}, err
+	}
 	if _, err := h.ix.Get(ctx, args.RecordID); err != nil {
 		h.logToolError(tool, start, err, slog.String("record_id", args.RecordID))
 		return nil, ConfirmResult{}, fmt.Errorf("cannot confirm helpful for %s: %w", args.RecordID, err)

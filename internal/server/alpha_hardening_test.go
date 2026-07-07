@@ -204,6 +204,54 @@ func TestRecordExperienceAlphaTenantSecretRejected(t *testing.T) {
 	}
 }
 
+// TestRecordExperienceAlphaTenantSessionSecretRejected guards a gap the
+// second-opinion review found: `session` is caller-supplied free text that
+// gets persisted (provenance.session) but was not covered by the alpha
+// fail-closed secret scan — a secret-shaped session bypassed rejectAlphaSecrets
+// entirely. A clean body/summary/etc but a secret-shaped session must still
+// be rejected outright for an alpha tenant.
+func TestRecordExperienceAlphaTenantSessionSecretRejected(t *testing.T) {
+	ts, _, fullToken, _ := newAlphaTestServer(t, nil)
+	session := connectWithToken(t, ts, fullToken)
+
+	secret := "ghp_" + strings.Repeat("A", 36)
+	_, res := callRecord(t, session, map[string]any{
+		"kind": "trap", "title": "Alpha tenant session secret rejection sample",
+		"summary": "alpha session secret rejection symptom", "error_signatures": []string{"alpha-session-secret-reject-sig-0001"},
+		"root_cause": "clean", "fix": "clean", "body": "a perfectly clean narrative body",
+		"author": "test", "session": secret,
+	})
+	if !res.IsError {
+		t.Fatal("an alpha tenant's secret-shaped session must be a tool error, not stored")
+	}
+	msg := toolText(res)
+	if !strings.Contains(msg, "secret:github-token") {
+		t.Errorf("error = %q, want it to name the secret:github-token rule", msg)
+	}
+	if strings.Contains(msg, secret) {
+		t.Errorf("error = %q, must never echo the raw secret", msg)
+	}
+}
+
+// TestRecordExperienceOperatorSessionSecretUnaffected is the regression half:
+// the operator channel's behavior around `session` is unchanged by this fix
+// (the alpha fail-closed scan is alpha-only).
+func TestRecordExperienceOperatorSessionSecretUnaffected(t *testing.T) {
+	ts := newTestServer(t)
+	session := connect(t, ts)
+
+	secret := "ghp_" + strings.Repeat("A", 36)
+	_, res := callRecord(t, session, map[string]any{
+		"kind": "trap", "title": "Operator session secret unaffected sample",
+		"summary": "operator session symptom", "error_signatures": []string{"operator-session-secret-sig-0001"},
+		"root_cause": "clean", "fix": "clean", "body": "a perfectly clean narrative body",
+		"author": "test", "session": secret,
+	})
+	if res.IsError {
+		t.Fatalf("operator behavior around session must be unchanged: %s", toolText(res))
+	}
+}
+
 // TestRecordExperienceAlphaTenantSizeBoundaries is invariant 4: alpha-tenant
 // caps are tighter than the engine-wide guardrails and are enforced at the
 // exact boundary.

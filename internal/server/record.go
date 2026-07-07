@@ -68,23 +68,8 @@ const (
 	maxSignatureBytes   = 4 << 10  // each signature is hashed and FTS-indexed
 )
 
-// Tighter input-size caps for alpha tok_ tenants (#0128, ADR-0030 phase 2):
-// untrusted contributors get a much smaller envelope than the operator's
-// trusted-channel guardrails above. title is already bounded to 8..120 runes
-// by record.Validate, so it needs no separate cap here.
-const (
-	alphaMaxBodyBytes      = 16 << 10 // 16 KiB
-	alphaMaxSummaryBytes   = 2 << 10  // 2 KiB
-	alphaMaxSignatures     = 10
-	alphaMaxSignatureBytes = 500
-)
-
-// alphaRecordDailyQuota is the per-token, per-UTC-day contribution quota for
-// record_experience (#0128) — separate from tenantAuth's per-call rate quota.
-const alphaRecordDailyQuota = 10
-
-// validateAlphaRecordSize applies the tighter alpha-tenant caps on top of
-// validateRecordSize's engine-wide guardrails.
+// validateAlphaRecordSize applies the tighter alpha-tenant caps (alpha_policy.go,
+// ADR-0031) on top of validateRecordSize's engine-wide guardrails.
 func validateAlphaRecordSize(args RecordArgs) error {
 	if len(args.Body) > alphaMaxBodyBytes {
 		return fmt.Errorf("body too large for an alpha tenant: %d bytes (max %d)", len(args.Body), alphaMaxBodyBytes)
@@ -109,19 +94,6 @@ func validateAlphaRecordSize(args RecordArgs) error {
 func recordScanTexts(args RecordArgs) []string {
 	return append([]string{args.Title, args.Summary, args.RootCause, args.Fix, args.GuardingTest, args.Body, args.Ecosystem, args.Package},
 		args.ErrorSignatures...)
-}
-
-// secretFlags narrows findings to secret-category hazards, rendered as
-// "secret:rule" tags — reuses screen's existing detectors/rule names, never a
-// new pattern.
-func secretFlags(findings []screen.Finding) []string {
-	secrets := make([]screen.Finding, 0, len(findings))
-	for _, f := range findings {
-		if f.Category == "secret" {
-			secrets = append(secrets, f)
-		}
-	}
-	return screen.Flags(secrets)
 }
 
 // validateRecordSize rejects oversized inputs cheaply, before NextID allocation
@@ -193,7 +165,7 @@ func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args Reco
 			h.logToolError(tool, start, err)
 			return nil, RecordResult{}, err
 		}
-		if err := h.checkContributionQuota(ctx, tool, alphaRecordDailyQuota); err != nil {
+		if err := h.checkContributionQuota(ctx, tool, alphaContributionQuotas[tool]); err != nil {
 			h.logToolError(tool, start, err)
 			return nil, RecordResult{}, err
 		}
@@ -213,9 +185,11 @@ func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args Reco
 	// behavior is unchanged: a secret from the trusted channel still just
 	// quarantines with a security_flags entry, as before.)
 	if alpha {
-		if findings := screen.Scan(recordScanTexts(args)...); screen.HasSecret(findings) {
-			err := fmt.Errorf("record_experience rejected: secret-shaped content detected (%s) — not stored",
-				strings.Join(secretFlags(findings), ", "))
+		// session is caller-supplied free text that gets persisted
+		// (provenance.session) but sits outside recordScanTexts' field set
+		// (that helper's doc comment ties it to redactRecordPII's fields) —
+		// append it here so the fail-closed scan still covers it.
+		if err := rejectAlphaSecrets(tool, append(recordScanTexts(args), args.Session)...); err != nil {
 			h.logToolError(tool, start, err)
 			return nil, RecordResult{}, err
 		}
@@ -263,8 +237,9 @@ func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args Reco
 	// display note in the narrative body, never as provenance.source.author.
 	recordAuthor := args.Author
 	if alpha {
-		recordAuthor = record.AlphaOriginPrefix + tenant
-		if display := strings.TrimSpace(args.Author); display != "" {
+		var display string
+		recordAuthor, display = alphaStampAuthor(tenant, args.Author)
+		if display != "" {
 			draft.Body = fmt.Sprintf("_Submitted as: %s (untrusted alpha tenant; recorded origin: %s)_\n\n%s",
 				display, recordAuthor, draft.Body)
 		}

@@ -254,20 +254,22 @@ func TestPushHTTPRecordsTenantCallToolPush(t *testing.T) {
 }
 
 // TestRetroHTTPRecordsTenantCallToolRetro guards the schema's documented
-// "retro" tool value (#0126).
+// "retro" tool value (#0126). Uses the operator tenant: ADR-0031 makes
+// /retro operator-only for the alpha (a tok_ tenant is refused 403 before
+// this telemetry point is even reached — see TestRetroHTTPAlphaTenantForbidden).
 func TestRetroHTTPRecordsTenantCallToolRetro(t *testing.T) {
 	f := &fakeTenantCallRecorder{}
 	h := &handlers{logger: quietLogger(), tenantCalls: f, retroQueue: t.TempDir()}
 
 	body := strings.NewReader(`{"transcript":"a session transcript long enough to pass"}`)
 	req := httptest.NewRequest(http.MethodPost, "/retro", body)
-	req = req.WithContext(withTenant(req.Context(), "tok_retro001"))
+	req = req.WithContext(withTenant(req.Context(), "operator"))
 	rec := httptest.NewRecorder()
 	h.retroHTTP(rec, req)
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if len(f.calls) != 1 || f.calls[0].tenant != "tok_retro001" || f.calls[0].tool != "retro" {
-		t.Fatalf("recorded calls = %+v, want one retro call for tok_retro001", f.calls)
+	if len(f.calls) != 1 || f.calls[0].tenant != "operator" || f.calls[0].tool != "retro" {
+		t.Fatalf("recorded calls = %+v, want one retro call for operator", f.calls)
 	}
 }
