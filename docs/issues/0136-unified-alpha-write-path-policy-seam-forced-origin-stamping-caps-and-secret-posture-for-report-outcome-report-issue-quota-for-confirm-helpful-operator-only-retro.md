@@ -1,14 +1,14 @@
 ---
 id: 0136
 title: Unified alpha write-path policy seam — forced origin stamping, caps and secret posture for report_outcome/report_issue, quota for confirm_helpful, operator-only /retro
-status: open
+status: closed
 severity: high
 group: 0124
 depends_on: [0135]
 forgejo:
 links:
   adr: ADR-0031
-  prs: []
+  prs: [543]
   issues: [0128, 0135]
   regression:
 assets: []
