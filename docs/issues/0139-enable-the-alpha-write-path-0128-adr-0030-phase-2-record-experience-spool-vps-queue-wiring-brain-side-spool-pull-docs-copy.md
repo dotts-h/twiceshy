@@ -1,14 +1,14 @@
 ---
 id: 0139
 title: Enable the alpha write path (#0128 / ADR-0030 phase 2): record-experience spool, VPS queue wiring, brain-side spool pull, docs copy
-status: open
+status: closed
 severity: high
 group: 0124
 depends_on: [0135, 0136]
 forgejo:
 links:
   adr: ADR-0030
-  prs: []
+  prs: [547, 548]
   issues: [0128, 0135, 0136]
   regression:
 assets: []
