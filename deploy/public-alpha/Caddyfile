@@ -49,7 +49,7 @@ twiceshy.app, www.twiceshy.app {
 	# this handle they'd fall through to the catch-all `handle` below and
 	# reverse-proxy to twiceshy instead of being served, so they'd never be
 	# reachable.
-	@seo path /robots.txt /llms.txt /sitemap.xml /favicon.svg /favicon.ico /favicon-32.png /apple-touch-icon.png /og-image.png /logo-512.png
+	@seo path /robots.txt /llms.txt /sitemap.xml /favicon.svg /favicon.ico /favicon-32.png /apple-touch-icon.png /og-image.png /logo-512.png /32c21b52f05b41fa6a8f76fed9626187.txt
 	handle @seo {
 		file_server
 	}
