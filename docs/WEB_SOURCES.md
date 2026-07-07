@@ -3,6 +3,11 @@
 License-verified scoping of web sources twiceshy could ingest for engineering traps
 (error→cause→fix), NOT security advisories. Ranked by license-safety × schema-fit × yield.
 
+> **Known gap:** rows 1–7 of the original GPT 5.5 table were lost in transcription — the file
+> was committed starting at row 8 (f58a41c's parent 33d81ee already lacked them). The four
+> "Recommended adapters" below are presumed survivors of that block. Restore from a rerun if
+> ever needed; the 2026-07-07 addendum below is independent.
+
 | 8 | TypeScript TSxxxx diagnostics | **ingest-OK** — Apache-2.0; retain notices. [LICENSE](https://raw.githubusercontent.com/microsoft/TypeScript/main/LICENSE.txt) | **Mixed:** excellent signature index, but most entries lack explicit cause/fix. Expect enrichment or panel rejection. | ~2,000 raw; perhaps `10²–10³` usable | Parse [`diagnosticMessages.json`](https://raw.githubusercontent.com/microsoft/TypeScript/main/src/compiler/diagnosticMessages.json); map `code` and message template, then derive guards from compiler tests. | H/M |
 | 9 | Go `vet` analyzers | **ingest-OK** — BSD-3-Clause. [x/tools license metadata](https://pkg.go.dev/golang.org/x/tools/go) | **Good but small:** analyzer name/docs and emitted diagnostics; suggested fixes exist for some analyzers. | ~30–50 (`10¹`) | Enumerate `go/analysis/passes`; `Analyzer` exposes name/docs and diagnostics may contain suggested fixes. [API](https://pkg.go.dev/golang.org/x/tools/go/analysis) | H |
 | 10 | Django release notes | **ingest-OK** — BSD-3-Clause; retain notice. [LICENSE](https://raw.githubusercontent.com/django/django/main/LICENSE) | **Good:** dedicated backwards-incompatible and deprecation sections, often with replacement behavior. | `10²–10³` | Parse versioned reStructuredText/HTML headings from the [release-note index](https://docs.djangoproject.com/en/dev/releases/). Require old behavior + new behavior or migration text. | H/M |
@@ -49,4 +54,31 @@ All imports are born `quarantined`; the panel promotes them later — implemente
 - Do not build a generic GitHub issue/comment text importer. API accessibility is not a redistribution license.
 - Do not import Stack Overflow questions, answers or code directly into the AGPL corpus. CC-BY-SA attribution and share-alike obligations are record-level and revision-dependent.
 - Do not treat CC-BY material such as React documentation as public domain. It requires §5 reframing plus provenance and attribution.
-EXIT=0
+
+## Addendum 2026-07-07 — coverage-gap sources (Gemini research, every URL re-verified locally)
+
+Targeted at the #0088 zero-coverage areas. Artifact + license URLs curl-verified 2026-07-07
+(two of the research pass's URLs were wrong and are corrected below — verify-cited-URLs stands).
+
+| A1 | Swift compiler diagnostics | **ingest-OK** — Apache-2.0. [LICENSE](https://raw.githubusercontent.com/apple/swift/main/LICENSE.txt) | **High:** structured `ERROR(id, opts, "signature")` macros; fix hints in adjacent `NOTE` macros. First iOS/native source. | `10³` | Regex-extract `ERROR`/`WARNING`/`NOTE` macros from [`DiagnosticsSema.def`](https://raw.githubusercontent.com/apple/swift/main/include/swift/AST/DiagnosticsSema.def) + sibling `.def` files at a pinned tag. | H |
+| A2 | KubePug Kubernetes deprecations | **ingest-OK** — Apache-2.0. [LICENSE](https://raw.githubusercontent.com/kubepug/kubepug/main/LICENSE) | **Excellent:** group/kind, description, deprecated/removed version, explicit `replacement`. Cleanly bypasses the CC-BY k8s website. | `10²` | Parse the generated [`data.json`](https://kubepug.xyz/data/data.json) (NOTE: lives on kubepug.xyz per their README, not in the repo; server requires a browser User-Agent). | H |
+| A3 | ESLint core rules | **ingest-OK** — MIT. [LICENSE](https://raw.githubusercontent.com/eslint/eslint/main/LICENSE) | **High:** each rule exports `meta.messages` (error signatures) + `meta.docs` (cause); fixable flag marks auto-fixes. | ~300 (`10²`) | AST/regex-parse `lib/rules/*.js` at a pinned tag for the `meta` object literals. | H |
+| A4 | uv resolver/CLI errors | **ingest-OK** — MIT/Apache-2.0 dual. [LICENSE-MIT](https://raw.githubusercontent.com/astral-sh/uv/main/LICENSE-MIT) | **High:** `#[error("…")]` gives the signature, `#[diagnostic(help("…"))]` the fix, in the same attribute block. | `10²` | Scan `crates/**/*.rs` at a pinned tag for `thiserror`/`miette` attribute pairs. | H |
+| A5 | deno_lint rules | **ingest-OK** — MIT. [LICENSE](https://raw.githubusercontent.com/denoland/deno_lint/main/LICENSE) | **Good:** 122 rule files with code/message/hint; mine the source, NOT the CC-BY docs.deno.com rendering. | `10²` | Parse `src/rules/*.rs` (the research pass cited a nonexistent `mod.rs` — the directory is the artifact). | H |
+| A6 | React production error codes | **ingest-OK (signatures only)** — MIT. [LICENSE](https://raw.githubusercontent.com/facebook/react/main/LICENSE) | **Medium:** [`codes.json`](https://raw.githubusercontent.com/facebook/react/main/scripts/error-codes/codes.json) maps error IDs to message templates; the fix prose lives in CC-BY react.dev docs, so fixes must be independently synthesized (row 15's reframe rule). | `10²` | Parse the JSON map; enrich cause/fix from first principles + executed repros, never doc prose. | H/M |
+
+**Experience-shaped sources (the differentiated material — filed as issues, higher priority
+than the catalogs above):**
+
+- **External-OSS git fail→fix mining (#0133)** — row 16's carve-out ("mine licensed
+  commits/tests") applied at scale: fix-shaped commits in permissively-licensed high-star
+  repos ARE experience records (author's own trap account + validated fix + guard test).
+  License allowlist gate; never the issue/PR prose. Yield `10³–10⁴`.
+- **wtfjs / wtfpython (#0134)** — both SPDX `WTFPL` (verified 2026-07-07): curated
+  symptom→cause gotcha collections, ingest-OK as-is. Yield `10²` each.
+
+**Additional no-gos confirmed 2026-07-07:** `teivah/100-go-mistakes` (NOASSERTION — book
+content, no license); MIT link-lists like `charlax/professional-programming` (the list is MIT,
+the linked blog content is not); Deno's rendered docs site (mine the MIT source instead).
+Android/Kotlin, React Native/Expo-specific, and Docker/Postgres/Terraform sources returned
+nothing this pass (Codex quota-limited) — rerun there.
