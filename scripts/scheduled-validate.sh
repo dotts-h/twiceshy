@@ -26,6 +26,7 @@
 #   TWICESHY_JUDGE_MODEL   judge model id (default gpt-oss:20b).
 #   TWICESHY_DRAFTER_MODEL drafter family the judge must differ from (default qwen2.5-coder).
 #   TWICESHY_REPORT_QUEUE  report intake queue (#0042); empty skips intake.
+#   TWICESHY_RECORD_QUEUE  record intake queue (#0139); empty skips intake (default /home/ori/twiceshy-hosted-spool/records).
 #   TWICESHY_SOAK_SECONDS  veto-window cooldown before a batch PR auto-merges
 #                          (default 172800 = 48h, ADR-0013 §2). A later nightly run
 #                          does the merge, so the service never sleeps for the soak.
@@ -56,6 +57,7 @@ MAXACTIONS="${TWICESHY_MAX_ACTIONS:-25}"
 # window elapses, so the held backlog stops re-judging itself every run. 0 = off.
 HOLDCOOLDOWN="${TWICESHY_HOLD_COOLDOWN:-168h}"
 QUEUE="${TWICESHY_REPORT_QUEUE:-}"
+RECORD_QUEUE="${TWICESHY_RECORD_QUEUE:-/home/ori/twiceshy-hosted-spool/records}"
 SOAK="${TWICESHY_SOAK_SECONDS:-172800}"
 AUTOMERGE="${TWICESHY_AUTOMERGE:-1}"
 DRYRUN="${TWICESHY_VALIDATE_DRYRUN:-0}"
@@ -175,6 +177,11 @@ abort() {
 # Intake queued outcome reports so adapt has input (#0042). Best-effort.
 if [ -n "$QUEUE" ]; then
 	"$bin" intake-reports -corpus "$REPO" -queue "$QUEUE" "${BASE_ARGS[@]}" || notify "twiceshy validate: intake-reports failed (continuing)"
+fi
+
+# Intake queued experience records (#0139). Best-effort.
+if [ -n "$RECORD_QUEUE" ] && [ -d "$RECORD_QUEUE" ] && compgen -G "$RECORD_QUEUE/*.json" >/dev/null; then
+	"$bin" intake-records -corpus "$REPO" -queue "$RECORD_QUEUE" "${BASE_ARGS[@]}" || notify "twiceshy validate: intake-records failed (continuing)"
 fi
 
 mkdir -p "$REPO/runs"
