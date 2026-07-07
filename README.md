@@ -7,6 +7,13 @@ dead-ends, root causes, validated fixes — to LLM coding agents at decision
 time, so they stop repeating known mistakes on autopilot. A private,
 curated, validated StackOverflow that injects itself at the right moment.
 
+## Hosted alpha
+
+The hosted instance runs at [twiceshy.app](https://twiceshy.app) — self-serve
+tokens, remote MCP endpoint `https://api.twiceshy.app/`. External
+contributions require a signed CLA before merge
+([ADR-0002](docs/adr/ADR-0002-licensing-strategy.md)).
+
 ## How it works (the locked architecture)
 
 - **Source of truth:** git-backed markdown experience records (YAML frontmatter
