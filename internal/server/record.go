@@ -13,6 +13,7 @@ import (
 	"github.com/dotts-h/twiceshy/internal/ingest"
 	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/screen"
+	"github.com/dotts-h/twiceshy/internal/spool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -305,7 +306,35 @@ func (h *handlers) record(ctx context.Context, _ *mcp.CallToolRequest, args Reco
 		return nil, RecordResult{}, err
 	}
 
-	msg := "Quarantined draft created — open it as a PR to validate; it is NOT yet active."
+	queued := false
+	if h.recordQueue != "" {
+		if _, err := spool.EnqueueRecord(h.recordQueue, spool.RecordDraft{
+			Kind:            args.Kind,
+			Title:           args.Title,
+			Summary:         args.Summary,
+			ErrorSignatures: args.ErrorSignatures,
+			Ecosystem:       args.Ecosystem,
+			Package:         args.Package,
+			RootCause:       args.RootCause,
+			Fix:             args.Fix,
+			GuardingTest:    args.GuardingTest,
+			Body:            draft.Body,
+			Author:          recordAuthor,
+			Session:         args.Session,
+			ReportedAt:      time.Now().UTC().Format(time.RFC3339Nano),
+		}); err != nil {
+			h.logToolError(tool, start, err)
+			return nil, RecordResult{}, fmt.Errorf("queueing record draft for intake: %w", err)
+		}
+		queued = true
+	}
+
+	var msg string
+	if queued {
+		msg = "Contribution queued for moderation — it enters review quarantined; the record id is provisional until intake."
+	} else {
+		msg = "Quarantined draft created — open it as a PR to validate; it is NOT yet active."
+	}
 	if flags := out.Record.Provenance.SecurityFlags; len(flags) > 0 {
 		msg += " SECURITY: the safety gate flagged this draft (" + strings.Join(flags, ", ") +
 			"); it cannot be promoted to validated until the hazard is resolved."

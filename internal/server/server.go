@@ -86,6 +86,10 @@ type Config struct {
 	// (#0066). Empty keeps the fallback: report_issue returns a PR-ready docs/issues
 	// markdown for a human to PR, and writes nothing.
 	IssueQueue string
+	// RecordQueue, when set, is the directory record_experience enqueues
+	// contribution drafts into for the intake-records CLI (#0139, ADR-0030 phase 2);
+	// empty keeps the current behavior: the draft is only returned to the caller.
+	RecordQueue string
 	// Corpus is the corpus root (the directory containing experience/) the index
 	// was built from. The write path scans it to allocate record ids robustly
 	// against a live index that has drifted behind the committed corpus (#0059).
@@ -149,7 +153,7 @@ func New(cfg Config) (*Server, error) {
 		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	}
 
-	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, retroQueue: cfg.RetroQueue, issueQueue: cfg.IssueQueue, corpus: cfg.Corpus, telemetry: cfg.Telemetry, queryText: cfg.TelemetryQueryText, signupEnabled: cfg.SignupEnabled, signupIssuer: cfg.TokenIssuer, signupLimiter: newSignupIPLimiter(time.Now), trustedProxies: cfg.TrustedProxies}
+	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, retroQueue: cfg.RetroQueue, issueQueue: cfg.IssueQueue, recordQueue: cfg.RecordQueue, corpus: cfg.Corpus, telemetry: cfg.Telemetry, queryText: cfg.TelemetryQueryText, signupEnabled: cfg.SignupEnabled, signupIssuer: cfg.TokenIssuer, signupLimiter: newSignupIPLimiter(time.Now), trustedProxies: cfg.TrustedProxies}
 	h.recordCount.Store(int64(cfg.RecordCount))
 	h.usage = newUsageRecorder(cfg.Index, logger, time.Now)
 	h.tenantCalls = cfg.Index
@@ -246,6 +250,7 @@ type handlers struct {
 	reportQueue string              // optional; report_outcome enqueues here for intake-reports (ADR-0013 §E1)
 	retroQueue  string              // optional; POST /retro spools transcripts here for retro-intake (ADR-0018)
 	issueQueue  string              // optional; report_issue enqueues here for intake-issues (#0066)
+	recordQueue string              // optional; record_experience enqueues here for intake-records (#0139)
 	corpus      string              // corpus root for robust id allocation against the source of truth (#0059)
 	telemetry   *telemetry.Recorder // optional; per-query gate-decision log (#0067)
 	queryText   bool                // opt-in raw query text on gate-decision telemetry, truncated (#0109); no-op if telemetry is nil

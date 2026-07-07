@@ -197,7 +197,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|learned|draft|promote|repromote|adapt|intake-reports|intake-issues|retro-intake|screen|report|pack|doctor|eval|usage-flush|gold-add|judge-eval|prospect|corpus-merge-check|corpus-pr-paths|nextid|token> [flags]")
+		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|learned|draft|promote|repromote|adapt|intake-reports|intake-records|intake-issues|retro-intake|screen|report|pack|doctor|eval|usage-flush|gold-add|judge-eval|prospect|corpus-merge-check|corpus-pr-paths|nextid|token> [flags]")
 	}
 	switch args[0] {
 	case "index":
@@ -222,6 +222,8 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runAdapt(ctx, args[1:], out, getenv)
 	case "intake-reports":
 		return runIntakeReports(args[1:], out)
+	case "intake-records":
+		return runIntakeRecords(args[1:], out)
 	case "intake-issues":
 		return runIntakeIssues(args[1:], out)
 	case "retro-intake":
@@ -259,7 +261,7 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	case "token":
 		return runToken(ctx, args[1:], out)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, learned, draft, promote, repromote, adapt, intake-reports, intake-issues, retro-intake, screen, report, pack, doctor, eval, usage-flush, gold-add, judge-eval, prospect, self-audit, similarity, author, corpus-merge-check, corpus-pr-paths, nextid, token, or idf-build)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, learned, draft, promote, repromote, adapt, intake-reports, intake-records, intake-issues, retro-intake, screen, report, pack, doctor, eval, usage-flush, gold-add, judge-eval, prospect, self-audit, similarity, author, corpus-merge-check, corpus-pr-paths, nextid, token, or idf-build)", args[0])
 	}
 }
 
@@ -392,6 +394,7 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 	c := addCommonFlags(fs)
 	addr := fs.String("addr", ":8722", "listen address")
 	reportQueue := fs.String("report-queue", "", "directory report_outcome enqueues outcome reports into for `intake-reports` to materialize (ADR-0013 §E1); empty = legacy markdown-to-PR")
+	recordQueue := fs.String("record-queue", "", "directory record_experience enqueues contribution drafts into for `intake-records` to materialize (#0139, ADR-0030 phase 2); empty = return PR-ready markdown")
 	retroQueue := fs.String("retro-queue", "", "directory POST /retro spools session transcripts into for `retro-intake` to analyze (ADR-0018, #0065); empty disables the /retro endpoint")
 	issueQueue := fs.String("issue-queue", "", "directory report_issue enqueues agent-submitted issues into for `intake-issues` to materialize (#0066); empty = return PR-ready markdown")
 	telemetryLog := fs.String("telemetry-log", "", "append per-query gate-decision telemetry to this rotating JSONL file (#0067); empty = disabled")
@@ -443,7 +446,7 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 	if err != nil {
 		return fmt.Errorf("TWICESHY_TRUSTED_PROXIES: %w", err)
 	}
-	handler, err := server.New(server.Config{Index: ix, RecordCount: n, Token: token, TokenStore: ix, TokenIssuer: ix, SignupEnabled: signupEnabled, TrustedProxies: trustedProxies, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue, RetroQueue: *retroQueue, IssueQueue: *issueQueue, Logger: logger, Corpus: c.corpus, Telemetry: tele, TelemetryQueryText: *telemetryQueryText})
+	handler, err := server.New(server.Config{Index: ix, RecordCount: n, Token: token, TokenStore: ix, TokenIssuer: ix, SignupEnabled: signupEnabled, TrustedProxies: trustedProxies, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue, RetroQueue: *retroQueue, IssueQueue: *issueQueue, RecordQueue: *recordQueue, Logger: logger, Corpus: c.corpus, Telemetry: tele, TelemetryQueryText: *telemetryQueryText})
 	if err != nil {
 		alerter.Alert(ctx, "serve-fatal", fmt.Sprintf("serve could not build the handler: %v", err))
 		return err
