@@ -1,14 +1,14 @@
 ---
 id: 0131
 title: Alpha follow-ups from PR #511/#512 review: quota debit ordering, over-quota counter inflation, signup per-IP cap behind a proxy
-status: open
+status: closed
 severity: medium
 group: 
 depends_on: []
 forgejo: 532
 links:
   adr:
-  prs: []
+  prs: [538]
   issues: []
   regression:
 assets: []
@@ -22,3 +22,12 @@ Three accepted-not-blocking findings from the #0125/#0127 reviews, plus one pre-
 4. (pre-existing, unrelated to those PRs) scripts/metrics-digest.test.sh fails on main: "FAIL healthy digest missing push section" — verified present with a clean tree on 2026-07-06. The script-level test drifted from the digest's current output; not part of make ci so CI stays green.
 ## Notes
 1–3 land together in one small PR on the token/signup layer (tests first: cross-tenant quota-burn repro, counter-stops-at-quota assertion, XFF-with-trusted-proxy table). 4 is a scripts-only fix. Parent: #0124 (ADR-0030).
+
+## Status 2026-07-07 — CLOSED
+
+All four findings fixed TDD in PR #538 and deployed to the public instance
+same day (verified live: a spoofed X-Forwarded-For from outside resolves to
+the caller's real IP; quota debit now sits after the global limiter; stored
+calls cap at quota; metrics-digest test was a wall-clock-fragile fixture,
+realigned). The XFF multi-header-line spoof hardening came out of the
+off-pool review pass.

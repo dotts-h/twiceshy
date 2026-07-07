@@ -43,9 +43,9 @@ going live per the runbook.
 via Cloudflare, both repos kept private with a scoped corpus-pull credential —
 see 0129's closing status for the as-built record). All launch-gate children
 (0125+0126+0127+0129+0130) are now closed. The epic stays open for the
-post-launch children: #0131 (review follow-ups incl. the signup XFF cap fix —
-now live-relevant) and #0132 (live demo box). 0128's write tools remain OFF
-for alpha tenants pending its enablement decision.
+post-launch children: #0131 (closed 2026-07-07) and #0132 (live demo box).
+0128's write tools remain OFF for alpha tenants pending its enablement
+decision.
 
 ## Notes
 
