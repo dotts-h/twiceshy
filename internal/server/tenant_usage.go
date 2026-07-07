@@ -62,25 +62,35 @@ func isAlphaTenant(tenant string) bool {
 	return strings.HasPrefix(tenant, "tok_")
 }
 
+// contributionQuota is the slice of the index the write-path contribution
+// quota needs (ADR-0032): an atomic, fail-closed per-tenant, per-tool debit.
+// Narrowed to an interface, like tenantCallRecorder/usageStore, so it is
+// unit-testable with a stub and documents that — unlike tenant_usage
+// telemetry — this store's errors DO gate the request.
+type contributionQuota interface {
+	CountContributionCall(tokenID, tool string, limit int, now time.Time) (int, bool, error)
+}
+
 // checkContributionQuota enforces the per-tenant, per-tool CONTRIBUTION quota
 // (#0128) for the write-path tools (record_experience / report_outcome /
-// report_issue) — separate from tenantAuth's per-call rate quota (#0125) and
-// from the recordTenantCall telemetry counter it reuses for storage.
-// withTenantTelemetry has already bumped tenant_usage for THIS call before the
-// handler runs (#0126), so the count read here already includes it: crossing
-// limit on this very call is what rejects it, giving an exact boundary. The
-// operator tenant is never gated — this quota exists for untrusted alpha
-// tok_ tenants only.
+// report_issue) — separate from tenantAuth's per-call rate quota (#0125).
+// Enforcement debits its own atomic, fail-closed counter via contribQuota
+// (ADR-0032); the tenant_usage telemetry counter (#0126) only observes calls
+// and never gates them. The operator tenant is never gated — this quota
+// exists for untrusted alpha tok_ tenants only.
 func (h *handlers) checkContributionQuota(ctx context.Context, tool string, limit int) error {
 	tenant := TenantFromContext(ctx)
 	if !isAlphaTenant(tenant) {
 		return nil
 	}
-	calls, err := h.ix.TenantToolCallsToday(tenant, tool, time.Now())
+	if h.contribQuota == nil {
+		return fmt.Errorf("checking %s contribution quota: no contribution-quota store wired", tool)
+	}
+	calls, allowed, err := h.contribQuota.CountContributionCall(tenant, tool, limit, time.Now())
 	if err != nil {
 		return fmt.Errorf("checking %s contribution quota: %w", tool, err)
 	}
-	if calls > limit {
+	if !allowed {
 		return fmt.Errorf("%s daily contribution quota exceeded (%d/%d) for this token — try again tomorrow (UTC)", tool, calls, limit)
 	}
 	return nil

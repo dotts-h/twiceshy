@@ -324,6 +324,158 @@ func TestCountTenantCallConcurrentIncrements(t *testing.T) {
 	}
 }
 
+// TestCountContributionCallCapsAtLimitExactly is ADR-0032's boundary case:
+// limit 3 admits exactly calls 1-3, the 4th is rejected, and the stored total
+// never inflates past the limit (mirrors CountTokenCall's #0131 finding 2
+// pattern, now applied to the per-tool contribution-quota table).
+func TestCountContributionCallCapsAtLimitExactly(t *testing.T) {
+	ix := tokenIndex(t)
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+
+	for i := 1; i <= 4; i++ {
+		calls, allowed, err := ix.CountContributionCall("tok_deadbeef", "record_experience", 3, now)
+		if err != nil {
+			t.Fatalf("call %d: CountContributionCall: %v", i, err)
+		}
+		wantAllowed := i <= 3
+		if allowed != wantAllowed {
+			t.Fatalf("call %d: allowed = %v, want %v", i, allowed, wantAllowed)
+		}
+		if calls > 3 {
+			t.Fatalf("call %d: stored calls = %d, must never exceed limit 3", i, calls)
+		}
+	}
+
+	// A follow-up read must show the counter unchanged at 3, not inflated by
+	// the rejected 4th call.
+	calls, allowed, err := ix.CountContributionCall("tok_deadbeef", "record_experience", 3, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allowed {
+		t.Fatal("5th call: allowed = true, want false (limit already reached)")
+	}
+	if calls != 3 {
+		t.Fatalf("5th call: stored calls = %d, want 3 (unchanged)", calls)
+	}
+}
+
+// TestCountContributionCallUnlimitedAtZero mirrors CountTokenCall's daily_quota
+// <= 0 = unlimited semantics: limit 0 never rejects, and the counter keeps
+// incrementing.
+func TestCountContributionCallUnlimitedAtZero(t *testing.T) {
+	ix := tokenIndex(t)
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+
+	var last int
+	for i := 1; i <= 5; i++ {
+		calls, allowed, err := ix.CountContributionCall("tok_deadbeef", "report_outcome", 0, now)
+		if err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+		if !allowed {
+			t.Fatalf("call %d: allowed = false, want true (limit 0 = unlimited)", i)
+		}
+		last = calls
+	}
+	if last != 5 {
+		t.Fatalf("stored calls = %d, want 5 (unlimited still increments)", last)
+	}
+}
+
+// TestCountContributionCallPerToolIsolation guards the tool dimension: the
+// same token+day must keep independent counts per tool.
+func TestCountContributionCallPerToolIsolation(t *testing.T) {
+	ix := tokenIndex(t)
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+
+	for i := 0; i < 2; i++ {
+		if _, _, err := ix.CountContributionCall("tok_deadbeef", "record_experience", 10, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls, _, err := ix.CountContributionCall("tok_deadbeef", "report_outcome", 25, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("report_outcome calls = %d, want 1 (independent of record_experience's 2)", calls)
+	}
+
+	recordCalls, _, err := ix.CountContributionCall("tok_deadbeef", "record_experience", 10, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recordCalls != 3 {
+		t.Fatalf("record_experience calls = %d, want 3", recordCalls)
+	}
+}
+
+// TestCountContributionCallDayRolloverUTC guards the per-day reset: a
+// different UTC day starts a fresh count for the same token+tool.
+func TestCountContributionCallDayRolloverUTC(t *testing.T) {
+	ix := tokenIndex(t)
+	day1 := time.Date(2026, 7, 6, 23, 59, 0, 0, time.UTC)
+	day2 := time.Date(2026, 7, 7, 0, 1, 0, 0, time.UTC)
+
+	c1, allowed1, err := ix.CountContributionCall("tok_deadbeef", "record_experience", 1, day1)
+	if err != nil || c1 != 1 || !allowed1 {
+		t.Fatalf("day1: calls=%d allowed=%v err=%v, want 1/true", c1, allowed1, err)
+	}
+	c2, allowed2, err := ix.CountContributionCall("tok_deadbeef", "record_experience", 1, day2)
+	if err != nil || c2 != 1 || !allowed2 {
+		t.Fatalf("day2: calls=%d allowed=%v err=%v, want 1/true (UTC day rollover)", c2, allowed2, err)
+	}
+}
+
+// TestCountContributionCallLimitRaceSafe drives concurrent calls at the limit
+// boundary: the cap check and the increment must be one atomic SQLite
+// statement, not a Go-side read-then-write, or concurrent goroutines can all
+// pass a stale check and push the stored total past the limit. Guards under
+// `go test -race`, mirroring TestCountTokenCallQuotaCapRaceSafe.
+func TestCountContributionCallLimitRaceSafe(t *testing.T) {
+	ix := tokenIndex(t)
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+
+	const limit = 5
+	const goroutines, perG = 10, 10
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	allowedCount := 0
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < perG; i++ {
+				_, allowed, err := ix.CountContributionCall("tok_deadbeef", "record_experience", limit, now)
+				if err != nil {
+					t.Errorf("CountContributionCall: %v", err)
+					return
+				}
+				if allowed {
+					mu.Lock()
+					allowedCount++
+					mu.Unlock()
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	if allowedCount != limit {
+		t.Fatalf("allowedCount = %d, want exactly %d (never over the limit under race)", allowedCount, limit)
+	}
+
+	calls, allowed, err := ix.CountContributionCall("tok_deadbeef", "record_experience", limit, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allowed || calls != limit {
+		t.Fatalf("post-race read: calls=%d allowed=%v, want %d/false", calls, allowed, limit)
+	}
+}
+
 func TestListTokensIncludesTodayCalls(t *testing.T) {
 	ix := tokenIndex(t)
 	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
