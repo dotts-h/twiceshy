@@ -9,7 +9,7 @@ forgejo: 364
 links:
   adr:
   prs: []
-  issues: []
+  issues: [0133, 0134]
   regression:
 assets: []
 ---
@@ -72,3 +72,11 @@ cell. Under #0015 (corpus growth as a live feed).
   build-time/static traps verifiable on the brain; device-runtime iOS/Android traps need a real
   toolchain (deferred). Still far from the ~40–80/cell target — this proves the engine; the cell
   needs a sustained campaign.
+
+- **2026-07-07 — experience-shaped source expansion filed.** Web-research pass (Gemini via
+  `ask-agy`, all artifact/license URLs re-verified locally; Codex quota-limited) added six new
+  license-safe sources to `docs/WEB_SOURCES.md` and spawned two children: **#0133** (external-OSS
+  git trap miner — the #0094 engine pointed at permissively-licensed high-star repos; the only
+  web-scale *experience-shaped* source identified) and **#0134** (wtfjs/wtfpython WTFPL importer —
+  JS/Python gotcha collections). Priority per that review: #0133 > #0134 > the documentation-shaped
+  catalogs (Swift diagnostics, ESLint rules, KubePug, uv errors, React codes.json, deno_lint).

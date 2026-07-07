@@ -5,7 +5,7 @@ status: open
 severity: medium
 group: 0064
 depends_on: []
-forgejo:
+forgejo: 522
 links:
   adr: docs/adr/ADR-0021-corpus-data-product-split.md
   prs: []

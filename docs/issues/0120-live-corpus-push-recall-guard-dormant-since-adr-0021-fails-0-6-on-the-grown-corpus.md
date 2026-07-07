@@ -5,7 +5,7 @@ status: open
 severity: medium
 group:
 depends_on: []
-forgejo:
+forgejo: 521
 links:
   adr: docs/adr/ADR-0021-corpus-repo-decoupling.md
   prs: []
