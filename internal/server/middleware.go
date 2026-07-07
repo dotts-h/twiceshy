@@ -151,8 +151,7 @@ func withRequestLog(logger *slog.Logger, next http.Handler) http.Handler {
 		start := time.Now()
 		reqID := newRequestID()
 		rec := &responseRecorder{ResponseWriter: w}
-		holder := &tenantHolder{}
-		r = r.WithContext(withTenantHolder(r.Context(), holder))
+		r = r.WithContext(withReqState(r.Context()))
 		next.ServeHTTP(rec, r)
 
 		sessionID := r.Header.Get("Mcp-Session-Id")
@@ -165,6 +164,11 @@ func withRequestLog(logger *slog.Logger, next http.Handler) http.Handler {
 			status = http.StatusOK
 		}
 
+		var tenant string
+		if s := stateFromContext(r.Context()); s != nil {
+			tenant = s.tenant
+		}
+
 		logger.Info("http request",
 			slog.String("request_id", reqID),
 			slog.String("method", r.Method),
@@ -173,7 +177,7 @@ func withRequestLog(logger *slog.Logger, next http.Handler) http.Handler {
 			slog.Int64("http_duration_ms", time.Since(start).Milliseconds()),
 			slog.String("remote_addr", r.RemoteAddr),
 			slog.String("mcp_session_id", sessionID),
-			slog.String("tenant", holder.get()),
+			slog.String("tenant", tenant),
 		)
 	})
 }

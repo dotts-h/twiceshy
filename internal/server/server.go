@@ -183,20 +183,19 @@ func New(cfg Config) (*Server, error) {
 	mux.HandleFunc("/statz", h.statzHTTP)
 	mux.Handle("/", mcpHandler)
 
-	// Middleware chain (outermost first): access log, then reject unauthenticated
-	// requests before any work (so a 401 never even reaches the global limiter),
-	// then rate-limit globally, then debit the tenant's daily quota, then bound
-	// time and body size. withDailyQuota sits AFTER withRateLimit deliberately
-	// (#0131 finding 1): it used to be debited inside tenantAuth, ahead of the
-	// global limiter, so a caller rejected by the shared bucket had already
-	// burned one of its own daily calls for a request that never ran.
+	// Middleware chains built via buildChain as ordered declarations.
+	// See pipeline.go and ADR-0033 for details.
 	limiter := newTokenBucket(defaultRatePerSec, defaultBurst)
-	hardened := withRateLimit(logger, limiter,
-		withDailyQuota(logger, cfg.TokenStore,
-			withTimeout(requestTimeout,
-				withMaxBytes(maxRequestBytes, mux))))
-	authed := withRequestLog(logger,
-		tenantAuth(logger, cfg.Token, cfg.TokenStore, hardened))
+
+	authed, err := buildChain(authedStages(logger, limiter, cfg.Token, cfg.TokenStore), mux)
+	if err != nil {
+		return nil, err
+	}
+
+	signup, err := buildChain(signupStages(logger, limiter), http.HandlerFunc(h.signupHTTP))
+	if err != nil {
+		return nil, err
+	}
 
 	// Health probes bypass auth + rate-limit so a container HEALTHCHECK and an
 	// external uptime monitor can reach them unauthenticated: /healthz = liveness
@@ -209,7 +208,7 @@ func New(cfg Config) (*Server, error) {
 	// /signup (#0127) is public like the probes above (no bearer), but a self-serve
 	// token mint is real work, so it still sits behind the global rate limiter
 	// (shared with the authed path) plus its own per-IP daily cap in signupHTTP.
-	outer.Handle("/signup", withRateLimit(logger, limiter, http.HandlerFunc(h.signupHTTP)))
+	outer.Handle("/signup", signup)
 	outer.Handle("/", authed)
 	return &Server{Handler: outer, h: h}, nil
 }
