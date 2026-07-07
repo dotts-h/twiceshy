@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- twiceshy — "The Bite": a record with a piece missing, and the sting that
+       took it. Palette = the site's own tokens (ink/amber/sting). -->
+  <rect width="64" height="64" rx="14" fill="#241C12"/>
+  <circle cx="32" cy="34" r="22" fill="#F5A800"/>
+  <circle cx="47" cy="17" r="11" fill="#241C12"/>
+  <circle cx="44" cy="20" r="3.4" fill="#C8442C"/>
+</svg>

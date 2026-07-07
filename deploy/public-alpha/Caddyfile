@@ -45,11 +45,11 @@ twiceshy.app, www.twiceshy.app {
 	redir /docs.html /docs permanent
 	redir /terms.html /terms permanent
 
-	# robots.txt / llms.txt / sitemap.xml are plain static files under
-	# web/landing/ — without this handle they'd fall through to the
-	# catch-all `handle` below and reverse-proxy to twiceshy instead of
-	# being served, so they'd never be reachable.
-	@seo path /robots.txt /llms.txt /sitemap.xml
+	# static assets (SEO files + brand icons) under web/landing/ — without
+	# this handle they'd fall through to the catch-all `handle` below and
+	# reverse-proxy to twiceshy instead of being served, so they'd never be
+	# reachable.
+	@seo path /robots.txt /llms.txt /sitemap.xml /favicon.svg /favicon.ico /favicon-32.png /apple-touch-icon.png /og-image.png /logo-512.png
 	handle @seo {
 		file_server
 	}
