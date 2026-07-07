@@ -15,12 +15,12 @@
 #     whole vhost reverse-proxies to twiceshy:8722 (this is what MCP clients
 #     configure; /healthz, /readyz, /signup, /statz are reachable here too).
 #
-# X-Forwarded-For: reverse_proxy sets this by default. KNOWN LIMITATION at
-# launch (#0131): the signup per-IP daily cap keys on RemoteAddr, so every
-# client behind this proxy shares Caddy's IP — the cap is effectively
-# global-3/day until trusted-proxy XFF handling lands server-side.
+# X-Forwarded-For: reverse_proxy sets this by default. The server honors it
+# only when TWICESHY_TRUSTED_PROXIES covers this container's network (#0131),
+# which makes the signup per-IP cap per-visitor — set that env on the twiceshy
+# service or the cap degrades to keying on Caddy's own IP.
 {
-	# Let's Encrypt account contact — OPEN DECISION placeholder, set to a real inbox.
+	# Let's Encrypt account contact (certificate expiry notices).
 	email horia.c.radulescu@gmail.com
 }
 
