@@ -49,6 +49,14 @@ func (h *handlers) retroHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "retro capture is not enabled on this server", http.StatusServiceUnavailable)
 		return
 	}
+	// ADR-0031 (#0136): the alpha opens record_experience/report_outcome only
+	// — retro spools directly into the off-pool analyzer queue, so a tok_
+	// tenant is refused before any body read/screen/spool work. Operator
+	// behavior is unchanged.
+	if isAlphaTenant(TenantFromContext(r.Context())) {
+		http.Error(w, "retro capture is operator-only in the alpha", http.StatusForbidden)
+		return
+	}
 
 	var args RetroArgs
 	if err := json.NewDecoder(r.Body).Decode(&args); err != nil {

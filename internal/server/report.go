@@ -55,11 +55,14 @@ func (h *handlers) reportOutcome(ctx context.Context, _ *mcp.CallToolRequest, ar
 	start := time.Now()
 	const tool = "report_outcome"
 
+	tenant := TenantFromContext(ctx)
+	alpha := isAlphaTenant(tenant)
+
 	if err := validateReportSize(args); err != nil {
 		h.logToolError(tool, start, err)
 		return nil, ReportResult{}, err
 	}
-	if err := h.checkContributionQuota(ctx, tool, alphaReportDailyQuota); err != nil {
+	if err := h.checkContributionQuota(ctx, tool, alphaContributionQuotas[tool]); err != nil {
 		h.logToolError(tool, start, err)
 		return nil, ReportResult{}, err
 	}
@@ -79,12 +82,48 @@ func (h *handlers) reportOutcome(ctx context.Context, _ *mcp.CallToolRequest, ar
 		return nil, ReportResult{}, fmt.Errorf("cannot report against %s: %w", args.RecordID, err)
 	}
 
+	// ADR-0031 full alpha posture (#0136): tighter size cap, then fail-closed
+	// secret rejection — BEFORE any id allocation, spooling, or record
+	// building, so a rejected submission never lands anywhere.
+	if alpha {
+		if len(args.Evidence) > alphaMaxEvidenceBytes {
+			err := fmt.Errorf("evidence too large for an alpha tenant: %d bytes (max %d)", len(args.Evidence), alphaMaxEvidenceBytes)
+			h.logToolError(tool, start, err)
+			return nil, ReportResult{}, err
+		}
+		if err := rejectAlphaSecrets(tool, args.Evidence, args.Author, args.Session); err != nil {
+			h.logToolError(tool, start, err)
+			return nil, ReportResult{}, err
+		}
+	}
+
 	id, err := h.allocateNextID(ctx)
 	if err != nil {
 		h.logToolError(tool, start, err)
 		return nil, ReportResult{}, err
 	}
-	meta := ingest.Meta{ID: id, Author: args.Author, Now: time.Now().UTC().Format("2006-01-02")}
+
+	// TENANT ORIGIN STAMPING (#0128, ADR-0031): a tok_ tenant's counter-record
+	// author is FORCED to "alpha:<token_id>" everywhere it is persisted —
+	// same trust key and display-note pattern as record_experience. The
+	// display note is prepended AFTER the secret scan above (it is
+	// server-constructed, never scanned as untrusted input). Only prepended
+	// when evidence is non-empty: ingest.BuildReport classifies a bare
+	// report on strings.TrimSpace(Evidence)=="" (its own triage-flag
+	// marking) — manufacturing non-empty evidence out of the note alone
+	// would defeat that classification for exactly the hostile-tenant class
+	// it exists to catch.
+	reportAuthor, evidence := args.Author, args.Evidence
+	if alpha {
+		var display string
+		reportAuthor, display = alphaStampAuthor(tenant, args.Author)
+		if display != "" && strings.TrimSpace(evidence) != "" {
+			evidence = fmt.Sprintf("_Submitted as: %s (untrusted alpha tenant; recorded origin: %s)_\n\n%s",
+				display, reportAuthor, evidence)
+		}
+	}
+
+	meta := ingest.Meta{ID: id, Author: reportAuthor, Now: time.Now().UTC().Format("2006-01-02")}
 	if args.Session != "" {
 		s := args.Session
 		meta.Session = &s
@@ -93,7 +132,7 @@ func (h *handlers) reportOutcome(ctx context.Context, _ *mcp.CallToolRequest, ar
 	rec, err := ingest.BuildReport(ingest.ReportInput{
 		RecordID: args.RecordID,
 		Outcome:  args.Outcome,
-		Evidence: args.Evidence,
+		Evidence: evidence,
 	}, meta)
 	if err != nil {
 		h.logToolError(tool, start, err)
@@ -117,8 +156,8 @@ func (h *handlers) reportOutcome(ctx context.Context, _ *mcp.CallToolRequest, ar
 		if _, err := spool.Enqueue(h.reportQueue, spool.Report{
 			RecordID:   args.RecordID,
 			Outcome:    args.Outcome,
-			Evidence:   args.Evidence,
-			Author:     args.Author,
+			Evidence:   evidence,
+			Author:     reportAuthor,
 			Session:    args.Session,
 			ReportedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		}); err != nil {

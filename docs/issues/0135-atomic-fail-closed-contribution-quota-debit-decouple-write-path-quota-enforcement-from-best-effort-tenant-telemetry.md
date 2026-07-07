@@ -1,14 +1,14 @@
 ---
 id: 0135
 title: Atomic fail-closed contribution-quota debit — decouple write-path quota enforcement from best-effort tenant telemetry
-status: open
+status: closed
 severity: high
 group: 0124
 depends_on: []
 forgejo:
 links:
   adr: ADR-0032
-  prs: []
+  prs: [542]
   issues: [0128, 0131]
   regression:
 assets: []

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dotts-h/twiceshy/internal/index"
 	"github.com/dotts-h/twiceshy/internal/server"
@@ -125,6 +126,37 @@ func TestRetroQueuesCleanTranscript(t *testing.T) {
 	}
 	if tr.SessionID != "sess-1" || tr.Author != "claude" || tr.Reason != "logout" {
 		t.Errorf("spooled metadata mismatch: %+v", tr)
+	}
+}
+
+// TestRetroHTTPAlphaTenantForbidden is ADR-0031's /retro invariant (#0136):
+// the alpha opens record_experience/report_outcome only — a tok_ tenant is
+// refused 403 before any body read/screen/spool work, and nothing is
+// spooled. Operator behavior (202) is unaffected — see TestRetroQueuesCleanTranscript.
+func TestRetroHTTPAlphaTenantForbidden(t *testing.T) {
+	ix, err := index.Open(filepath.Join(t.TempDir(), "ix.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = ix.Close() })
+	queue := t.TempDir()
+	fullToken, _, err := ix.IssueToken("alpha-retro-forbidden-test", 100000, 100000, time.Now())
+	if err != nil {
+		t.Fatalf("IssueToken: %v", err)
+	}
+	h, err := server.New(server.Config{Index: ix, Token: token, TokenStore: ix, RetroQueue: queue})
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	ts := httptest.NewServer(h)
+	t.Cleanup(ts.Close)
+
+	resp := postRetro(t, ts.URL, fullToken, map[string]any{"transcript": "an alpha tenant transcript long enough to pass"})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (retro capture is operator-only in the alpha)", resp.StatusCode)
+	}
+	if files, _ := spool.List(queue); len(files) != 0 {
+		t.Errorf("an alpha tenant's retro call spooled %d files, want 0", len(files))
 	}
 }
 
