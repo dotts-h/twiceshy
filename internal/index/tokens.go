@@ -161,20 +161,42 @@ func (ix *Index) AuthenticateToken(full string, now time.Time) (TokenInfo, error
 	return info, nil
 }
 
-// CountTokenCall atomically increments today's call count and returns the new total.
-func (ix *Index) CountTokenCall(id string, now time.Time) (int, error) {
+// CountTokenCall atomically increments today's call count for id, UNLESS it
+// has already reached its tokens.daily_quota (<= 0 = unlimited), in which case
+// the row is left unchanged. This used to increment unconditionally and let
+// the caller compare after the fact (#0131 finding 2): under concurrent
+// requests at the boundary, or simply many requests after quota was reached,
+// that count-then-check let the stored total grow without bound even though
+// every over-quota call was rejected. The cap check now lives in the same
+// SQLite statement as the increment (the UPSERT's conditional WHERE), so
+// there is no read-then-write race window in Go — verified under -race.
+// Returns the resulting (possibly unchanged) total and whether this call was
+// admitted.
+func (ix *Index) CountTokenCall(id string, now time.Time) (calls int, allowed bool, err error) {
 	day := now.UTC().Format("2006-01-02")
-	var calls int
-	err := ix.db.QueryRow(
+	err = ix.db.QueryRow(
 		`INSERT INTO token_usage (token_id, day, calls) VALUES (?, ?, 1)
 		 ON CONFLICT(token_id, day) DO UPDATE SET calls = calls + 1
+		 WHERE (SELECT daily_quota FROM tokens WHERE id = ?) <= 0
+		    OR calls < (SELECT daily_quota FROM tokens WHERE id = ?)
 		 RETURNING calls`,
-		id, day,
+		id, day, id, id,
 	).Scan(&calls)
-	if err != nil {
-		return 0, fmt.Errorf("count token call: %w", err)
+	if errors.Is(err, sql.ErrNoRows) {
+		// The conditional UPDATE was skipped: quota already reached today.
+		// Read the (unchanged) stored total back for the caller to report.
+		if selErr := ix.db.QueryRow(
+			`SELECT calls FROM token_usage WHERE token_id = ? AND day = ?`,
+			id, day,
+		).Scan(&calls); selErr != nil {
+			return 0, false, fmt.Errorf("count token call: quota check: %w", selErr)
+		}
+		return calls, false, nil
 	}
-	return calls, nil
+	if err != nil {
+		return 0, false, fmt.Errorf("count token call: %w", err)
+	}
+	return calls, true, nil
 }
 
 // CountTenantCall atomically increments today's per-tenant, per-tool call

@@ -69,6 +69,23 @@ if contains "$out" "usage: ERROR"; then ok "missing usage db marks ERROR"; else 
 
 # ---- layer 2: metrics-digest.sh (seams stubbed) ----------------------------------
 
+# Unlike layer 1 above (which pins "now" via aggregate.py's --now), main() below
+# calls aggregate.py with no --now override, so it windows against the REAL
+# wall clock — $GD's hardcoded 2026-07-01 timestamps age out of the 24h window
+# as real time passes (#0131: this is exactly what broke "healthy digest missing
+# push section" once "now" moved past 2026-07-02). Anchor this fixture's
+# timestamps a couple of hours behind the actual current time instead, so the
+# test stays green regardless of when it runs.
+recent_ts() { date -u -d "-$1 minutes" +%Y-%m-%dT%H:%M:%SZ; }
+GD_RECENT="$TMP/gate-decisions-recent.jsonl"
+cat >"$GD_RECENT" <<EOF
+{"ts":"$(recent_ts 120)","channel":"push","trigger":"prompt","count":1,"served":[{"id":"exp-0001","score":1}],"query_text":"how to fix foo bar baz"}
+{"ts":"$(recent_ts 115)","channel":"push","trigger":"prompt","count":0,"served":[]}
+{"ts":"$(recent_ts 110)","channel":"push","trigger":"error","count":1,"served":[{"id":"exp-0001","score":1}]}
+{"ts":"$(recent_ts 100)","channel":"search","count":1,"served":[{"id":"exp-0002","score":1}]}
+{"ts":"$(recent_ts 95)","channel":"search","count":0,"served":[]}
+EOF
+
 export TWICESHY_NTFY_ENV="$TMP/ntfy.env" # empty: no NTFY_URL -> notify is a log-only no-op
 : >"$TWICESHY_NTFY_ENV"
 export DIGEST_HOURS=24
@@ -83,7 +100,7 @@ reset() { NOTIFIED=""; }
 
 # Healthy tick: both sources fetch, journal seams return canned drain output.
 reset
-fetch_gate_decisions() { cp "$GD" "$1"; }
+fetch_gate_decisions() { cp "$GD_RECENT" "$1"; }
 fetch_usage_db() { cp "$DB" "$1"; }
 journal_retro() { printf '  confirmed 2 helpful (from x)\n  skip y: unprocessable after 3 attempts (err)\n'; }
 journal_validate() { printf 'done: run-1, PR #5, anomaly=0\n'; }
