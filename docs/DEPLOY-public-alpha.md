@@ -281,6 +281,21 @@ SHA already matches the volume marker. Pause by disabling the timer:
   > **DURABLE TENANT REGISTRY WARNING**
   > The `twiceshy-data` volume's database (`twiceshy.db`) holds the **TENANT REGISTRY** (hash-only token credentials). Deleting or recreating the volume or the database file revokes every issued token irrecoverably; it is **NOT** a rebuildable cache. Cache rebuilds (via `twiceshy index`) do NOT touch or restore these tables ([ADR-0034](adr/ADR-0034-tenant-registry-is-not-derived-state.md)).
 
+## Contribution spools (write path, #0139)
+
+To capture contributions from alpha users without exposing the private corpus repository, the VPS write path spools submissions locally.
+
+1. **Service Configuration:** The three serve queue flags are configured in the `twiceshy` service command in [deploy/public-alpha/compose.yaml](../deploy/public-alpha/compose.yaml):
+   - `-record-queue /data/spool/records`
+   - `-report-queue /data/spool/reports`
+   - `-issue-queue /data/spool/issues`
+2. **Storage:** The spool directories live inside the `twiceshy-data` Docker volume.
+3. **Pull mechanism:** The brain pulls spooled entries periodically using [deploy/public-alpha/spool-pull.sh](../deploy/public-alpha/spool-pull.sh) via a cron job/timer. This script follows a one-way claim → stream (tar over SSH) → delete-by-name pattern. No LAN credentials exist on the VPS; the brain initiates all SSH connections to the VPS as root.
+4. **Ingestion & Validation:**
+   - Spooled records and reports are automatically drained on the brain by [scripts/scheduled-validate.sh](../scripts/scheduled-validate.sh) calling `intake-records` and `intake-reports`, feeding them into the standard corpus quarantine ladder.
+   - Spooled issues are pulled to the brain but are not processed automatically. They must be drained manually using `twiceshy intake-issues` since `report_issue` is a triage surface and out of scope for automated phase-2 pipeline integration.
+5. **Fail-Closed Behavior:** If a spool directory becomes unwritable, the corresponding client write tool call (e.g. `record_experience`) fails with an error rather than silently discarding the user's submission (PR #547).
+
 ## Known limitation at launch — signup rate limit behind the proxy (#0131)
 
 The signup per-IP daily cap (3/day) keys on `RemoteAddr`, which behind this

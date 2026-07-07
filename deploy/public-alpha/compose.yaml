@@ -27,6 +27,8 @@ services:
       TWICESHY_SIGNUP: "1" # public alpha: self-serve token signup (#0127)
     volumes:
       - twiceshy-data:/data # corpus + this instance's OWN sqlite index/tokens (fresh; not the LAN db)
+    # spool dirs are created by serve itself (spool.enqueueJSON MkdirAll) inside the twiceshy-data volume; the brain pulls them one-way (spool-pull.sh) — ADR-0030 phase 2, #0139.
+    command: ["serve", "-corpus", "/data/corpus", "-db", "/data/twiceshy.db", "-addr", ":8722", "-record-queue", "/data/spool/records", "-report-queue", "/data/spool/reports", "-issue-queue", "/data/spool/issues"]
     expose:
       - "8722" # internal only — Caddy is the sole public listener (80/443)
     mem_limit: 1g
