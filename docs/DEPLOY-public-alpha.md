@@ -260,21 +260,26 @@ SHA already matches the volume marker. Pause by disabling the timer:
 - **Application alerts:** `serve`'s own `TWICESHY_ALERT_URL` (fatal index
   build/bind failures) and `corpus-refresh.sh`'s alerts (failed reload/mirror)
   both fire to the same ntfy topic set in `.env` — no separate wiring needed.
-- **Backups (daily, sqlite state):**
+- **Backups (daily, sqlite state, offsite pull):**
+
+  The VPS cron takes a crash-consistent snapshot with `sqlite3 .backup`
+  (transactionally safe against the live db, unlike a plain `cp`). As
+  deployed, verbatim:
 
   ```sh
-  # /etc/cron.d/twiceshy-backup — snapshot the token/telemetry db INTO the
-  # same volume (cheap, but co-located — see the open offsite question below).
-  0 3 * * * twiceshy docker run --rm -v twiceshy-data:/data alpine \
-    sh -c 'cp /data/twiceshy.db "/data/backup-$(date +\%Y\%m\%d).db" && \
-           find /data -maxdepth 1 -name "backup-*.db" -mtime +7 -delete'
+  # Nightly crash-consistent sqlite snapshot INTO the volume (03:00); the brain
+  # pulls it offsite at 04:30. sqlite .backup is transactionally safe against a
+  # live db, unlike a plain cp of the file.
+  0 3 * * * root docker run --rm -v twiceshy-data:/data alpine:3.20 sh -c 'apk add -q sqlite && sqlite3 /data/twiceshy.db ".backup /data/backup-$(date +\%Y\%m\%d).db" && find /data -maxdepth 1 -name "backup-*.db" -mtime +7 -delete'
   ```
 
-  **Open question (not resolved here):** this backs up onto the same volume,
-  so it does not survive a lost/corrupted disk. An offsite copy (e.g.
-  `scp`-less: push to an S3-compatible bucket, or pull from the brain like the
-  corpus sync but in reverse) is deliberately left as a follow-up — flag it
-  before this instance holds tokens anyone would be upset to lose.
+  The brain pulls the latest snapshot offsite nightly at 04:30
+  (`twiceshy-backup-pull.timer`), runs `PRAGMA integrity_check` on each pull,
+  keeps 14 days of retention; the restore path is tested.
+
+  > [!WARNING]
+  > **DURABLE TENANT REGISTRY WARNING**
+  > The `twiceshy-data` volume's database (`twiceshy.db`) holds the **TENANT REGISTRY** (hash-only token credentials). Deleting or recreating the volume or the database file revokes every issued token irrecoverably; it is **NOT** a rebuildable cache. Cache rebuilds (via `twiceshy index`) do NOT touch or restore these tables ([ADR-0034](adr/ADR-0034-tenant-registry-is-not-derived-state.md)).
 
 ## Known limitation at launch — signup rate limit behind the proxy (#0131)
 
