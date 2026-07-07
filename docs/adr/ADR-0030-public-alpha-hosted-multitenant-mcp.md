@@ -1,7 +1,6 @@
 # ADR-0030: Public alpha as a hosted multi-tenant remote-MCP service (open-core)
 
-- **Status:** Proposed (deciders: claude drafted from the 2026-07-06 productization
-  discussion; horia to ratify).
+- **Status:** Accepted (ratified by launch: https://twiceshy.app live 2026-07-07; read alpha shipped, write alpha gated on the ADR-0031/0032 pre-enablement work — now closed).
 - **Related:** ADR-0002 (AGPL-3.0 + CLA — the licensing posture this decision
   activates commercially), ADR-0001 §6 (PR/quarantine trust boundary — reused as
   the contribution moderation pipeline), ADR-0013/0016/0020 (the judge pipeline

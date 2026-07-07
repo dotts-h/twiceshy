@@ -49,7 +49,13 @@ else: print('wait')")"
     ok)   code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$HOST/api/v1/repos/$REPO/pulls/$PR/merge" \
             -H "Authorization: token $TOK" -H "Content-Type: application/json" \
             -d '{"Do":"merge","delete_branch_after_merge":true}')
-          echo "CI green → merged PR #$PR (HTTP $code)"; exit 0 ;;
+          if [ "$code" -eq 200 ]; then
+            echo "CI green → merged PR #$PR (HTTP $code)"
+            exit 0
+          else
+            echo "CI green but merge FAILED (HTTP $code)" >&2
+            exit 1
+          fi ;;
     fail) echo "CI FAILED for PR #$PR — left open for inspection"; exit 1 ;;
   esac
   sleep 12
