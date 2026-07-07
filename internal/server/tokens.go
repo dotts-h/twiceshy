@@ -38,28 +38,39 @@ func TenantFromContext(ctx context.Context) string {
 	return ""
 }
 
-// tenantHolder carries the tenant id upstream to the access logger: withRequestLog
-// runs outside tenantAuth (so rejects are logged), but a context value set by the
-// inner middleware is invisible to the outer one — the holder bridges that. Same
-// request goroutine writes then reads, so a plain field suffices.
-type tenantHolder struct{ v string }
-
-func (t *tenantHolder) get() string {
-	if t == nil {
-		return ""
-	}
-	return t.v
+// reqState holds request-scoped mutable state. It exists because the access logger runs
+// OUTSIDE tenantAuth so rejected requests are logged too, and a context value set
+// downstream is invisible upstream. The mutable state struct seeded upstream bridges
+// that, matching the rationale of the deleted tenantHolder (ADR-0033).
+type reqState struct {
+	tenant string
 }
 
-type tenantHolderKey struct{}
+type reqStateKey struct{}
 
-func withTenantHolder(ctx context.Context, h *tenantHolder) context.Context {
-	return context.WithValue(ctx, tenantHolderKey{}, h)
+// withReqState seeds a new mutable reqState into the context. This exists because the
+// access logger runs OUTSIDE tenantAuth so rejected requests are logged too, and a context
+// value set downstream is invisible upstream. The mutable reqState struct bridges that (ADR-0033).
+func withReqState(ctx context.Context) context.Context {
+	return context.WithValue(ctx, reqStateKey{}, &reqState{})
+}
+
+// stateFromContext retrieves the mutable reqState from the context. This exists because the
+// access logger runs OUTSIDE tenantAuth so rejected requests are logged too, and a context
+// value set downstream is invisible upstream. The mutable reqState struct bridges that (ADR-0033).
+func stateFromContext(ctx context.Context) *reqState {
+	if ctx == nil {
+		return nil
+	}
+	if v, ok := ctx.Value(reqStateKey{}).(*reqState); ok {
+		return v
+	}
+	return nil
 }
 
 func withTenant(ctx context.Context, tenant string) context.Context {
-	if h, ok := ctx.Value(tenantHolderKey{}).(*tenantHolder); ok {
-		h.v = tenant
+	if s := stateFromContext(ctx); s != nil {
+		s.tenant = tenant
 	}
 	return context.WithValue(ctx, tenantKey{}, tenant)
 }
