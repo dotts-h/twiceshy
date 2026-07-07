@@ -21,8 +21,9 @@ const tenantOpToken = "s3cret-operator-token"
 type stubTokenStore struct {
 	mu      sync.Mutex
 	auth    func(full string, now time.Time) (index.TokenInfo, error)
-	count   func(id string, now time.Time) (int, error)
+	count   func(id string, now time.Time) (int, bool, error)
 	countN  map[string]int
+	quotas  map[string]int // id -> daily quota for the default CountTokenCall's cap check; 0/absent = unlimited
 	authFn  map[string]index.TokenInfo
 	revoked map[string]bool
 }
@@ -43,7 +44,10 @@ func (s *stubTokenStore) AuthenticateToken(full string, now time.Time) (index.To
 	return info, nil
 }
 
-func (s *stubTokenStore) CountTokenCall(id string, now time.Time) (int, error) {
+// CountTokenCall mirrors the production cap semantics (index.Index.CountTokenCall,
+// #0131): quota <= 0 (absent from quotas) is unlimited; otherwise it admits
+// exactly quota calls/day and leaves the stored count unchanged afterward.
+func (s *stubTokenStore) CountTokenCall(id string, now time.Time) (int, bool, error) {
 	if s.count != nil {
 		return s.count(id, now)
 	}
@@ -52,10 +56,19 @@ func (s *stubTokenStore) CountTokenCall(id string, now time.Time) (int, error) {
 	if s.countN == nil {
 		s.countN = make(map[string]int)
 	}
+	quota := s.quotas[id]
+	if quota > 0 && s.countN[id] >= quota {
+		return s.countN[id], false, nil
+	}
 	s.countN[id]++
-	return s.countN[id], nil
+	return s.countN[id], true, nil
 }
 
+// tenantProbeHandler builds the same three-middleware order as server.New
+// (#0131): tenantAuth (auth + per-token rate), then the global limiter, then
+// withDailyQuota — so a test exercising this handler sees production ordering,
+// including that a global 429 must run before (and so never burns) the quota
+// debit.
 func tenantProbeHandler(t *testing.T, store TokenStore) http.Handler {
 	t.Helper()
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -65,7 +78,7 @@ func tenantProbeHandler(t *testing.T, store TokenStore) http.Handler {
 	})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	limiter := newTokenBucket(1000, 1000)
-	hardened := withRateLimit(logger, limiter, inner)
+	hardened := withRateLimit(logger, limiter, withDailyQuota(logger, store, inner))
 	return tenantAuth(logger, tenantOpToken, store, hardened)
 }
 
@@ -159,6 +172,7 @@ func TestTenantAuthOverQuota429(t *testing.T) {
 			full: {ID: "tok_quota001", DailyQuota: 2, RatePerMin: 1000},
 		},
 		countN: make(map[string]int),
+		quotas: map[string]int{"tok_quota001": 2},
 	}
 	h := tenantProbeHandler(t, store)
 
@@ -182,6 +196,55 @@ func TestTenantAuthOverQuota429(t *testing.T) {
 				t.Fatal("quota 429 must carry Retry-After")
 			}
 		}
+	}
+}
+
+// TestGlobalRateLimit429DoesNotBurnQuota is #0131 finding 1: the middleware
+// chain used to debit a tok_ tenant's daily quota INSIDE tenantAuth, which ran
+// before (outside) the shared global rate limiter — so a caller rejected by
+// the global bucket had already had one of its own daily calls counted against
+// it, for a request that never even reached the handler. The fix moves the
+// quota debit (withDailyQuota) to run AFTER the global limiter, so a global
+// 429 must leave the tenant's usage counter untouched.
+func TestGlobalRateLimit429DoesNotBurnQuota(t *testing.T) {
+	full := "tok_globl001_" + strings.Repeat("g", 32)
+	store := &stubTokenStore{
+		authFn: map[string]index.TokenInfo{
+			full: {ID: "tok_globl001", DailyQuota: 1000, RatePerMin: 1000},
+		},
+		countN: make(map[string]int),
+	}
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	// A global bucket with zero tokens and zero refill always rejects.
+	exhausted := newTokenBucket(0, 0)
+	chain := tenantAuth(logger, tenantOpToken, store,
+		withRateLimit(logger, exhausted,
+			withDailyQuota(logger, store, inner)))
+
+	resp := authGet(t, chain, full)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429 from the exhausted global limiter", resp.StatusCode)
+	}
+	if got := store.countN["tok_globl001"]; got != 0 {
+		t.Fatalf("global 429 must not burn quota: token_usage calls = %d, want 0", got)
+	}
+
+	// Confirm the quota is still fully available: swap in an always-allow
+	// global bucket and the same request must now succeed and debit exactly once.
+	chain = tenantAuth(logger, tenantOpToken, store,
+		withRateLimit(logger, newTokenBucket(1000, 1000),
+			withDailyQuota(logger, store, inner)))
+	resp = authGet(t, chain, full)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 once the global limiter allows", resp.StatusCode)
+	}
+	if got := store.countN["tok_globl001"]; got != 1 {
+		t.Fatalf("token_usage calls = %d, want 1 (debited exactly once, on the admitted request)", got)
 	}
 }
 

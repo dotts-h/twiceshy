@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -54,6 +55,13 @@ type Config struct {
 	// Default false — the LAN instance never sets it. When false, /signup still
 	// resolves to the route but answers 404, never revealing whether it is wired.
 	SignupEnabled bool
+	// TrustedProxies, when set, lets POST /signup's per-IP daily cap key off
+	// X-Forwarded-For instead of RemoteAddr — but ONLY when RemoteAddr itself
+	// matches one of these networks (#0131): behind a reverse proxy, RemoteAddr
+	// is always the proxy's address, so without this the cap effectively capped
+	// the whole deployment rather than one caller. nil/empty = current
+	// RemoteAddr-only behavior (the LAN instance, with no reverse proxy in front).
+	TrustedProxies []*net.IPNet
 	// Repo, when set, lets fingerprint matching also use app-scoped
 	// fingerprints for that repository identifier.
 	Repo string
@@ -141,7 +149,7 @@ func New(cfg Config) (*Server, error) {
 		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	}
 
-	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, retroQueue: cfg.RetroQueue, issueQueue: cfg.IssueQueue, corpus: cfg.Corpus, telemetry: cfg.Telemetry, queryText: cfg.TelemetryQueryText, signupEnabled: cfg.SignupEnabled, signupIssuer: cfg.TokenIssuer, signupLimiter: newSignupIPLimiter(time.Now)}
+	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, retroQueue: cfg.RetroQueue, issueQueue: cfg.IssueQueue, corpus: cfg.Corpus, telemetry: cfg.Telemetry, queryText: cfg.TelemetryQueryText, signupEnabled: cfg.SignupEnabled, signupIssuer: cfg.TokenIssuer, signupLimiter: newSignupIPLimiter(time.Now), trustedProxies: cfg.TrustedProxies}
 	h.recordCount.Store(int64(cfg.RecordCount))
 	h.usage = newUsageRecorder(cfg.Index, logger, time.Now)
 	h.tenantCalls = cfg.Index
@@ -175,11 +183,17 @@ func New(cfg Config) (*Server, error) {
 	mux.Handle("/", mcpHandler)
 
 	// Middleware chain (outermost first): access log, then reject unauthenticated
-	// requests before any work, then rate-limit, then bound time and body size.
+	// requests before any work (so a 401 never even reaches the global limiter),
+	// then rate-limit globally, then debit the tenant's daily quota, then bound
+	// time and body size. withDailyQuota sits AFTER withRateLimit deliberately
+	// (#0131 finding 1): it used to be debited inside tenantAuth, ahead of the
+	// global limiter, so a caller rejected by the shared bucket had already
+	// burned one of its own daily calls for a request that never ran.
 	limiter := newTokenBucket(defaultRatePerSec, defaultBurst)
 	hardened := withRateLimit(logger, limiter,
-		withTimeout(requestTimeout,
-			withMaxBytes(maxRequestBytes, mux)))
+		withDailyQuota(logger, cfg.TokenStore,
+			withTimeout(requestTimeout,
+				withMaxBytes(maxRequestBytes, mux))))
 	authed := withRequestLog(logger,
 		tenantAuth(logger, cfg.Token, cfg.TokenStore, hardened))
 
@@ -238,9 +252,10 @@ type handlers struct {
 
 	tenantCalls tenantCallRecorder // per-tenant per-tool call counter (#0126); nil in unit tests that construct handlers directly
 
-	signupEnabled bool             // gates POST /signup; false answers 404 (#0127)
-	signupIssuer  TokenIssuer      // mints tokens for /signup; required when signupEnabled
-	signupLimiter *signupIPLimiter // per-IP daily signup cap, independent of the global limiter
+	signupEnabled  bool             // gates POST /signup; false answers 404 (#0127)
+	signupIssuer   TokenIssuer      // mints tokens for /signup; required when signupEnabled
+	signupLimiter  *signupIPLimiter // per-IP daily signup cap, independent of the global limiter
+	trustedProxies []*net.IPNet     // reverse proxies allowed to set X-Forwarded-For for the signup cap (#0131); nil = RemoteAddr only
 
 	idMu   sync.Mutex // serializes record-id allocation (#0089)
 	lastID int        // high-water mark of ids handed out this process; 0 = none yet

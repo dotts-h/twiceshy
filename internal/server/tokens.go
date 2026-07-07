@@ -21,7 +21,11 @@ const defaultTokenRatePerMin = 60
 // TokenStore authenticates tenant tokens and counts per-day usage.
 type TokenStore interface {
 	AuthenticateToken(full string, now time.Time) (index.TokenInfo, error)
-	CountTokenCall(id string, now time.Time) (int, error)
+	// CountTokenCall atomically debits one call against id's daily quota,
+	// returning the resulting (possibly unchanged) total and whether this
+	// call was admitted (#0131 finding 2: the check-then-increment must be
+	// atomic at the store, not a Go-side compare after an unconditional bump).
+	CountTokenCall(id string, now time.Time) (calls int, allowed bool, err error)
 }
 
 type tenantKey struct{}
@@ -152,27 +156,49 @@ func tenantAuth(logger *slog.Logger, operatorToken string, store TokenStore, nex
 			return
 		}
 
-		calls, err := store.CountTokenCall(info.ID, now)
+		// The daily quota debit does NOT happen here (#0131 finding 1): it used to,
+		// which ran ahead of the shared global rate limiter in the chain, so a
+		// caller rejected by that limiter had already burned one of its own daily
+		// calls for a request that never reached a handler. withDailyQuota debits
+		// it downstream of the global limiter instead (see server.go's wiring).
+		next.ServeHTTP(w, r.WithContext(withTenant(r.Context(), info.ID)))
+	})
+}
+
+// withDailyQuota enforces each tok_ tenant's daily call quota (#0131). It must
+// run AFTER the global rate limiter in the chain, so a global 429 never debits
+// a tenant's quota — tenantAuth used to debit it itself, ahead of the global
+// limiter. The "operator" tenant (and any request with no tenant in context,
+// which should not reach here unauthenticated) has no quota and passes through.
+func withDailyQuota(logger *slog.Logger, store TokenStore, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tenant := TenantFromContext(r.Context())
+		if store == nil || tenant == "" || tenant == "operator" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		now := time.Now()
+		calls, allowed, err := store.CountTokenCall(tenant, now)
 		if err != nil {
 			logger.Error("token usage count failed",
-				slog.String("tenant", info.ID),
+				slog.String("tenant", tenant),
 				slog.String("err", err.Error()),
 			)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		if info.DailyQuota > 0 && calls > info.DailyQuota {
+		if !allowed {
 			logger.Warn("token daily quota exhausted",
-				slog.String("tenant", info.ID),
+				slog.String("tenant", tenant),
 				slog.Int("calls", calls),
-				slog.Int("daily_quota", info.DailyQuota),
 			)
 			w.Header().Set("Retry-After", strconv.Itoa(secondsUntilUTCMidnight(now)))
 			http.Error(w, "quota_exhausted", http.StatusTooManyRequests)
 			return
 		}
 
-		next.ServeHTTP(w, r.WithContext(withTenant(r.Context(), info.ID)))
+		next.ServeHTTP(w, r)
 	})
 }
 

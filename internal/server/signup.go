@@ -95,7 +95,7 @@ func (h *handlers) signupHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ip := signupClientIP(r)
+	ip := resolveSignupClientIP(r, h.trustedProxies)
 	if !h.signupLimiter.allow(ip) {
 		w.Header().Set("Retry-After", strconv.Itoa(secondsUntilUTCMidnight(time.Now())))
 		writeSignupError(w, http.StatusTooManyRequests, "rate_limited")
@@ -152,6 +152,87 @@ func signupClientIP(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// resolveSignupClientIP is signupClientIP, made trusted-proxy aware (#0131
+// finding 3): behind a reverse proxy, RemoteAddr is always the proxy's own
+// address, so the per-IP signup cap effectively capped the whole deployment
+// at signupMaxPerIPPerDay instead of one caller. X-Forwarded-For is only
+// honored when RemoteAddr itself matches a configured trusted proxy — an
+// untrusted caller can set that header to anything, so trusting it
+// unconditionally would let a spoofed value bypass the cap entirely. When
+// trusted, the LAST XFF entry is used: in a single-hop deployment that is the
+// proxy's own appended value (the real client); earlier entries are
+// client-supplied and spoofable. Any parse failure (unset trustedProxies,
+// RemoteAddr not trusted, missing/unparsable XFF) falls back to RemoteAddr.
+func resolveSignupClientIP(r *http.Request, trustedProxies []*net.IPNet) string {
+	remoteHost := signupClientIP(r)
+	if len(trustedProxies) == 0 {
+		return remoteHost
+	}
+	remoteIP := net.ParseIP(remoteHost)
+	if remoteIP == nil || !ipTrusted(remoteIP, trustedProxies) {
+		return remoteHost
+	}
+	xff := r.Header.Get("X-Forwarded-For")
+	if xff == "" {
+		return remoteHost
+	}
+	parts := strings.Split(xff, ",")
+	last := strings.TrimSpace(parts[len(parts)-1])
+	if net.ParseIP(last) == nil {
+		return remoteHost
+	}
+	return last
+}
+
+func ipTrusted(ip net.IP, trustedProxies []*net.IPNet) bool {
+	for _, n := range trustedProxies {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// ParseTrustedProxies parses TWICESHY_TRUSTED_PROXIES: a comma-separated list
+// of CIDRs for reverse proxies allowed to set X-Forwarded-For on POST /signup
+// (#0131). A bare IP (no "/") is accepted as an exact match — /32 for IPv4,
+// /128 for IPv6. Empty input returns (nil, nil): no trusted proxies, the
+// current RemoteAddr-only behavior. Any invalid entry is an error, by design —
+// the deployment should fail fast at startup on a typo, not silently trust
+// nothing (or, worse, the wrong network).
+func ParseTrustedProxies(raw string) ([]*net.IPNet, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	entries := strings.Split(raw, ",")
+	out := make([]*net.IPNet, 0, len(entries))
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		cidr := entry
+		if !strings.Contains(cidr, "/") {
+			ip := net.ParseIP(entry)
+			if ip == nil {
+				return nil, fmt.Errorf("trusted proxies: invalid address %q", entry)
+			}
+			if ip.To4() != nil {
+				cidr += "/32"
+			} else {
+				cidr += "/128"
+			}
+		}
+		_, ipNet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			return nil, fmt.Errorf("trusted proxies: invalid CIDR %q: %w", entry, err)
+		}
+		out = append(out, ipNet)
+	}
+	return out, nil
 }
 
 // normalizeSignupEmail trims and lowercases raw, then validates it: 3..254

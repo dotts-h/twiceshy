@@ -124,7 +124,7 @@ func TestCountTokenCallIncrementsAtomically(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < perG; i++ {
-				if _, err := ix.CountTokenCall(id, now); err != nil {
+				if _, _, err := ix.CountTokenCall(id, now); err != nil {
 					t.Errorf("CountTokenCall: %v", err)
 					return
 				}
@@ -142,6 +142,84 @@ func TestCountTokenCallIncrementsAtomically(t *testing.T) {
 	}
 }
 
+// TestCountTokenCallCapsAtQuota is #0131 finding 2: the old CountTokenCall
+// incremented unconditionally and let tenantAuth reject only AFTER the bump
+// (count-then-check), so an over-quota tenant's stored calls counter grew
+// without bound — every rejected call still cost a row update. The atomic
+// conditional UPDATE must stop incrementing once daily_quota is reached: quota
+// N admits exactly N calls/day, and the stored total never exceeds N no matter
+// how many more calls arrive.
+func TestCountTokenCallCapsAtQuota(t *testing.T) {
+	ix := tokenIndex(t)
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+
+	_, id, err := ix.IssueToken("", 3, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 1; i <= 10; i++ {
+		calls, allowed, err := ix.CountTokenCall(id, now)
+		if err != nil {
+			t.Fatalf("call %d: CountTokenCall: %v", i, err)
+		}
+		wantAllowed := i <= 3
+		if allowed != wantAllowed {
+			t.Fatalf("call %d: allowed = %v, want %v", i, allowed, wantAllowed)
+		}
+		if calls > 3 {
+			t.Fatalf("call %d: stored calls = %d, must never exceed quota 3", i, calls)
+		}
+	}
+
+	list, err := ix.ListTokens(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].CallsToday != 3 {
+		t.Fatalf("calls today = %d, want 3 (capped at quota, not 10)", list[0].CallsToday)
+	}
+}
+
+// TestCountTokenCallQuotaCapRaceSafe drives concurrent calls at the quota
+// boundary: the check-then-increment must be one atomic SQLite statement, not
+// a Go-side read-then-write, or concurrent goroutines can all pass a stale
+// check and push the stored total past the quota. Guards under `go test -race`.
+func TestCountTokenCallQuotaCapRaceSafe(t *testing.T) {
+	ix := tokenIndex(t)
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+
+	const quota = 5
+	_, id, err := ix.IssueToken("", quota, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const goroutines, perG = 10, 10
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < perG; i++ {
+				if _, _, err := ix.CountTokenCall(id, now); err != nil {
+					t.Errorf("CountTokenCall: %v", err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	list, err := ix.ListTokens(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].CallsToday != quota {
+		t.Fatalf("calls today = %d, want exactly %d (never over the quota under race)", list[0].CallsToday, quota)
+	}
+}
+
 func TestCountTokenCallDayRolloverUTC(t *testing.T) {
 	ix := tokenIndex(t)
 	day1 := time.Date(2026, 7, 6, 23, 59, 0, 0, time.UTC)
@@ -151,11 +229,11 @@ func TestCountTokenCallDayRolloverUTC(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c1, err := ix.CountTokenCall(id, day1)
+	c1, _, err := ix.CountTokenCall(id, day1)
 	if err != nil || c1 != 1 {
 		t.Fatalf("day1 count = %d err=%v, want 1", c1, err)
 	}
-	c2, err := ix.CountTokenCall(id, day2)
+	c2, _, err := ix.CountTokenCall(id, day2)
 	if err != nil || c2 != 1 {
 		t.Fatalf("day2 count = %d err=%v, want 1 (UTC day rollover)", c2, err)
 	}
@@ -255,7 +333,7 @@ func TestListTokensIncludesTodayCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 3 {
-		if _, err := ix.CountTokenCall(id, now); err != nil {
+		if _, _, err := ix.CountTokenCall(id, now); err != nil {
 			t.Fatal(err)
 		}
 	}

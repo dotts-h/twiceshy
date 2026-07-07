@@ -80,7 +80,7 @@ func TestTenantStatsCallsAndWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("IssueToken: %v", err)
 	}
-	if _, err := ix.CountTokenCall(id, now); err != nil {
+	if _, _, err := ix.CountTokenCall(id, now); err != nil {
 		t.Fatalf("CountTokenCall: %v", err)
 	}
 

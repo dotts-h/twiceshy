@@ -435,7 +435,15 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 	// endpoint (#0127); default off, like TWICESHY_PAUSE — the LAN instance never
 	// sets it.
 	signupEnabled := guard.Truthy(getenv("TWICESHY_SIGNUP"))
-	handler, err := server.New(server.Config{Index: ix, RecordCount: n, Token: token, TokenStore: ix, TokenIssuer: ix, SignupEnabled: signupEnabled, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue, RetroQueue: *retroQueue, IssueQueue: *issueQueue, Logger: logger, Corpus: c.corpus, Telemetry: tele, TelemetryQueryText: *telemetryQueryText})
+	// TWICESHY_TRUSTED_PROXIES (#0131): comma-separated CIDRs (bare IPs accepted
+	// as /32 or /128) of reverse proxies allowed to set X-Forwarded-For for the
+	// signup per-IP cap; unset = RemoteAddr only. Invalid input fails fast here
+	// rather than silently trusting nothing (or the wrong network) at runtime.
+	trustedProxies, err := server.ParseTrustedProxies(getenv("TWICESHY_TRUSTED_PROXIES"))
+	if err != nil {
+		return fmt.Errorf("TWICESHY_TRUSTED_PROXIES: %w", err)
+	}
+	handler, err := server.New(server.Config{Index: ix, RecordCount: n, Token: token, TokenStore: ix, TokenIssuer: ix, SignupEnabled: signupEnabled, TrustedProxies: trustedProxies, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue, RetroQueue: *retroQueue, IssueQueue: *issueQueue, Logger: logger, Corpus: c.corpus, Telemetry: tele, TelemetryQueryText: *telemetryQueryText})
 	if err != nil {
 		alerter.Alert(ctx, "serve-fatal", fmt.Sprintf("serve could not build the handler: %v", err))
 		return err

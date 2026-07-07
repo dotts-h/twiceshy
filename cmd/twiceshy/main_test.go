@@ -395,6 +395,32 @@ func TestRunServeServesUntilCancelled(t *testing.T) {
 	}
 }
 
+// TestRunServeFailsFastOnInvalidTrustedProxies is #0131 finding 3's config
+// side: TWICESHY_TRUSTED_PROXIES must fail startup on a typo rather than
+// silently trust nothing (or, worse, the wrong network) at runtime.
+func TestRunServeFailsFastOnInvalidTrustedProxies(t *testing.T) {
+	var out lockedBuffer
+	err := run(context.Background(), []string{
+		"serve", "-corpus", corpus,
+		"-db", filepath.Join(t.TempDir(), "ix.db"),
+		"-addr", "127.0.0.1:0",
+	}, &out, func(k string) string {
+		switch k {
+		case "TWICESHY_TOKEN":
+			return "test-token"
+		case "TWICESHY_TRUSTED_PROXIES":
+			return "not-a-cidr"
+		}
+		return ""
+	})
+	if err == nil {
+		t.Fatal("expected an error for an invalid TWICESHY_TRUSTED_PROXIES entry")
+	}
+	if !strings.Contains(err.Error(), "TWICESHY_TRUSTED_PROXIES") {
+		t.Fatalf("error = %q, want it to name TWICESHY_TRUSTED_PROXIES", err.Error())
+	}
+}
+
 // SIGHUP hot-reloads the corpus in place (#0060): serve starts on an empty
 // corpus (/readyz 503), a record is written to the corpus dir, and a SIGHUP
 // makes serve rebuild its index without a restart — /readyz flips to ready. This
