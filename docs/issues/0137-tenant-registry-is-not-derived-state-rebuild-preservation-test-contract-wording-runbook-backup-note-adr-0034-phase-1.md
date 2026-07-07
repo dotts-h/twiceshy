@@ -1,14 +1,14 @@
 ---
 id: 0137
 title: Tenant registry is not derived state — Rebuild-preservation test, contract wording, runbook backup note (ADR-0034 phase 1)
-status: open
+status: closed
 severity: medium
 group: 0124
 depends_on: []
 forgejo:
 links:
   adr: ADR-0034
-  prs: []
+  prs: [544]
   issues: [0125, 0135]
   regression:
 assets: []
