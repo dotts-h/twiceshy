@@ -112,7 +112,9 @@ sync in the other direction.
    ```
 
    Keep the printed `TWICESHY_TOKEN` value — it is the operator credential
-   (full pull access + `GET /statz`); it is not shown again.
+   (full pull access + `GET /statz`); it is not shown again. Also set
+   `TWICESHY_TRUSTED_PROXIES` to the compose network's subnet so the signup
+   per-IP cap keys on the real visitor IP behind Caddy, not the proxy's (#0131).
 
 4. **Build + start:**
 

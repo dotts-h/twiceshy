@@ -31,7 +31,20 @@ twiceshy.app, www.twiceshy.app {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	}
 
+	# Access logs: default JSON to stdout — docker's json-file log driver
+	# already bounds rotation, so no extra config needed here.
+	log
+
 	root * /srv/landing
+
+	# robots.txt / llms.txt / sitemap.xml are plain static files under
+	# web/landing/ — without this handle they'd fall through to the
+	# catch-all `handle` below and reverse-proxy to twiceshy instead of
+	# being served, so they'd never be reachable.
+	@seo path /robots.txt /llms.txt /sitemap.xml
+	handle @seo {
+		file_server
+	}
 
 	handle /docs {
 		rewrite * /docs.html
@@ -67,6 +80,10 @@ api.twiceshy.app {
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	}
+
+	# Access logs: default JSON to stdout — docker's json-file log driver
+	# already bounds rotation, so no extra config needed here.
+	log
 
 	# Everything is non-static on this vhost — the MCP endpoint (mounted at "/"
 	# in the server) plus /healthz, /readyz, /signup, /statz.
