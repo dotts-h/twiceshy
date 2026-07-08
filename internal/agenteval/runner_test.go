@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // chatResponse renders a minimal OpenAI-compatible chat-completions body.
@@ -103,5 +105,110 @@ func TestModelRunner_UpstreamErrorIsReturned(t *testing.T) {
 func TestNewModelRunner_RequiresEndpoint(t *testing.T) {
 	if _, err := NewModelRunner(RunnerConfig{Model: "m"}); err == nil {
 		t.Error("NewModelRunner must require an endpoint")
+	}
+}
+
+func TestModelRunner_RetryOnTransportError_Success(t *testing.T) {
+	oldBackoff := transportRetryBackoff
+	transportRetryBackoff = 0
+	defer func() { transportRetryBackoff = oldBackoff }()
+
+	var reqCount int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := atomic.AddInt32(&reqCount, 1)
+		if count == 1 {
+			// First request hangs/times out
+			time.Sleep(100 * time.Millisecond)
+			return
+		}
+		// Second request succeeds
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(chatResponse("const ref = useRef<number|null>(null)", 52)))
+	}))
+	defer srv.Close()
+
+	client := &http.Client{Timeout: 30 * time.Millisecond}
+	runner, err := NewModelRunner(RunnerConfig{
+		Endpoint: srv.URL,
+		Model:    "m",
+		Client:   client,
+	})
+	if err != nil {
+		t.Fatalf("NewModelRunner: %v", err)
+	}
+
+	res, err := runner.Run(context.Background(), "p", "")
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	if atomic.LoadInt32(&reqCount) != 2 {
+		t.Errorf("expected exactly 2 requests, got %d", reqCount)
+	}
+	if res.Output != "const ref = useRef<number|null>(null)" {
+		t.Errorf("unexpected output: %s", res.Output)
+	}
+}
+
+func TestModelRunner_RetryOnTransportError_Failure(t *testing.T) {
+	oldBackoff := transportRetryBackoff
+	transportRetryBackoff = 0
+	defer func() { transportRetryBackoff = oldBackoff }()
+
+	var reqCount int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&reqCount, 1)
+		// Both requests hang
+		time.Sleep(100 * time.Millisecond)
+	}))
+	defer srv.Close()
+
+	client := &http.Client{Timeout: 30 * time.Millisecond}
+	runner, err := NewModelRunner(RunnerConfig{
+		Endpoint: srv.URL,
+		Model:    "m",
+		Client:   client,
+	})
+	if err != nil {
+		t.Fatalf("NewModelRunner: %v", err)
+	}
+
+	_, err = runner.Run(context.Background(), "p", "")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if atomic.LoadInt32(&reqCount) != 2 {
+		t.Errorf("expected exactly 2 requests, got %d", reqCount)
+	}
+}
+
+func TestModelRunner_NoRetryOnHTTP500(t *testing.T) {
+	oldBackoff := transportRetryBackoff
+	transportRetryBackoff = 0
+	defer func() { transportRetryBackoff = oldBackoff }()
+
+	var reqCount int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&reqCount, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	runner, err := NewModelRunner(RunnerConfig{
+		Endpoint: srv.URL,
+		Model:    "m",
+	})
+	if err != nil {
+		t.Fatalf("NewModelRunner: %v", err)
+	}
+
+	_, err = runner.Run(context.Background(), "p", "")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if atomic.LoadInt32(&reqCount) != 1 {
+		t.Errorf("expected exactly 1 request (no retry on 500), got %d", reqCount)
 	}
 }

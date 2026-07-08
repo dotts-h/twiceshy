@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/dotts-h/twiceshy/internal/record"
 )
@@ -218,5 +220,112 @@ func TestModelTaskDrafter_Name(t *testing.T) {
 	}
 	if d.Name() != "model-task-drafter(qwen)" {
 		t.Errorf("Name() = %q", d.Name())
+	}
+}
+
+func TestModelTaskDrafter_RetryOnTransportError_Success(t *testing.T) {
+	// Save and restore package-level retry backoff
+	oldBackoff := transportRetryBackoff
+	transportRetryBackoff = 0
+	defer func() { transportRetryBackoff = oldBackoff }()
+
+	var reqCount int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := atomic.AddInt32(&reqCount, 1)
+		if count == 1 {
+			// First request hangs/times out
+			time.Sleep(100 * time.Millisecond)
+			return
+		}
+		// Second request succeeds
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"{\n  \"prompt\": \"Build a search query from user input\",\n  \"verify\": \"gobuild\",\n  \"deps\": [],\n  \"control\": \"package main\\n\\nfunc main() {}\\n\"\n}"}}], "usage":{"total_tokens":52}}`))
+	}))
+	defer srv.Close()
+
+	// Short client timeout to trigger the transport error
+	client := &http.Client{Timeout: 30 * time.Millisecond}
+	d, err := NewModelTaskDrafter(DrafterConfig{
+		Endpoint: srv.URL,
+		Model:    "m",
+		Client:   client,
+	})
+	if err != nil {
+		t.Fatalf("NewModelTaskDrafter: %v", err)
+	}
+
+	tc, err := d.DraftTask(context.Background(), draftRec())
+	if err != nil {
+		t.Fatalf("DraftTask failed: %v", err)
+	}
+
+	if atomic.LoadInt32(&reqCount) != 2 {
+		t.Errorf("expected exactly 2 requests, got %d", reqCount)
+	}
+	if tc.Prompt != "Build a search query from user input" {
+		t.Errorf("Prompt = %q", tc.Prompt)
+	}
+}
+
+func TestModelTaskDrafter_RetryOnTransportError_Failure(t *testing.T) {
+	oldBackoff := transportRetryBackoff
+	transportRetryBackoff = 0
+	defer func() { transportRetryBackoff = oldBackoff }()
+
+	var reqCount int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&reqCount, 1)
+		// Both requests hang
+		time.Sleep(100 * time.Millisecond)
+	}))
+	defer srv.Close()
+
+	client := &http.Client{Timeout: 30 * time.Millisecond}
+	d, err := NewModelTaskDrafter(DrafterConfig{
+		Endpoint: srv.URL,
+		Model:    "m",
+		Client:   client,
+	})
+	if err != nil {
+		t.Fatalf("NewModelTaskDrafter: %v", err)
+	}
+
+	_, err = d.DraftTask(context.Background(), draftRec())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if atomic.LoadInt32(&reqCount) != 2 {
+		t.Errorf("expected exactly 2 requests, got %d", reqCount)
+	}
+}
+
+func TestModelTaskDrafter_NoRetryOnHTTP500(t *testing.T) {
+	oldBackoff := transportRetryBackoff
+	transportRetryBackoff = 0
+	defer func() { transportRetryBackoff = oldBackoff }()
+
+	var reqCount int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&reqCount, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	d, err := NewModelTaskDrafter(DrafterConfig{
+		Endpoint: srv.URL,
+		Model:    "m",
+	})
+	if err != nil {
+		t.Fatalf("NewModelTaskDrafter: %v", err)
+	}
+
+	_, err = d.DraftTask(context.Background(), draftRec())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if atomic.LoadInt32(&reqCount) != 1 {
+		t.Errorf("expected exactly 1 request (no retry on 500), got %d", reqCount)
 	}
 }
