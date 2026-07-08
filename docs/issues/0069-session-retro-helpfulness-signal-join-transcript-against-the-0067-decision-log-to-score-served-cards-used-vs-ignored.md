@@ -1,7 +1,7 @@
 ---
 id: 0069
 title: Session-retro helpfulness signal — join transcript against the #0067 decision log to score served cards used vs ignored
-status: open
+status: closed
 severity: medium
 group: 0064
 depends_on: []
@@ -45,7 +45,7 @@ applied — closing the loop with no new instrumentation.
 - [x] A captured session yields, per served/pushed card, a used-vs-ignored verdict.
 - [x] The verdict is attributed via the #0067 decision log and recorded through the
       existing usage seam (no new ranking influence).
-- [ ] Precision/recall reported on a real-traffic sample (feeds #0005).
+- [x] Precision/recall reported on a real-traffic sample (feeds #0005) — 2026-07-08, see Close-out.
 
 ## Progress
 
@@ -96,6 +96,21 @@ applied — closing the loop with no new instrumentation.
 
 Issue stays **open**: the verdict→confirm core, the live join, and the judge-accuracy eval ship;
 the real-traffic precision/recall (acceptance 3 proper) is gated on activating telemetry in prod.
+
+## Close-out (2026-07-08)
+
+Acceptance 3 measured. `twiceshy eval -usage` gained `-usage-cases <json>`
+(real transcripts stay OUTSIDE the repo - they are private), and the first
+real-traffic gold set was hand-labeled from the 2026-07-08 retro-queue
+snapshot: 8 correlated sessions (of 225 drained), 18 served pairs, and the
+hand label is **zero used** - every served card was a search result the
+session never applied (retrieval != usage, the ADR-0026 thesis, now measured).
+
+Judge vs gold: **real sample FP=0** (no hallucinated confirmations - the live
+`confirmed 0 helpful` is TRUE, not an artifact); **synthetic precision 1.0 /
+recall 0.33** (the judge misses genuine usage; filed as #0146). The
+measurement chain end-to-end is now: serve logs -> NAS->brain sync -> session
+correlation -> judge -> eval harness with real gold. Feeds #0005 slice 2.
 
 ## Notes
 Split out of #0065 (whose Notes bless shipping the extraction half independently).
