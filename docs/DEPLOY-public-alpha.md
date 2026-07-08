@@ -35,9 +35,12 @@ sync in the other direction.
   - `twiceshy` — this repo's `Dockerfile` (distroless nonroot), its **own**
     operator token + a fresh SQLite index in the `twiceshy-data` volume (NOT
     the LAN instance's db — tokens/telemetry here are public-instance state).
-    `TWICESHY_SIGNUP=1` is fixed on for this deployment.
+    `TWICESHY_SIGNUP=1` is fixed on for this deployment. Set
+    `TWICESHY_DEMO=1` on the `twiceshy` service the same way to enable the public
+    `GET /demo-search` endpoint the landing page's try-a-search box calls — rate
+    limited, validated records only, no bearer token required (#0132).
   - `caddy` — TLS via Let's Encrypt, serves `web/landing/` as a static root
-    (`/`, `/docs`, `/terms`), reverse-proxies `/signup`, `/statz`, and
+    (`/`, `/docs`, `/terms`), reverse-proxies `/signup`, `/demo-search`, `/statz`, and
     everything else non-static (the MCP endpoint) to `twiceshy:8722`.
 - Corpus link: **pull-only**. `corpus-refresh.sh` (+ `.service`/`.timer`) on
   the host pulls the (private) corpus repo
