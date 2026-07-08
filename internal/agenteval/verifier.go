@@ -33,6 +33,9 @@ var npmResolutionFailureMarkers = []string{
 	// ERESOLVE: the drafted dep SET is uninstallable (peer conflict) — deterministic
 	// for the drafted task even though each dep may exist individually (exp-2847).
 	"npm error code ERESOLVE",
+	// ENOENT: a malformed drafted name (e.g. "nestjs/common@8", missing the @scope
+	// prefix) makes npm treat it as a local PATH that doesn't exist (exp-3208).
+	"npm error code ENOENT",
 }
 
 const (

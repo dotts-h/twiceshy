@@ -201,6 +201,7 @@ func TestBrokerVerifier_PrepareFailures(t *testing.T) {
 		{"npm EINVALIDTAGNAME", "npm error code EINVALIDTAGNAME\nnpm error Invalid tag name \"@2\" of package \"x@@2\""},
 		{"npm ENOVERSIONS", "npm error code ENOVERSIONS\nnpm error No valid versions available for placeholder-pkg"},
 		{"npm ERESOLVE", "npm error code ERESOLVE\nnpm error ERESOLVE unable to resolve dependency tree\nnpm error Conflicting peer dependency: @types/react@19.2.17"},
+		{"npm ENOENT", "npm error code ENOENT\nnpm error syscall open\nnpm error path /work/nestjs/common@8/package.json\nnpm error enoent Could not read package.json: Error: ENOENT: no such file or directory, open '/work/nestjs/common@8/package.json'"},
 	} {
 		t.Run(tc.name+" wraps ErrDepsUnavailable", func(t *testing.T) {
 			br := &stubBroker{
