@@ -50,7 +50,7 @@ test: test-scripts
 
 test-scripts:
 	$(GO) test ./internal/ops
-	@for test_script in scripts/*.test.sh; do bash "$$test_script"; done
+	@for test_script in scripts/*.test.sh; do bash "$$test_script" || exit 1; done
 
 test-livecorpus:
 	$(GO) test -tags livecorpus ./...

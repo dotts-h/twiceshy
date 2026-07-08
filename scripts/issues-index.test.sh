@@ -75,6 +75,13 @@ for filepath in docs/issues/[0-9][0-9][0-9][0-9]-*.md; do
       ok "ID $id status matches ($status_cell)"
     fi
 
+    # Rows are either epics-table (5 pipes: id|title|status|children) or
+    # issues-table (7 pipes: id|title|status|severity|group|links) shaped;
+    # anything else is a malformed row whose cells can't be trusted.
+    if [ "$num_pipes" -ne 5 ] && [ "$num_pipes" -ne 7 ]; then
+      bad "ID $id row has unexpected column count ($num_pipes pipes)"
+    fi
+
     # d. check group if >= 6 data columns (which means >= 7 pipes)
     if [ "$num_pipes" -ge 7 ]; then
       norm_group_cell="$group_cell"
@@ -90,6 +97,15 @@ for filepath in docs/issues/[0-9][0-9][0-9][0-9]-*.md; do
     fi
   done < <(grep "^| \[$id\](" docs/issues/INDEX.md || true)
 done
+
+# Orphaned INDEX rows: every row's id must have a matching issue file.
+while IFS= read -r row_id; do
+  if ! ls "docs/issues/${row_id}"-*.md >/dev/null 2>&1; then
+    bad "ID $row_id: INDEX row has no matching docs/issues/${row_id}-*.md file"
+  else
+    ok "ID $row_id row has a matching issue file"
+  fi
+done < <(grep -o '^| \[[0-9][0-9][0-9][0-9]\](' docs/issues/INDEX.md | grep -o '[0-9][0-9][0-9][0-9]' | sort -u)
 
 echo "----"
 echo "PASS=$PASS FAIL=$FAIL"
