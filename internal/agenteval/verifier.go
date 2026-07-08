@@ -30,6 +30,9 @@ var npmResolutionFailureMarkers = []string{
 	"npm error code ETARGET",
 	"npm error code EINVALIDTAGNAME",
 	"npm error code ENOVERSIONS",
+	// ERESOLVE: the drafted dep SET is uninstallable (peer conflict) — deterministic
+	// for the drafted task even though each dep may exist individually (exp-2847).
+	"npm error code ERESOLVE",
 }
 
 const (

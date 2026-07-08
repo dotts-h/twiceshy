@@ -200,6 +200,7 @@ func TestBrokerVerifier_PrepareFailures(t *testing.T) {
 		{"npm ETARGET", "npm error code ETARGET\nnpm error notarget No matching version found for @types/w3c-image-capture@4."},
 		{"npm EINVALIDTAGNAME", "npm error code EINVALIDTAGNAME\nnpm error Invalid tag name \"@2\" of package \"x@@2\""},
 		{"npm ENOVERSIONS", "npm error code ENOVERSIONS\nnpm error No valid versions available for placeholder-pkg"},
+		{"npm ERESOLVE", "npm error code ERESOLVE\nnpm error ERESOLVE unable to resolve dependency tree\nnpm error Conflicting peer dependency: @types/react@19.2.17"},
 	} {
 		t.Run(tc.name+" wraps ErrDepsUnavailable", func(t *testing.T) {
 			br := &stubBroker{
