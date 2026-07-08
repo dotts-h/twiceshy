@@ -3,7 +3,7 @@ id: 0132
 title: Landing page fast-follow: live try-a-search demo box backed by a rate-limited public demo token
 status: open
 severity: low
-group: 
+group: 0124
 depends_on: []
 forgejo: 533
 links:
