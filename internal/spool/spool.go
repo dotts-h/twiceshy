@@ -113,6 +113,11 @@ type Transcript struct {
 	Reason     string `json:"reason,omitempty"`
 	Transcript string `json:"transcript"`
 	CapturedAt string `json:"captured_at"`
+	// Set by the git/external trap miners (#0133) to record the upstream commit
+	// URL + SPDX license on every draft mined from that entry; empty for
+	// interactive session captures.
+	SourceURL     string `json:"source_url,omitempty"`
+	SourceLicense string `json:"source_license,omitempty"`
 }
 
 // EnqueueTranscript writes t as a JSON file in dir using the same atomic

@@ -39,6 +39,28 @@ imported security advisories.
   "mine licensed commits/tests; retain only independently derived facts" is
   explicitly in-bounds — commits and tests carry the repo's own license.
 
+## Status 2026-07-08 (PR pending) — machinery shipped, rollout gated
+
+Built and verified; the rollout wave is deliberately NOT fired (operator call).
+
+- **Part A (engine):** the retro-queue `Transcript` carries `source_url` +
+  `source_license`, and `retro-intake` stamps them into each mined draft's
+  structured provenance — the legal-compliance prerequisite (an external MIT/
+  Apache commit records its upstream URL + SPDX license as fields, not prose).
+- **Part B (script):** `scripts/external-trap-miner.sh` — a curated-seedfile,
+  license-gated miner. Permissive SPDX allowlist {MIT, Apache-2.0, BSD-2/3,
+  ISC, 0BSD, Unlicense, WTFPL} enforced BEFORE clone; everything else (GPL/
+  AGPL/NOASSERTION/empty/unresolvable) is fail-closed rejected, never cloned.
+  Hermetic tests (`external-trap-miner.test.sh`, in `make test-scripts`) prove
+  the reject path never invokes clone. **Real dry-run 2026-07-08:** react-use
+  (→Unlicense) mined 3 React fix-commits with correct provenance; git/git
+  (→NOASSERTION) rejected before clone.
+- **Rollout (remaining, operator):** curate `external-trap-miner.seeds.example`
+  per gap ecosystem and run ONE small batch at a time into the live retro queue,
+  letting validate drain between batches (judge-budget: a large wave = days).
+  No timer is enabled and the script is not deployed to `~/.local/bin` — firing
+  the wave is a deliberate operator step, not automated here.
+
 ## Notes
 
 Scope sketch (engine reuse, mostly configuration + policy):

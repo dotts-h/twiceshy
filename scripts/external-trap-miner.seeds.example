@@ -1,0 +1,26 @@
+# external-trap-miner seed list (#0133) — OPERATOR-CURATED.
+#
+# Format: one "<git_url> <ecosystem>" per line. Blank lines and lines starting
+# with # are ignored. The ecosystem token is operator metadata (repo selection
+# only); the miner does not branch on it.
+#
+# SELECTION is a human decision — pick high-star, active repos in the corpus's
+# zero-coverage ecosystems (React, React Native/Expo, Swift/iOS, Kotlin/Android,
+# TS frontend). The miner does NOT crawl.
+#
+# The LICENSE GATE is enforced automatically: only repos whose GitHub-resolved
+# SPDX id is in {MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD,
+# Unlicense, WTFPL} are cloned+mined. Anything else (GPL/AGPL/LGPL/MPL/CC/
+# NOASSERTION/none) is rejected before any clone — so a mistaken entry here is
+# safe, it is simply skipped and logged.
+#
+# ROLLOUT is deliberately batched (charter: "don't fire-hose"): a large wave is
+# days of judge budget. Run one small ecosystem batch at a time and let the
+# validate pipeline drain before the next.
+#
+# Verified-permissive starting examples (SPDX confirmed via the GitHub API
+# 2026-07-08). Uncomment / extend as you curate a batch:
+
+# https://github.com/streamich/react-use React        # Unlicense
+# https://github.com/pmndrs/zustand React              # MIT
+# https://github.com/software-mansion/react-native-reanimated ReactNative  # MIT
