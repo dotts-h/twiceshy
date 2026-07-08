@@ -4,6 +4,7 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode"
@@ -12,6 +13,12 @@ import (
 	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/screen"
 )
+
+// ErrInvalidDraft marks a draft that fails schema validation — a deterministic,
+// per-entry data defect (e.g. a too-short title). Batch callers key on it to
+// skip-and-count the one bad draft instead of aborting the whole import, while
+// infra errors (index failures, context cancellation) still abort (#0134/#0142).
+var ErrInvalidDraft = errors.New("ingest: invalid draft")
 
 // Draft is an agent-proposed record before it is identified, dated, or sited.
 type Draft struct {
@@ -141,7 +148,7 @@ func Prepare(ctx context.Context, ix *index.Index, repo string, d Draft, m Meta)
 	}
 
 	if err := record.Validate(rec); err != nil {
-		return Outcome{}, fmt.Errorf("ingest: invalid draft: %w", err)
+		return Outcome{}, fmt.Errorf("%w: %w", ErrInvalidDraft, err)
 	}
 
 	return Outcome{

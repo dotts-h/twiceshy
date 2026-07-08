@@ -4,6 +4,7 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -17,6 +18,7 @@ type ImportStats struct {
 	Created int
 	Skipped int
 	Flagged int
+	Invalid int // drafts skipped because they failed schema validation (#0134)
 }
 
 // ImportBatch deduplicates drafts against the corpus and within the batch, then
@@ -35,6 +37,16 @@ func ImportBatch(ctx context.Context, ix *index.Index, repo, corpus, sourceName 
 		outcome, err := Prepare(ctx, ix, repo, d,
 			Meta{ID: id, Author: author, Now: now, IncludeQuarantined: true})
 		if err != nil {
+			// A malformed single entry (bad title, failed schema check) is a
+			// per-entry data defect: skip it, count it, and log it so the drop is
+			// never silent — but do not let it abort the whole feed. Infra errors
+			// (index failure, context cancellation) are not ErrInvalidDraft and
+			// still abort loudly (#0134/#0142; no silent partials, #0119).
+			if errors.Is(err, ErrInvalidDraft) {
+				st.Invalid++
+				_, _ = fmt.Fprintf(out, "  skipped %q: invalid draft (%v)\n", d.Title, err)
+				continue
+			}
 			return st, fmt.Errorf("ingest %q: %w", d.Title, err)
 		}
 		if outcome.Record == nil { // Known — already in the corpus
@@ -67,8 +79,8 @@ func ImportBatch(ctx context.Context, ix *index.Index, repo, corpus, sourceName 
 	if dryRun {
 		verb = "would create"
 	}
-	_, _ = fmt.Fprintf(out, "ingest %s: %s %d records, skipped %d (known), flagged %d (quarantined+documented)\n",
-		sourceName, verb, st.Created, st.Skipped, st.Flagged)
+	_, _ = fmt.Fprintf(out, "ingest %s: %s %d records, skipped %d (known), flagged %d (quarantined+documented), invalid %d (skipped)\n",
+		sourceName, verb, st.Created, st.Skipped, st.Flagged, st.Invalid)
 	return st, nil
 }
 

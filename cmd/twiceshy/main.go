@@ -576,8 +576,12 @@ func importSource(name, ecosystem string) (ingest.Source, error) {
 		// Node.js's own changelogs → trap records for SEMVER-MAJOR breaking changes
 		// (#0115); the default major-line target set is curated (unknown ones 404→skip).
 		return ingest.NewNodeBreakingSource(), nil
+	case "wtf":
+		// wtfjs/wtfpython README gotchas → trap records for JS/Python quirks (#0134);
+		// WTFPL prose, born quarantined.
+		return ingest.NewWtfSource(), nil
 	default:
-		return nil, fmt.Errorf("unknown ingest source %q (want: go, osv, osv-live, eol-live, npm-deprecation, node-breaking, py)", name)
+		return nil, fmt.Errorf("unknown ingest source %q (want: go, osv, osv-live, eol-live, npm-deprecation, node-breaking, wtf, py)", name)
 	}
 }
 
@@ -590,7 +594,7 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 	// stops at the first non-flag arg, so pull the source off the front before
 	// parsing (otherwise `ingest go -corpus X` would leave -corpus unparsed).
 	if len(args) < 1 {
-		return errors.New("usage: twiceshy ingest <source> [flags] (sources: go, osv, osv-live, eol-live, npm-deprecation, node-breaking, py)")
+		return errors.New("usage: twiceshy ingest <source> [flags] (sources: go, osv, osv-live, eol-live, npm-deprecation, node-breaking, wtf, py)")
 	}
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	c := addCommonFlags(fs)

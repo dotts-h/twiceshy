@@ -5,6 +5,7 @@ package ingest_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/dotts-h/twiceshy/internal/ingest"
@@ -197,5 +198,53 @@ func TestImportBatch_CountsFlaggedRecords(t *testing.T) {
 	}
 	if !bytes.Contains(out.Bytes(), []byte("FLAGGED")) {
 		t.Errorf("output = %q, want a FLAGGED annotation", out.String())
+	}
+}
+
+// A single draft that fails schema validation (here: a too-short title, the
+// wtfjs "baNaNa" case, #0134) is a deterministic per-entry data defect — it
+// must be skipped, counted, and logged, NOT abort the whole batch. The valid
+// drafts around it still import. Mirrors the #0142 per-item-defect rule.
+func TestImportBatch_SkipsInvalidDraftAndContinues(t *testing.T) {
+	ix := openIx(t)
+	var persisted []string
+	persist := func(_ string, rec *record.Record) error { persisted = append(persisted, rec.ID); return nil }
+	var out bytes.Buffer
+
+	bad := trapDraft("too short a title fails validation", "banana-coercion-sig")
+	bad.Title = "baNaNa" // 6 chars — outside record.Validate's 8..120 title bound
+	drafts := []ingest.Draft{
+		trapDraft("first ok", "zorblefrag-uno"),
+		bad,
+		trapDraft("second ok", "zorblefrag-dos"),
+	}
+	st, err := ingest.ImportBatch(context.Background(), ix, repo, "/corpus", "test-source",
+		drafts, "exp-0001", "claude", "2026-06-17", false, 0, persist, &out)
+	if err != nil {
+		t.Fatalf("ImportBatch must not abort on one invalid draft: %v", err)
+	}
+	if st.Created != 2 || st.Invalid != 1 {
+		t.Fatalf("stats = %+v, want {Created:2 Invalid:1}", st)
+	}
+	if len(persisted) != 2 || persisted[0] != "exp-0001" || persisted[1] != "exp-0002" {
+		t.Fatalf("persisted = %v, want [exp-0001 exp-0002] (id not consumed by the skipped invalid draft)", persisted)
+	}
+	if !bytes.Contains(out.Bytes(), []byte("baNaNa")) || !bytes.Contains(out.Bytes(), []byte("invalid")) {
+		t.Errorf("output = %q, want a logged 'invalid' skip naming baNaNa (no silent drop)", out.String())
+	}
+}
+
+// An invalid-draft skip is scoped to record.Validate failures (ErrInvalidDraft);
+// this pins that the sentinel actually wraps that path so ImportBatch can key on it.
+func TestPrepare_InvalidDraftIsSentinel(t *testing.T) {
+	ix := openIx(t)
+	bad := trapDraft("short title", "sentinel-sig")
+	bad.Title = "tiny"
+	_, err := ingest.Prepare(context.Background(), ix, repo, bad, meta())
+	if err == nil {
+		t.Fatal("Prepare must reject a too-short title")
+	}
+	if !errors.Is(err, ingest.ErrInvalidDraft) {
+		t.Errorf("err = %v, want it to wrap ingest.ErrInvalidDraft", err)
 	}
 }
