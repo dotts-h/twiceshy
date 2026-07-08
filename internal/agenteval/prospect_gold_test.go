@@ -8,15 +8,39 @@ import (
 	"testing"
 )
 
-// The embedded prospect_gold.yaml starts empty (no cases yet drafted) — loading it
-// must return zero cases without error, never a parse failure on an empty file.
-func TestLoadProspectGold_EmptyIsTolerated(t *testing.T) {
+// The checked-in prospect_gold.yaml carries the measured model-hard cases the
+// live prospect runs emit (#0114/#0140) — it grows over time, so this pins its
+// SHAPE, not its size: every case is complete and TrapIDs never collide.
+func TestLoadProspectGold_CheckedInSetIsWellFormed(t *testing.T) {
 	cases, err := LoadProspectGold()
 	if err != nil {
 		t.Fatalf("LoadProspectGold: %v", err)
 	}
+	seen := make(map[string]bool, len(cases))
+	for _, c := range cases {
+		if c.TrapID == "" || c.Prompt == "" || c.VerifyID == "" {
+			t.Errorf("incomplete gold case: %+v", c)
+		}
+		if seen[c.TrapID] {
+			t.Errorf("duplicate TrapID in checked-in gold set: %s", c.TrapID)
+		}
+		seen[c.TrapID] = true
+	}
+}
+
+// An empty gold file (the pre-#0140 state, or a fresh -gold-out target) must
+// load as zero cases without error, never a parse failure.
+func TestLoadProspectGold_EmptyIsTolerated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gold.yaml")
+	if err := os.WriteFile(path, []byte("cases: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cases, err := loadProspectGoldFrom(path)
+	if err != nil {
+		t.Fatalf("loadProspectGoldFrom: %v", err)
+	}
 	if len(cases) != 0 {
-		t.Errorf("want 0 cases from the (currently empty) checked-in gold set, got %d", len(cases))
+		t.Errorf("want 0 cases from an empty gold file, got %d", len(cases))
 	}
 }
 

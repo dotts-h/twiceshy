@@ -1,7 +1,7 @@
 ---
 id: 0140
 title: Live prospector run — 17-record re-run with positive controls; model-hard set or honest null (deferred from 0119)
-status: open
+status: closed
 severity: high
 group: 0112
 depends_on: []
@@ -50,7 +50,29 @@ control fix and its 5/5 model-hard result is known-vacuous.
   null result closes this issue honestly (empty is an answer).
 - Epic #0112's acceptance boxes are reconciled against the run's outcome.
 
-## Notes
+## Close-out (2026-07-08)
+
+Run complete (attempt 8; report `runs/prospect-20260708-0140-live.json`,
+qwen2.5-coder:14b drafter+runner, controls enforced): **scanned 4004,
+eligible 225, drafted 17 (the -max cap), skipped: control 126 / unsupported
+73 / deps 9 / ineligible 3779. OFF-avoided 12. Model-hard 5 — and 1 of them
+(exp-3952) FLIPPED ON-arm: the first measured positive card delta** (epic
+0112 acceptance box 3 met with a real find, not a null). Gold set grew by 5
+via #0114's merge; the empty-set test evolved into a shape guard.
+
+react19-useref sanity check (acceptance bullet 2): exp-2868 skips as
+control-fail in the drafted path — the drafter's own correct answer does not
+pass its drafted task, so the case voids honestly; the 2026-07-01 hand-built
+fixed-VerifyID result stands as the authority for that record. Investigated,
+not reproduced-by-draft: recorded as a #0144 data point.
+
+Getting here forced four engine fixes, each from a live abort: #0142 npm
+deterministic-resolution skip family (E404/ETARGET/ERESOLVE/ENOENT — 9
+deps-skips in the final run would each have been a fatal abort), #0143
+transport retry on the model edges, plus the systemd-unit run harness
+(background-timeout immunity). Honest caveats → #0144: 56% control-fail loss,
+task-record relevance mismatches make some model-hard verdicts noise (e.g.
+exp-2861), and the report lacks per-record skip reasons.
 This is a live, env-gated measurement session (local models via
 `TWICESHY_AGENTEVAL_*`), not new engine code — any code changes it forces
 (e.g. drafter shape rejections observed live) get filed separately.
