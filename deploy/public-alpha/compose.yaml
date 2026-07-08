@@ -25,6 +25,7 @@ services:
     environment:
       # Fixed by ADR-0030 for this deployment — not operator-tunable via .env.
       TWICESHY_SIGNUP: "1" # public alpha: self-serve token signup (#0127)
+      TWICESHY_DEMO: "1" # landing-page try-a-search box → GET /demo-search (#0132)
     volumes:
       - twiceshy-data:/data # corpus + this instance's OWN sqlite index/tokens (fresh; not the LAN db)
     # spool dirs are created by serve itself (spool.enqueueJSON MkdirAll) inside the twiceshy-data volume; the brain pulls them one-way (spool-pull.sh) — ADR-0030 phase 2, #0139.
