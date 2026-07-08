@@ -4,7 +4,9 @@ package eval
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/dotts-h/twiceshy/internal/retro"
@@ -152,4 +154,49 @@ quoted or applied the FTS5 tokenization lesson.
 `),
 		},
 	}
+}
+
+// LoadUsageCases reads a JSON file containing an array of UsageCase, validates:
+// non-empty array, every case has non-empty Name and Transcript and len(Served)>0,
+// and Used ⊆ Served; descriptive errors naming the offending case.
+//
+// Real-traffic gold sets live OUTSIDE the repo (transcripts are private);
+// this loader is how they reach the eval.
+func LoadUsageCases(path string) ([]UsageCase, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading usage cases file: %w", err)
+	}
+	var cases []UsageCase
+	if err := json.Unmarshal(b, &cases); err != nil {
+		return nil, fmt.Errorf("parsing usage cases JSON: %w", err)
+	}
+	if len(cases) == 0 {
+		return nil, fmt.Errorf("usage cases file contains an empty array")
+	}
+	for i, c := range cases {
+		caseRef := c.Name
+		if caseRef == "" {
+			caseRef = fmt.Sprintf("at index %d", i)
+		}
+		if c.Name == "" {
+			return nil, fmt.Errorf("case %s: Name cannot be empty", caseRef)
+		}
+		if c.Transcript == "" {
+			return nil, fmt.Errorf("case %q: Transcript cannot be empty", caseRef)
+		}
+		if len(c.Served) == 0 {
+			return nil, fmt.Errorf("case %q: Served list cannot be empty", caseRef)
+		}
+		servedMap := make(map[string]bool, len(c.Served))
+		for _, s := range c.Served {
+			servedMap[s] = true
+		}
+		for _, u := range c.Used {
+			if !servedMap[u] {
+				return nil, fmt.Errorf("case %q: used card %q is not in served list %v", caseRef, u, c.Served)
+			}
+		}
+	}
+	return cases, nil
 }

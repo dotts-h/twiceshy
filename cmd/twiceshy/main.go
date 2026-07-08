@@ -1874,12 +1874,13 @@ func runEval(ctx context.Context, args []string, out io.Writer, getenv func(stri
 	asJSON := fs.Bool("json", false, "emit the report as JSON")
 	push := fs.Bool("push", false, "run the push-precision eval (off-domain prompts must inject nothing) instead of pull recall")
 	usage := fs.Bool("usage", false, "run the usage-judge precision/recall eval over the gold set")
+	usageCases := fs.String("usage-cases", "", "path to a JSON []UsageCase file for -usage; replaces the built-in synthetic gold set (real-traffic transcripts stay outside the repo)")
 	model := fs.String("analyzer-model", "", "off-pool model id for -usage (default: TWICESHY_RETRO_MODEL, else TWICESHY_JUDGE_MODEL)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if *usage {
-		return runEvalUsage(ctx, getenv, out, *asJSON, *model)
+		return runEvalUsage(ctx, getenv, out, *asJSON, *model, *usageCases)
 	}
 	recs, err := record.LoadCorpus(c.corpus)
 	if err != nil {
@@ -1961,8 +1962,9 @@ func runEvalPush(ctx context.Context, ix *index.Index, out io.Writer, asJSON boo
 }
 
 // runEvalUsage reports how accurately the usage judge labels served cards as
-// used vs ignored over the hand-labeled gold set (#0069 acceptance 3).
-func runEvalUsage(ctx context.Context, getenv func(string) string, out io.Writer, asJSON bool, model string) error {
+// used vs ignored over the hand-labeled gold set (#0069 acceptance 3) — the
+// built-in synthetic set, or a real-traffic []UsageCase JSON via casesPath.
+func runEvalUsage(ctx context.Context, getenv func(string) string, out io.Writer, asJSON bool, model, casesPath string) error {
 	cfg, err := modelConfigFromEnv(getenv, model, 0)
 	if err != nil {
 		return err
@@ -1971,7 +1973,13 @@ func runEvalUsage(ctx context.Context, getenv func(string) string, out io.Writer
 	if err != nil {
 		return err
 	}
-	rep, err := eval.RunUsage(ctx, judge, eval.UsageGold())
+	cases := eval.UsageGold()
+	if casesPath != "" {
+		if cases, err = eval.LoadUsageCases(casesPath); err != nil {
+			return err
+		}
+	}
+	rep, err := eval.RunUsage(ctx, judge, cases)
 	if err != nil {
 		return err
 	}
