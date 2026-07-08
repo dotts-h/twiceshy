@@ -73,7 +73,9 @@ func (r *prospectStubRunner) Run(_ context.Context, prompt, card string) (Result
 // (none of which populate controlAvoided) keeps its original behavior.
 type prospectStubVerifier struct {
 	offAvoided     map[string]bool
+	offErr         map[string]error
 	onAvoided      map[string]bool
+	onErr          map[string]error
 	controlAvoided map[string]bool
 	controlErr     map[string]error
 }
@@ -81,8 +83,14 @@ type prospectStubVerifier struct {
 func (v *prospectStubVerifier) Avoided(_ context.Context, c TaskCase, output string) (bool, error) {
 	switch {
 	case strings.HasPrefix(output, "OFF:"):
+		if err, ok := v.offErr[c.Prompt]; ok {
+			return false, err
+		}
 		return v.offAvoided[c.Prompt], nil
 	case strings.HasPrefix(output, "ON:"):
+		if err, ok := v.onErr[c.Prompt]; ok {
+			return false, err
+		}
 		return v.onAvoided[c.Prompt], nil
 	default:
 		if err, ok := v.controlErr[output]; ok {
@@ -420,4 +428,138 @@ func TestProspectEligible(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProspect_DepsUnavailableSkip(t *testing.T) {
+	t.Run("skip deps-unavailable control-verify error, process next", func(t *testing.T) {
+		recs := []*record.Record{
+			mkProspectRecord("exp-0001", "trap", "validated", "horia"),
+			mkProspectRecord("exp-0002", "trap", "validated", "horia"),
+		}
+		drafter := &stubDrafter{tasks: map[string]TaskCase{
+			"exp-0001": {TrapID: "exp-0001", Prompt: "bad deps prompt", VerifyID: "tsc", Control: "control text 1"},
+			"exp-0002": {TrapID: "exp-0002", Prompt: "good prompt", VerifyID: "tsc", Control: "control text 2"},
+		}}
+		runner := &prospectStubRunner{}
+		verifier := &prospectStubVerifier{
+			controlErr: map[string]error{
+				"control text 1": ErrDepsUnavailable,
+			},
+			offAvoided: map[string]bool{
+				"good prompt": true,
+			},
+		}
+
+		rep, err := Prospect(context.Background(), ProspectConfig{
+			Records: recs, Runner: runner, Verifier: verifier, Drafter: drafter, Max: 10,
+		})
+		if err != nil {
+			t.Fatalf("Prospect: %v", err)
+		}
+		if rep.Skipped["deps"] != 1 {
+			t.Errorf("Skipped[deps] = %d, want 1", rep.Skipped["deps"])
+		}
+		if rep.Drafted != 1 {
+			t.Errorf("Drafted = %d, want 1", rep.Drafted)
+		}
+		if len(rep.OffAvoided) != 1 || rep.OffAvoided[0] != "exp-0002" {
+			t.Errorf("OffAvoided = %v, want [exp-0002]", rep.OffAvoided)
+		}
+	})
+
+	t.Run("non-404 prepare failure control-verify error aborts", func(t *testing.T) {
+		recs := []*record.Record{
+			mkProspectRecord("exp-0001", "trap", "validated", "horia"),
+		}
+		drafter := &stubDrafter{tasks: map[string]TaskCase{
+			"exp-0001": {TrapID: "exp-0001", Prompt: "prompt 1", VerifyID: "tsc", Control: "control text 1"},
+		}}
+		runner := &prospectStubRunner{}
+		verifier := &prospectStubVerifier{
+			controlErr: map[string]error{
+				"control text 1": errors.New("some other error"),
+			},
+		}
+
+		_, err := Prospect(context.Background(), ProspectConfig{
+			Records: recs, Runner: runner, Verifier: verifier, Drafter: drafter, Max: 10,
+		})
+		if err == nil {
+			t.Fatal("expected run-aborting error, got nil")
+		}
+		if errors.Is(err, ErrDepsUnavailable) {
+			t.Error("expected non-404 error, got ErrDepsUnavailable")
+		}
+	})
+
+	t.Run("skip deps-unavailable OFF-arm verify error preserves counters", func(t *testing.T) {
+		recs := []*record.Record{
+			mkProspectRecord("exp-0001", "trap", "validated", "horia"),
+		}
+		drafter := &stubDrafter{tasks: map[string]TaskCase{
+			"exp-0001": {TrapID: "exp-0001", Prompt: "bad deps prompt", VerifyID: "tsc", Control: "control text 1"},
+		}}
+		runner := &prospectStubRunner{}
+		verifier := &prospectStubVerifier{
+			controlAvoided: map[string]bool{"control text 1": true},
+			offErr: map[string]error{
+				"bad deps prompt": ErrDepsUnavailable,
+			},
+		}
+
+		rep, err := Prospect(context.Background(), ProspectConfig{
+			Records: recs, Runner: runner, Verifier: verifier, Drafter: drafter, Max: 10,
+		})
+		if err != nil {
+			t.Fatalf("Prospect: %v", err)
+		}
+		if rep.Skipped["deps"] != 1 {
+			t.Errorf("Skipped[deps] = %d, want 1", rep.Skipped["deps"])
+		}
+		if rep.Drafted != 0 {
+			t.Errorf("Drafted = %d, want 0", rep.Drafted)
+		}
+		if len(rep.OffAvoided) != 0 {
+			t.Errorf("OffAvoided = %v, want empty", rep.OffAvoided)
+		}
+		if len(rep.ModelHard) != 0 {
+			t.Errorf("ModelHard = %v, want empty", rep.ModelHard)
+		}
+	})
+
+	t.Run("skip deps-unavailable ON-arm verify error preserves counters", func(t *testing.T) {
+		recs := []*record.Record{
+			mkProspectRecord("exp-0001", "trap", "validated", "horia"),
+		}
+		drafter := &stubDrafter{tasks: map[string]TaskCase{
+			"exp-0001": {TrapID: "exp-0001", Prompt: "bad deps prompt", VerifyID: "tsc", Control: "control text 1"},
+		}}
+		runner := &prospectStubRunner{}
+		verifier := &prospectStubVerifier{
+			controlAvoided: map[string]bool{"control text 1": true},
+			offAvoided:     map[string]bool{"bad deps prompt": false},
+			onErr: map[string]error{
+				"bad deps prompt": ErrDepsUnavailable,
+			},
+		}
+
+		rep, err := Prospect(context.Background(), ProspectConfig{
+			Records: recs, Runner: runner, Verifier: verifier, Drafter: drafter, Max: 10,
+		})
+		if err != nil {
+			t.Fatalf("Prospect: %v", err)
+		}
+		if rep.Skipped["deps"] != 1 {
+			t.Errorf("Skipped[deps] = %d, want 1", rep.Skipped["deps"])
+		}
+		if rep.Drafted != 0 {
+			t.Errorf("Drafted = %d, want 0", rep.Drafted)
+		}
+		if len(rep.OffAvoided) != 0 {
+			t.Errorf("OffAvoided = %v, want empty", rep.OffAvoided)
+		}
+		if len(rep.ModelHard) != 0 {
+			t.Errorf("ModelHard = %v, want empty", rep.ModelHard)
+		}
+	})
 }

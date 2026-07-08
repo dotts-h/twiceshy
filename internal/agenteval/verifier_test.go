@@ -4,6 +4,7 @@ package agenteval
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -14,9 +15,10 @@ import (
 // verifier's job-construction and exit-code→avoided logic are tested WITHOUT a real
 // gVisor sandbox (the integration path runs on the brain, never in CI).
 type stubBroker struct {
-	gotJob repro.Job
-	exit   int
-	err    error
+	gotJob        repro.Job
+	exit          int
+	err           error
+	prepareResult repro.PhaseResult
 }
 
 func (s *stubBroker) Run(_ context.Context, j repro.Job) (repro.Result, error) {
@@ -24,7 +26,10 @@ func (s *stubBroker) Run(_ context.Context, j repro.Job) (repro.Result, error) {
 	if s.err != nil {
 		return repro.Result{}, s.err
 	}
-	return repro.Result{Execute: repro.PhaseResult{ExitCode: s.exit}}, nil
+	return repro.Result{
+		Prepare: s.prepareResult,
+		Execute: repro.PhaseResult{ExitCode: s.exit},
+	}, nil
 }
 func (s *stubBroker) Healthy(_ context.Context) error { return nil }
 
@@ -182,4 +187,52 @@ func hasFileWithSuffix(m map[string][]byte, suffix string) bool {
 		}
 	}
 	return false
+}
+
+func TestBrokerVerifier_PrepareFailures(t *testing.T) {
+	t.Run("npm E404 wrap ErrDepsUnavailable", func(t *testing.T) {
+		stderr := "npm error code E404\nnpm error 404 Not Found - GET https://registry.npmjs.org/@cosul%2fdb"
+		br := &stubBroker{
+			prepareResult: repro.PhaseResult{
+				ExitCode: 1,
+				Stderr:   stderr,
+			},
+		}
+		v := NewBrokerVerifier(br)
+		c := TaskCase{VerifyID: "tsc", Deps: []string{"@cosul/db@2"}}
+		_, err := v.Avoided(context.Background(), c, "const x = 1")
+		if err == nil {
+			t.Fatal("expected prepare failure error, got nil")
+		}
+		if !errors.Is(err, ErrDepsUnavailable) {
+			t.Errorf("expected ErrDepsUnavailable, got error: %v", err)
+		}
+		expectedMsg := "agenteval: tsc prepare: deps unavailable: npm error code E404: agenteval: task deps unavailable"
+		if err.Error() != expectedMsg {
+			t.Errorf("expected error string %q, got %q", expectedMsg, err.Error())
+		}
+	})
+
+	t.Run("non-404 prepare failure", func(t *testing.T) {
+		stderr := "npm error code ETIMEDOUT\nsomething went wrong"
+		br := &stubBroker{
+			prepareResult: repro.PhaseResult{
+				ExitCode: 1,
+				Stderr:   stderr,
+			},
+		}
+		v := NewBrokerVerifier(br)
+		c := TaskCase{VerifyID: "tsc", Deps: []string{"typescript"}}
+		_, err := v.Avoided(context.Background(), c, "const x = 1")
+		if err == nil {
+			t.Fatal("expected prepare failure error, got nil")
+		}
+		if errors.Is(err, ErrDepsUnavailable) {
+			t.Error("expected non-404 prepare failure NOT to wrap ErrDepsUnavailable")
+		}
+		expectedMsg := "agenteval: tsc prepare failed (exit 1): npm error code ETIMEDOUT\nsomething went wrong"
+		if err.Error() != expectedMsg {
+			t.Errorf("expected error string %q, got %q", expectedMsg, err.Error())
+		}
+	})
 }

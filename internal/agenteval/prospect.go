@@ -123,6 +123,10 @@ func Prospect(ctx context.Context, cfg ProspectConfig) (ProspectReport, error) {
 
 		controlAvoided, err := cfg.Verifier.Avoided(ctx, tc, tc.Control)
 		if err != nil {
+			if errors.Is(err, ErrDepsUnavailable) {
+				rep.Skipped["deps"]++
+				continue
+			}
 			return ProspectReport{}, prospectErr("control verify", rec.ID, err)
 		}
 		if !controlAvoided {
@@ -137,6 +141,13 @@ func Prospect(ctx context.Context, cfg ProspectConfig) (ProspectReport, error) {
 		}
 		offAvoided, err := cfg.Verifier.Avoided(ctx, tc, off.Output)
 		if err != nil {
+			if errors.Is(err, ErrDepsUnavailable) {
+				// A deps-skip at OFF time should not count toward Drafted. Since Drafted was
+				// already incremented after control verify, we decrement it to keep report arithmetic coherent.
+				rep.Drafted--
+				rep.Skipped["deps"]++
+				continue
+			}
 			return ProspectReport{}, prospectErr("OFF verify", rec.ID, err)
 		}
 		if offAvoided {
@@ -151,6 +162,13 @@ func Prospect(ctx context.Context, cfg ProspectConfig) (ProspectReport, error) {
 		}
 		onAvoided, err := cfg.Verifier.Avoided(ctx, tc, on.Output)
 		if err != nil {
+			if errors.Is(err, ErrDepsUnavailable) {
+				// A deps-skip at ON time should not count toward Drafted. Since Drafted was
+				// already incremented after control verify, we decrement it to keep report arithmetic coherent.
+				rep.Drafted--
+				rep.Skipped["deps"]++
+				continue
+			}
 			return ProspectReport{}, prospectErr("ON verify", rec.ID, err)
 		}
 		rep.ModelHard = append(rep.ModelHard, ProspectCase{
