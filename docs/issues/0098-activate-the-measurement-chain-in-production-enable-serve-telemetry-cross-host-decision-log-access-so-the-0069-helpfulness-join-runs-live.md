@@ -1,7 +1,7 @@
 ---
 id: 0098
 title: Activate the measurement chain in production — cross-host decision-log sync so the #0069 helpfulness join runs live on real traffic
-status: open
+status: closed
 severity: medium
 group: 0064
 depends_on: []
@@ -93,6 +93,21 @@ plumbing nor traffic — `confirmed N` flows from the next scheduled drain.
   what misled me). Fixed via `telemetrySalt` (serve + retro now share the rule) + sourcing
   `TWICESHY_TOKEN` into the drain. ADR-0026 enforcement is still valid for *pull adoption* and *fleet
   coverage*, but it was never the blocker for the feedback join — this salt fix is.
+
+## Close-out (2026-07-08)
+
+Closed as shipped-and-verified-live. All acceptance boxes were met by PRs #421
+(NAS->brain decision-log sync + timer) and #425 (token-fallback salt shared by
+serve and drain). Verified on the brain today: `twiceshy-decisions-sync.timer`
+and `twiceshy-retro.timer` both active, the synced log fresh (408 KB, 05:30Z),
+and the scheduled drain joining every transcript against it.
+
+Honest residual, handed to #0069 acceptance 3: the live joins currently emit
+`confirmed 0 helpful` on every drained transcript. The chain being live makes
+that a MEASURABLE question now (are Ignored verdicts true, or judge/correlation
+artifacts?) - which is precisely #0069's real-traffic precision/recall work
+(hand-label correlated sessions, run `twiceshy eval -usage` against them).
+Nothing in this issue's scope (sync, salt, wiring) remains open.
 
 ## Notes
 
