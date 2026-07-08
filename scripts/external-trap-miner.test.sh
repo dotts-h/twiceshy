@@ -6,6 +6,15 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 
+# external-trap-miner.sh requires jq (safe JSON escaping of commit text). It runs
+# on the brain (jq present), never in CI — the CI container (node:22-bookworm)
+# ships no jq, so SKIP cleanly there rather than fail on a tool the miner's host
+# always has. Same guard the script itself uses. (#0133 — the make-ci-vs-CI gap.)
+if ! command -v jq >/dev/null 2>&1; then
+	echo "SKIP external-trap-miner.test.sh: jq not installed"
+	exit 0
+fi
+
 PASS=0
 FAIL=0
 ok()  { PASS=$((PASS + 1)); printf 'PASS %s\n' "$1"; }
