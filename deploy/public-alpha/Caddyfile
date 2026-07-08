@@ -11,6 +11,7 @@
 #     web/landing/ as a static root (/, /docs, /terms map to the *.html files),
 #     and reverse-proxies POST /signup + GET /statz to twiceshy:8722 so the
 #     landing page's own signup form (fetch("/signup")) stays same-origin.
+#     GET /demo-search is proxied the same way for the live try-a-search box (#0132).
 #   - api.twiceshy.app — the MCP domain: everything here is non-static, so the
 #     whole vhost reverse-proxies to twiceshy:8722 (this is what MCP clients
 #     configure; /healthz, /readyz, /signup, /statz are reachable here too).
@@ -65,6 +66,10 @@ twiceshy.app, www.twiceshy.app {
 	}
 
 	handle /signup {
+		reverse_proxy twiceshy:8722
+	}
+
+	handle /demo-search {
 		reverse_proxy twiceshy:8722
 	}
 

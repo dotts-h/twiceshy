@@ -130,3 +130,22 @@ func signupStages(logger *slog.Logger, limiter *tokenBucket) []stage {
 		{name: "max-bytes", wrap: maxBytes},
 	}
 }
+
+// demoSearchStages returns the canonical middleware stages for the demo search endpoint pipeline.
+func demoSearchStages(logger *slog.Logger, limiter *tokenBucket) []stage {
+	rateLimit := func(next http.Handler) http.Handler {
+		return withRateLimit(logger, limiter, next)
+	}
+	timeout := func(next http.Handler) http.Handler {
+		return withTimeout(requestTimeout, next)
+	}
+	maxBytes := func(next http.Handler) http.Handler {
+		return withMaxBytes(maxRequestBytes, next)
+	}
+
+	return []stage{
+		{name: "global-rate-limit", provides: []string{"global-rate-limit"}, wrap: rateLimit},
+		{name: "timeout", wrap: timeout},
+		{name: "max-bytes", wrap: maxBytes},
+	}
+}

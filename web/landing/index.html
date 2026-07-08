@@ -584,6 +584,44 @@
     section { padding: 2.25rem 0; }
     .demo-panel { font-size: 13px; }
   }
+
+  .demo-search-card {
+    background: #fff;
+    border: 1px solid var(--ink-hair);
+    border-left: 3px solid var(--amber);
+    border-radius: 6px;
+    padding: 0.75rem 0.85rem;
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+  .demo-search-badge {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    background: var(--ink);
+    color: var(--paper);
+    margin-bottom: 0.4rem;
+  }
+  .demo-search-card-title {
+    font-family: var(--font-body);
+    font-weight: 700;
+    margin: 0 0 0.25rem 0;
+    color: var(--ink);
+  }
+  .demo-search-card-summary {
+    color: var(--ink-soft);
+    margin: 0;
+  }
+  .demo-search-message {
+    font-size: 0.9rem;
+    color: var(--ink-soft);
+    font-style: italic;
+    margin-top: 0.5rem;
+  }
 </style>
 </head>
 <body>
@@ -654,6 +692,14 @@
         <button type="button" class="demo-replay" id="demo-replay">↻ replay</button>
       </aside>
       <p class="demo-caption">A real card, served in milliseconds — before the third retry, not after the thirtieth.</p>
+      <div class="demo-search-box" style="margin-top: 1.5rem;">
+        <p style="font-size: 0.95rem; font-weight: 700; margin-bottom: 0.5rem; font-family: var(--font-body);">Try a real search against the live corpus:</p>
+        <form id="demo-search-form" style="display: flex; gap: 0.5rem;">
+          <input type="text" id="demo-search-input" class="signup-email" placeholder="e.g. fts5 syntax error" required style="padding: 0.5rem 0.75rem; font-size: 0.95rem;">
+          <button type="submit" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.95rem;">Search</button>
+        </form>
+        <div id="demo-search-results" style="margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.5rem;"></div>
+      </div>
     </div>
   </div>
 </header>
@@ -888,6 +934,75 @@
         }
       });
     }
+  }
+
+  // ---------- Try a real search demo box ----------
+  var searchForm = document.getElementById("demo-search-form");
+  var searchInput = document.getElementById("demo-search-input");
+  var searchResults = document.getElementById("demo-search-results");
+
+  if (searchForm && searchInput && searchResults) {
+    searchForm.addEventListener("submit", function (evt) {
+      evt.preventDefault();
+      var q = searchInput.value.trim();
+      if (!q) { return; }
+
+      searchResults.innerHTML = '<div class="demo-search-message">Searching...</div>';
+
+      fetch("/demo-search?q=" + encodeURIComponent(q))
+        .then(function (resp) {
+          if (resp.status === 429) {
+            throw new Error("Demo limit reached for today.");
+          }
+          if (!resp.ok) {
+            throw new Error("Demo temporarily unavailable.");
+          }
+          return resp.json();
+        })
+        .then(function (data) {
+          searchResults.innerHTML = "";
+          if (!data.hits || data.hits.length === 0) {
+            var msg = document.createElement("div");
+            msg.className = "demo-search-message";
+            msg.textContent = "Nothing recorded applies - that is an answer.";
+            searchResults.appendChild(msg);
+            return;
+          }
+          data.hits.forEach(function (hit) {
+            var card = document.createElement("div");
+            card.className = "demo-search-card";
+            
+            var badge = document.createElement("span");
+            badge.className = "demo-search-badge";
+            badge.textContent = hit.kind;
+            
+            var title = document.createElement("div");
+            title.className = "demo-search-card-title";
+            title.textContent = hit.title;
+            
+            var summary = document.createElement("p");
+            summary.className = "demo-search-card-summary";
+            summary.textContent = hit.summary || "";
+            
+            card.appendChild(badge);
+            card.appendChild(title);
+            card.appendChild(summary);
+            searchResults.appendChild(card);
+          });
+        })
+        .catch(function (err) {
+          var msg = document.createElement("div");
+          msg.className = "demo-search-message";
+          msg.style.color = "var(--sting)";
+          msg.style.fontWeight = "bold";
+          if (err.message === "Demo limit reached for today.") {
+            msg.textContent = "Demo limit reached for today.";
+          } else {
+            msg.textContent = "Demo temporarily unavailable.";
+          }
+          searchResults.appendChild(msg);
+        });
+    });
   }
 })();
 </script>

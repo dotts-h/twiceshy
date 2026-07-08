@@ -55,6 +55,9 @@ type Config struct {
 	// Default false — the LAN instance never sets it. When false, /signup still
 	// resolves to the route but answers 404, never revealing whether it is wired.
 	SignupEnabled bool
+	// DemoEnabled registers a working GET /demo-search endpoint: public, like
+	// /healthz and /signup, but rate-limited. When false, /demo-search answers 404.
+	DemoEnabled bool
 	// TrustedProxies, when set, lets POST /signup's per-IP daily cap key off
 	// X-Forwarded-For instead of RemoteAddr — but ONLY when RemoteAddr itself
 	// matches one of these networks (#0131): behind a reverse proxy, RemoteAddr
@@ -153,7 +156,7 @@ func New(cfg Config) (*Server, error) {
 		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	}
 
-	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, retroQueue: cfg.RetroQueue, issueQueue: cfg.IssueQueue, recordQueue: cfg.RecordQueue, corpus: cfg.Corpus, telemetry: cfg.Telemetry, queryText: cfg.TelemetryQueryText, signupEnabled: cfg.SignupEnabled, signupIssuer: cfg.TokenIssuer, signupLimiter: newSignupIPLimiter(time.Now), trustedProxies: cfg.TrustedProxies}
+	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, retroQueue: cfg.RetroQueue, issueQueue: cfg.IssueQueue, recordQueue: cfg.RecordQueue, corpus: cfg.Corpus, telemetry: cfg.Telemetry, queryText: cfg.TelemetryQueryText, signupEnabled: cfg.SignupEnabled, signupIssuer: cfg.TokenIssuer, signupLimiter: newSignupIPLimiter(time.Now), demoEnabled: cfg.DemoEnabled, demoLimiter: newDemoLimiter(time.Now), trustedProxies: cfg.TrustedProxies}
 	h.recordCount.Store(int64(cfg.RecordCount))
 	h.usage = newUsageRecorder(cfg.Index, logger, time.Now)
 	h.tenantCalls = cfg.Index
@@ -201,6 +204,11 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 
+	demoChain, err := buildChain(demoSearchStages(logger, limiter), http.HandlerFunc(h.demoSearchHTTP))
+	if err != nil {
+		return nil, err
+	}
+
 	// Health probes bypass auth + rate-limit so a container HEALTHCHECK and an
 	// external uptime monitor can reach them unauthenticated: /healthz = liveness
 	// (the process is up and serving), /readyz = readiness (the index is non-empty;
@@ -213,6 +221,7 @@ func New(cfg Config) (*Server, error) {
 	// token mint is real work, so it still sits behind the global rate limiter
 	// (shared with the authed path) plus its own per-IP daily cap in signupHTTP.
 	outer.Handle("/signup", signup)
+	outer.Handle("/demo-search", demoChain)
 	outer.Handle("/", authed)
 	return &Server{Handler: outer, h: h}, nil
 }
@@ -262,6 +271,8 @@ type handlers struct {
 	signupEnabled  bool             // gates POST /signup; false answers 404 (#0127)
 	signupIssuer   TokenIssuer      // mints tokens for /signup; required when signupEnabled
 	signupLimiter  *signupIPLimiter // per-IP daily signup cap, independent of the global limiter
+	demoEnabled    bool             // gates GET /demo-search; false answers 404
+	demoLimiter    *demoLimiter     // rate limiter for GET /demo-search
 	trustedProxies []*net.IPNet     // reverse proxies allowed to set X-Forwarded-For for the signup cap (#0131); nil = RemoteAddr only
 
 	idMu   sync.Mutex // serializes record-id allocation (#0089)
@@ -335,19 +346,8 @@ func (h *handlers) search(ctx context.Context, req *mcp.CallToolRequest, args Se
 		h.logToolError(tool, start, err)
 		return nil, SearchResult{}, err
 	}
-	// Pull channel: dense (cosine) retrieval fused with fingerprint + BM25 when
-	// an embedder is configured; falls back to the embedding-free path otherwise
-	// (ADR-0009). RetrieveFused applies the relevance floor like Retrieve.
-	hits, err := h.ix.RetrieveFused(ctx, index.Query{
-		Text:               args.Query,
-		Repo:               h.repo,
-		Ecosystem:          args.Ecosystem,
-		Package:            args.Package,
-		K:                  args.K,
-		IncludeQuarantined: args.IncludeQuarantined,
-	}, h.emb)
+	hits, err := h.pullSearchHits(ctx, args)
 	if err != nil {
-		err = fmt.Errorf("search failed: %w", err)
 		h.logToolError(tool, start, err)
 		return nil, SearchResult{}, err
 	}
@@ -384,6 +384,24 @@ func (h *handlers) search(ctx context.Context, req *mcp.CallToolRequest, args Se
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: enveloped}},
 	}, out, nil
+}
+
+// pullSearchHits is the shared pull retrieval used by search_experience and GET
+// /demo-search: RetrieveFused with the configured repo/embedder, the caller's
+// k cap, IncludeQuarantined flag, and the index relevance floor (ADR-0001).
+func (h *handlers) pullSearchHits(ctx context.Context, args SearchArgs) ([]index.Hit, error) {
+	hits, err := h.ix.RetrieveFused(ctx, index.Query{
+		Text:               args.Query,
+		Repo:               h.repo,
+		Ecosystem:          args.Ecosystem,
+		Package:            args.Package,
+		K:                  args.K,
+		IncludeQuarantined: args.IncludeQuarantined,
+	}, h.emb)
+	if err != nil {
+		return nil, fmt.Errorf("search failed: %w", err)
+	}
+	return hits, nil
 }
 
 // sessionIDFromRequest extracts the MCP session id from a tool request, or "" if there
