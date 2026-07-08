@@ -120,16 +120,19 @@ func (r *ModelRunner) Run(ctx context.Context, prompt, card string) (Result, err
 	}
 
 	url := r.endpoint + "/v1/chat/completions"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return Result{}, fmt.Errorf("agenteval: build request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if r.apiKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+r.apiKey)
+	buildReq := func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("agenteval: build request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if r.apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+r.apiKey)
+		}
+		return req, nil
 	}
 
-	resp, err := r.client.Do(httpReq)
+	resp, err := postWithOneRetry(ctx, r.client, buildReq)
 	if err != nil {
 		return Result{}, fmt.Errorf("agenteval: call %s: %w", r.model, err)
 	}
@@ -158,4 +161,38 @@ func (r *ModelRunner) Run(ctx context.Context, prompt, card string) (Result, err
 		Steps:  1,
 		Tokens: cr.Usage.TotalTokens,
 	}, nil
+}
+
+// transportRetryBackoff is the duration to wait before retrying a transport-level error.
+// It is package-level and overridden to ~0 in tests.
+var transportRetryBackoff = 2 * time.Second
+
+// postWithOneRetry executes the given HTTP request. If a transport-level error occurs
+// (i.e. client.Do returns an error), it retries the request exactly once after transportRetryBackoff.
+// Non-transport errors (any HTTP response, even 5xx) are never retried.
+// To ensure the body is re-sendable, we take a request builder function.
+func postWithOneRetry(ctx context.Context, client *http.Client, buildReq func() (*http.Request, error)) (*http.Response, error) {
+	req, err := buildReq()
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		// Any client.Do error is transport-level by definition (timeout, refused/
+		// reset connection, DNS) — an HTTP response, however bad, never errors here.
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(transportRetryBackoff):
+		}
+
+		req, err = buildReq()
+		if err != nil {
+			return nil, err
+		}
+		return client.Do(req)
+	}
+
+	return resp, nil
 }

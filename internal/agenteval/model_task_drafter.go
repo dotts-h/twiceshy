@@ -23,7 +23,9 @@ import (
 )
 
 const (
-	drafterHTTPTimeout  = 60 * time.Second
+	// drafterHTTPTimeout is raised to 120s to match runnerHTTPTimeout because a cold model
+	// reload behind a busy GPU blew 60s in the 0140 live run.
+	drafterHTTPTimeout  = 120 * time.Second
 	drafterMaxRespBytes = 1 << 20 // cap a misbehaving endpoint's body
 )
 
@@ -128,16 +130,19 @@ func (d *ModelTaskDrafter) complete(ctx context.Context, system, user string) (s
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 	url := d.endpoint + "/v1/chat/completions"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("build request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if d.apiKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+d.apiKey)
+	buildReq := func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("build request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if d.apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+d.apiKey)
+		}
+		return req, nil
 	}
 
-	resp, err := d.client.Do(httpReq)
+	resp, err := postWithOneRetry(ctx, d.client, buildReq)
 	if err != nil {
 		return "", fmt.Errorf("call %s: %w", d.model, err)
 	}
