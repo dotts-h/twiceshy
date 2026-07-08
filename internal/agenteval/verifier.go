@@ -20,6 +20,18 @@ import (
 // a substrate failure.
 var ErrDepsUnavailable = errors.New("agenteval: task deps unavailable")
 
+// npmResolutionFailureMarkers are npm's deterministic dependency-RESOLUTION
+// failure codes: the requested package/version/tag does not exist, so retrying
+// can never succeed. E404 hit at exp-2776 and ETARGET at exp-2778 in the 0140
+// live runs; EINVALIDTAGNAME and ENOVERSIONS are the remaining codes of the
+// same family. Extend only with codes that are deterministic by definition.
+var npmResolutionFailureMarkers = []string{
+	"npm error code E404",
+	"npm error code ETARGET",
+	"npm error code EINVALIDTAGNAME",
+	"npm error code ENOVERSIONS",
+}
+
 const (
 	// pinnedNodeImage is the digest-pinned Node repro-base used for TypeScript
 	// type-check jobs (the React/RN traps are tsc type errors).
@@ -78,12 +90,17 @@ func (v *BrokerVerifier) Avoided(ctx context.Context, c TaskCase, output string)
 	}
 	// A failed prepare (e.g. npm install couldn't run) means the toolchain never set
 	// up — the verdict is UNKNOWN, not "avoided". Surface it instead of scoring a
-	// vacuous pass (the bug the discrimination control caught). A deterministic
-	// dep-not-found (npm E404) is the one exception: that's a case-input defect,
-	// marked ErrDepsUnavailable so the prospect loop can skip-and-count it (#0142).
+	// vacuous pass (the bug the discrimination control caught). npm's deterministic
+	// RESOLUTION failures are the one exception: the record's dep does not exist as
+	// asked (a case-input defect), marked ErrDepsUnavailable so the prospect loop
+	// can skip-and-count it (#0142). Transient codes (ETIMEDOUT, ECONNRESET, …)
+	// deliberately stay run-fatal — a flaky registry must never look like a bad record.
 	if len(job.Prepare) > 0 && res.Prepare.ExitCode != 0 {
 		stderr := strings.TrimSpace(res.Prepare.Stderr)
-		if strings.Contains(stderr, "npm error code E404") {
+		for _, marker := range npmResolutionFailureMarkers {
+			if !strings.Contains(stderr, marker) {
+				continue
+			}
 			firstLine := stderr
 			if idx := strings.Index(stderr, "\n"); idx != -1 {
 				firstLine = strings.TrimSpace(stderr[:idx])

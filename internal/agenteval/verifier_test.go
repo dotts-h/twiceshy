@@ -190,6 +190,36 @@ func hasFileWithSuffix(m map[string][]byte, suffix string) bool {
 }
 
 func TestBrokerVerifier_PrepareFailures(t *testing.T) {
+	// The deterministic resolution family beyond E404 — each stderr is shaped
+	// like a real npm failure (ETARGET verbatim from the 0140 live run at
+	// exp-2778, which aborted the sweep the E404-only marker should have saved).
+	for _, tc := range []struct {
+		name   string
+		stderr string
+	}{
+		{"npm ETARGET", "npm error code ETARGET\nnpm error notarget No matching version found for @types/w3c-image-capture@4."},
+		{"npm EINVALIDTAGNAME", "npm error code EINVALIDTAGNAME\nnpm error Invalid tag name \"@2\" of package \"x@@2\""},
+		{"npm ENOVERSIONS", "npm error code ENOVERSIONS\nnpm error No valid versions available for placeholder-pkg"},
+	} {
+		t.Run(tc.name+" wraps ErrDepsUnavailable", func(t *testing.T) {
+			br := &stubBroker{
+				prepareResult: repro.PhaseResult{
+					ExitCode: 1,
+					Stderr:   tc.stderr,
+				},
+			}
+			v := NewBrokerVerifier(br)
+			c := TaskCase{VerifyID: "tsc", Deps: []string{"@types/w3c-image-capture@4"}}
+			_, err := v.Avoided(context.Background(), c, "const x = 1")
+			if err == nil {
+				t.Fatal("expected prepare failure error, got nil")
+			}
+			if !errors.Is(err, ErrDepsUnavailable) {
+				t.Errorf("expected ErrDepsUnavailable, got error: %v", err)
+			}
+		})
+	}
+
 	t.Run("npm E404 wrap ErrDepsUnavailable", func(t *testing.T) {
 		stderr := "npm error code E404\nnpm error 404 Not Found - GET https://registry.npmjs.org/@cosul%2fdb"
 		br := &stubBroker{
