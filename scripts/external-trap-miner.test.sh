@@ -142,6 +142,32 @@ second_count="$(queue_count)"
 check 'first run count' "$first_count" '1'
 check 'second run idempotent' "$second_count" "$first_count"
 
+# ---- a non-github/malformed line does not crash the run or drop later seeds ---
+# (reviewer finding: mapfile masks parse failure → unbound-var crash under set -u,
+# silently dropping every subsequent seed line.)
+reset_run
+SEED_MIXED="$SCRATCH/seed-mixed.txt"
+cat >"$SEED_MIXED" <<EOF
+https://gitlab.com/not/github Go
+https://github.com/example/fixture React
+EOF
+run_miner "$SEED_MIXED"
+check 'bad line skipped, later github/permissive line still mined' "$(queue_count)" '1'
+if grep -qF 'skip https://gitlab.com/not/github: unresolvable host' "$LOG"; then
+	ok 'non-github line logged as unresolvable'
+else
+	bad "non-github line not logged as unresolvable; log=$LOG"
+fi
+
+# ---- seen-ledger uses whole-line match: a fork sharing a SHA is not skipped ----
+# (reviewer finding: grep -F substring false-positive; owner/repo:sha of one repo
+# can be a substring of another's key.)
+reset_run
+# Pre-seed the ledger with a SUPERSTRING of the fixture's real key.
+printf 'x-example/fixture:%s\n' "$FIX_SHA" >"$SEEN"
+run_miner "$SEED_ALLOW"
+check 'substring ledger match does not falsely skip a distinct repo' "$(queue_count)" '1'
+
 # ---- seedfile ignores comment and blank lines --------------------------------
 reset_run
 SEED_NOISE="$SCRATCH/seed-noise.txt"

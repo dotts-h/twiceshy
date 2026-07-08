@@ -44,7 +44,12 @@ parse_github_url() {
 
 default_license_resolver() {
 	local url=$1 owner repo spdx
-	if ! mapfile -t parts < <(parse_github_url "$url"); then
+	# NB: mapfile exits 0 even when the process-substituted command fails and
+	# prints nothing, so we must check the array is actually populated — not
+	# mapfile's status — or a non-github url yields an empty array and an
+	# unbound-variable crash under `set -u`.
+	mapfile -t parts < <(parse_github_url "$url")
+	if [ "${#parts[@]}" -lt 2 ] || [ -z "${parts[0]}" ] || [ -z "${parts[1]}" ]; then
 		echo "skip $url: unresolvable host" >&2
 		return 1
 	fi
@@ -92,7 +97,7 @@ mine_repo() {
 	for sha in "${shas[@]}"; do
 		[ "$n" -ge "$LIMIT" ] && break
 		seen_key="${owner}/${repo}:${sha}"
-		grep -qF "$seen_key" "$SEEN" && continue
+		grep -qxF "$seen_key" "$SEEN" && continue  # -x: whole-line, so a fork sharing a SHA isn't a false substring match
 		subject="$(git -C "$tmpdir" log -1 --pretty='%s' "$sha")"
 		body="$(git -C "$tmpdir" log -1 --pretty='%b' "$sha" | grep -ivE '^Co-Authored-By:')"
 		diff="$(git -C "$tmpdir" show --no-color --format='' "$sha" 2>/dev/null | head -c "$MAXDIFF")"
@@ -135,7 +140,11 @@ while IFS= read -r line || [ -n "$line" ]; do
 	# ecosystem="${line#"$url"}" — operator metadata; selection only (#0133)
 	[ -z "$url" ] && continue
 
-	if ! mapfile -t parts < <(parse_github_url "$url"); then
+	# Check the array is populated, not mapfile's (always-0) status — otherwise
+	# one non-github/malformed seed line crashes the whole run on `set -u` and
+	# silently drops every later line (reviewer finding, #0133).
+	mapfile -t parts < <(parse_github_url "$url")
+	if [ "${#parts[@]}" -lt 2 ] || [ -z "${parts[0]}" ] || [ -z "${parts[1]}" ]; then
 		echo "skip $url: unresolvable host" >&2
 		continue
 	fi
