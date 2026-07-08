@@ -7,12 +7,18 @@ package agenteval
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/dotts-h/twiceshy/internal/repro"
 )
+
+// ErrDepsUnavailable marks a DETERMINISTIC dep-resolution failure (the record's
+// dep does not exist on the registry), distinguishing a case-input defect from
+// a substrate failure.
+var ErrDepsUnavailable = errors.New("agenteval: task deps unavailable")
 
 const (
 	// pinnedNodeImage is the digest-pinned Node repro-base used for TypeScript
@@ -72,10 +78,20 @@ func (v *BrokerVerifier) Avoided(ctx context.Context, c TaskCase, output string)
 	}
 	// A failed prepare (e.g. npm install couldn't run) means the toolchain never set
 	// up — the verdict is UNKNOWN, not "avoided". Surface it instead of scoring a
-	// vacuous pass (the bug the discrimination control caught).
+	// vacuous pass (the bug the discrimination control caught). A deterministic
+	// dep-not-found (npm E404) is the one exception: that's a case-input defect,
+	// marked ErrDepsUnavailable so the prospect loop can skip-and-count it (#0142).
 	if len(job.Prepare) > 0 && res.Prepare.ExitCode != 0 {
+		stderr := strings.TrimSpace(res.Prepare.Stderr)
+		if strings.Contains(stderr, "npm error code E404") {
+			firstLine := stderr
+			if idx := strings.Index(stderr, "\n"); idx != -1 {
+				firstLine = strings.TrimSpace(stderr[:idx])
+			}
+			return false, fmt.Errorf("agenteval: %s prepare: deps unavailable: %s: %w", c.VerifyID, firstLine, ErrDepsUnavailable)
+		}
 		return false, fmt.Errorf("agenteval: %s prepare failed (exit %d): %s",
-			c.VerifyID, res.Prepare.ExitCode, strings.TrimSpace(res.Prepare.Stderr))
+			c.VerifyID, res.Prepare.ExitCode, stderr)
 	}
 	return res.Execute.ExitCode == 0, nil
 }
