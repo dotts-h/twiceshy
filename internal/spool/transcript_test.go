@@ -52,6 +52,35 @@ func TestEnqueueReadTranscript_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestEnqueueReadTranscript_RoundTripSourceProvenance(t *testing.T) {
+	dir := t.TempDir()
+	tr := Transcript{
+		SessionID:     "sess-ext",
+		Author:        "trap-miner",
+		Transcript:    "upstream issue thread",
+		CapturedAt:    "2026-07-08T10:00:00Z",
+		SourceURL:     "https://github.com/example/repo/commit/abc123",
+		SourceLicense: "MIT",
+	}
+	if _, err := EnqueueTranscript(dir, tr); err != nil {
+		t.Fatalf("EnqueueTranscript: %v", err)
+	}
+	files, err := List(dir)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	got, err := ReadTranscript(files[0])
+	if err != nil {
+		t.Fatalf("ReadTranscript: %v", err)
+	}
+	if got.SourceURL != tr.SourceURL {
+		t.Errorf("SourceURL = %q, want %q", got.SourceURL, tr.SourceURL)
+	}
+	if got.SourceLicense != tr.SourceLicense {
+		t.Errorf("SourceLicense = %q, want %q", got.SourceLicense, tr.SourceLicense)
+	}
+}
+
 // Transcript and Report queues are decoupled: a Report file must not decode as a
 // Transcript with content (the intake drivers point at separate dirs, but a
 // misroute must not silently produce an empty-bodied draft).

@@ -205,6 +205,12 @@ func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, r
 
 		for _, cand := range candidates {
 			draft := candidateDraft(cand)
+			if tr.SourceURL != "" {
+				draft.SourceURL = tr.SourceURL
+			}
+			if tr.SourceLicense != "" {
+				draft.SourceLicense = tr.SourceLicense
+			}
 			key := ingest.BatchKey(draft)
 			if seen[key] {
 				dup++

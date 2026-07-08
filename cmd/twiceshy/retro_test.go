@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/dotts-h/twiceshy/internal/notify"
+	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/retro"
 	"github.com/dotts-h/twiceshy/internal/spool"
 )
@@ -58,6 +59,77 @@ func enqueueRetroTranscript(t *testing.T, queue, sessionID, transcript string) {
 		CapturedAt: "2026-06-28T10:00:00Z",
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func enqueueRetroTranscriptWithSource(t *testing.T, queue, sessionID, transcript, sourceURL, sourceLicense string) {
+	t.Helper()
+	if _, err := spool.EnqueueTranscript(queue, spool.Transcript{
+		SessionID:     sessionID,
+		Author:        "trap-miner",
+		Transcript:    transcript,
+		CapturedAt:    "2026-06-28T10:00:00Z",
+		SourceURL:     sourceURL,
+		SourceLicense: sourceLicense,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// External trap miners (#0133) stamp upstream commit URL + SPDX license on every
+// draft mined from a retro-queue entry carrying source_url/source_license.
+func TestDrainRetro_PropagatesSourceProvenance(t *testing.T) {
+	const (
+		wantURL     = "https://github.com/example/repo/commit/abc123"
+		wantLicense = "MIT"
+	)
+	corpus, ix := retroTestCorpus(t)
+	queue := filepath.Join(t.TempDir(), "retro")
+	enqueueRetroTranscriptWithSource(t, queue, "s1", "upstream issue thread", wantURL, wantLicense)
+	analyzer := &retro.StubAnalyzer{Candidates: []retro.Candidate{aTrapCandidate()}}
+
+	var buf bytes.Buffer
+	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-28"}, nil, notify.NopAlerter{}, &buf); err != nil {
+		t.Fatalf("drainRetro: %v", err)
+	}
+	recs, err := record.LoadCorpus(corpus)
+	if err != nil {
+		t.Fatalf("LoadCorpus: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("want 1 quarantined draft, got %d", len(recs))
+	}
+	if recs[0].Provenance.SourceURL != wantURL {
+		t.Errorf("Provenance.SourceURL = %q, want %q", recs[0].Provenance.SourceURL, wantURL)
+	}
+	if recs[0].Provenance.SourceLicense != wantLicense {
+		t.Errorf("Provenance.SourceLicense = %q, want %q", recs[0].Provenance.SourceLicense, wantLicense)
+	}
+}
+
+// Interactive session captures omit source_url/source_license; provenance stays empty.
+func TestDrainRetro_BackwardCompat_NoSourceProvenance(t *testing.T) {
+	corpus, ix := retroTestCorpus(t)
+	queue := filepath.Join(t.TempDir(), "retro")
+	enqueueRetroTranscript(t, queue, "s1", "agent session")
+	analyzer := &retro.StubAnalyzer{Candidates: []retro.Candidate{aTrapCandidate()}}
+
+	var buf bytes.Buffer
+	if err := drainRetro(context.Background(), analyzer, ix, "", corpus, queue, retroOpts{now: "2026-06-28"}, nil, notify.NopAlerter{}, &buf); err != nil {
+		t.Fatalf("drainRetro: %v", err)
+	}
+	recs, err := record.LoadCorpus(corpus)
+	if err != nil {
+		t.Fatalf("LoadCorpus: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("want 1 quarantined draft, got %d", len(recs))
+	}
+	if recs[0].Provenance.SourceURL != "" {
+		t.Errorf("Provenance.SourceURL = %q, want empty", recs[0].Provenance.SourceURL)
+	}
+	if recs[0].Provenance.SourceLicense != "" {
+		t.Errorf("Provenance.SourceLicense = %q, want empty", recs[0].Provenance.SourceLicense)
 	}
 }
 
