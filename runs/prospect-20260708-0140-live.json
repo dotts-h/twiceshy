@@ -1,0 +1,87 @@
+{
+  "Scanned": 4004,
+  "Eligible": 225,
+  "Drafted": 17,
+  "Skipped": {
+    "control": 126,
+    "deps": 9,
+    "ineligible": 3779,
+    "unsupported": 73
+  },
+  "OffAvoided": [
+    "exp-3227",
+    "exp-3891",
+    "exp-3909",
+    "exp-3910",
+    "exp-3919",
+    "exp-3949",
+    "exp-3950",
+    "exp-3955",
+    "exp-4011",
+    "exp-4064",
+    "exp-4068",
+    "exp-4103"
+  ],
+  "ModelHard": [
+    {
+      "TrapID": "exp-2815",
+      "Prompt": "Implement a viewport utility function `clampInset` that calculates the keyboard inset as a fraction of the viewport height instead of using a fixed pixel value.",
+      "VerifyID": "tsc",
+      "Deps": [
+        "typescript@5"
+      ],
+      "Card": "Clamp keyboard inset using viewport fraction instead of fixed pixel floor\nA hard‑coded 80px clamp caused dead space on taller phones because the resting residual grows with screen height; gating on a fraction (20%) keeps the inset accurate across devices.\nReplace the constant KB_INSET_FLOOR with a dynamic threshold based on 20% of innerHeight; clamp inset to zero when below that fraction and preserve real keyboard insets above it.",
+      "OnAvoided": false,
+      "TokensOff": 107,
+      "TokensOn": 229
+    },
+    {
+      "TrapID": "exp-2861",
+      "Prompt": "Write a function that takes two numbers and returns their product.",
+      "VerifyID": "tsc",
+      "Deps": [
+        "typescript@5"
+      ],
+      "Card": "Do not close issues with failing acceptance criteria\nClosing an issue before all acceptance checks pass can hide bugs.\nOnly close the GitHub issue after CI passes and all acceptance tests are verified.",
+      "OnAvoided": false,
+      "TokensOff": 67,
+      "TokensOn": 109
+    },
+    {
+      "TrapID": "exp-3875",
+      "Prompt": "Given a list of latitude and longitude coordinates representing the bounding box of a region, write a function that calculates the geographic center of this bounding box. The function should return the center as an object with 'latitude' and 'longitude' properties.",
+      "VerifyID": "tsc",
+      "Deps": [
+        "typescript@5"
+      ],
+      "Card": "Bounding‑box centre can start a day plan in the sea\nWhen the planner defaults to the geographic centre of a region’s bounding box, the origin may lie offshore and a sea tap becomes the first stop.\nSnap the origin to the nearest real destination (any place whose category is not \"transit\") before planning, and expose this snapped point back to the UI.",
+      "OnAvoided": false,
+      "TokensOff": 145,
+      "TokensOn": 266
+    },
+    {
+      "TrapID": "exp-3952",
+      "Prompt": "Create a function named `clampPercentage` that takes a number as input and returns the number clamped between 0 and 100.",
+      "VerifyID": "tsc",
+      "Deps": [
+        "typescript@5"
+      ],
+      "Card": "Create a unified clamp function for displayed percentages\nAdded `fillPct` in `contextFill.ts`, which clamps any percentage to the 0–100 range, and updated all component references to use it.\nDefine `fillPct(f)` that returns `Math.min(100, Math.max(0, f.pct))` and replace all raw `f.pct` usages with this function in the Svelte component and tests.",
+      "OnAvoided": true,
+      "TokensOff": 91,
+      "TokensOn": 197
+    },
+    {
+      "TrapID": "exp-4001",
+      "Prompt": "Update the documentation file `README.md` to correctly reference experiment ID 'exp-2871'. Ensure that all mentions of 'exp-2868' are replaced with 'exp-2871'.",
+      "VerifyID": "tsc",
+      "Deps": [
+        "typescript"
+      ],
+      "Card": "Wrong experience ID referenced in documentation\nDocs mistakenly refer to exp-2868 instead of the correct exp-2871, causing confusion and regression tracking errors.\nUpdated all references to use the correct exp-2871 ID, as shown by the diff.",
+      "OnAvoided": false,
+      "TokensOff": 110,
+      "TokensOn": 345
+    }
+  ]
+}
