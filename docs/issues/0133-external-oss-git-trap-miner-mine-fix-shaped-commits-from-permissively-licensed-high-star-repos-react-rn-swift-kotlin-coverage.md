@@ -1,7 +1,7 @@
 ---
 id: 0133
 title: External-OSS git trap miner — mine fix-shaped commits from permissively-licensed high-star repos (React/RN/Swift/Kotlin coverage)
-status: open
+status: closed
 severity: medium
 group: 0088
 depends_on: []
@@ -39,7 +39,7 @@ imported security advisories.
   "mine licensed commits/tests; retain only independently derived facts" is
   explicitly in-bounds — commits and tests carry the repo's own license.
 
-## Status 2026-07-08 (PR pending) — machinery shipped, rollout gated
+## Status 2026-07-08 — SHIPPED & LIVE (autonomous)
 
 Built and verified; the rollout wave is deliberately NOT fired (operator call).
 
