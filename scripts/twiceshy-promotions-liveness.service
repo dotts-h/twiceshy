@@ -1,0 +1,15 @@
+[Unit]
+Description=twiceshy promotions-liveness alarm — alert if validate runs promote 0 while an eligible quarantine backlog sits (a silent judge freeze, #0122)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ori
+# Alert channel + thresholds via /etc/twiceshy/promotions-liveness.env if present
+# (TWICESHY_ALERT_URL / NTFY_URL, NTFY_TOKEN, TWICESHY_LIVENESS_K, TWICESHY_LIVENESS_COOLDOWN).
+EnvironmentFile=-/etc/twiceshy/promotions-liveness.env
+ExecStart=/home/ori/.local/bin/promotions-liveness-alarm.sh
+# main() returns 1 when it DETECTS a freeze (and alerts) — the alarm working, not
+# failing, so don't mark the unit failed in `systemctl --failed` (cf. stall-alarm).
+SuccessExitStatus=1

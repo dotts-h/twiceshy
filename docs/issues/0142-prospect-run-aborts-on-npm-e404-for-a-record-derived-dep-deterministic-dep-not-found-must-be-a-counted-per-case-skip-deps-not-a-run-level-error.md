@@ -1,14 +1,14 @@
 ---
 id: 0142
 title: Prospect run aborts on npm E404 for a record-derived dep — deterministic dep-not-found must be a counted per-case skip (deps), not a run-level error
-status: open
+status: closed
 severity: high
 group: 0112
 depends_on: []
 forgejo:
 links:
   adr: docs/adr/ADR-0029-model-hard-trap-prospector.md
-  prs: []
+  prs: [553, 554, 555, 556]
   issues: [0112, 0140, 0119]
   regression:
 assets: []

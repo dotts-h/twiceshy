@@ -1,0 +1,10 @@
+[Unit]
+Description=run the twiceshy promotions-liveness alarm hourly (a green run is not a productive run, #0122)
+
+[Timer]
+OnBootSec=8min
+OnUnitActiveSec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
