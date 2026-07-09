@@ -62,6 +62,8 @@ type ProspectReport struct {
 	// (prospectEligible false), "unsupported" (drafter declined), "leak" (the leak
 	// guard tripped), "control" (the drafted control did not verify as avoided).
 	Skipped map[string]int
+	// per-record skip reason so auditing 'why was record X skipped' needs no re-run (#0144).
+	SkipReasons map[string]string
 	// OffAvoided lists the TrapIDs whose OFF arm already avoided the trap — no
 	// ON arm was run for these (nothing to measure).
 	OffAvoided []string
@@ -92,7 +94,7 @@ type ProspectConfig struct {
 // both arms' verdicts are recorded. Runner/Verifier errors abort the run, like
 // agenteval.Run.
 func Prospect(ctx context.Context, cfg ProspectConfig) (ProspectReport, error) {
-	rep := ProspectReport{Skipped: map[string]int{}}
+	rep := ProspectReport{Skipped: map[string]int{}, SkipReasons: map[string]string{}}
 
 	for _, rec := range cfg.Records {
 		if cfg.Max > 0 && rep.Drafted >= cfg.Max {
@@ -102,6 +104,7 @@ func Prospect(ctx context.Context, cfg ProspectConfig) (ProspectReport, error) {
 
 		if !prospectEligible(rec) {
 			rep.Skipped["ineligible"]++
+			rep.SkipReasons[rec.ID] = "ineligible"
 			continue
 		}
 		rep.Eligible++
@@ -110,6 +113,7 @@ func Prospect(ctx context.Context, cfg ProspectConfig) (ProspectReport, error) {
 		if err != nil {
 			if errors.Is(err, ErrTaskUnsupported) {
 				rep.Skipped["unsupported"]++
+				rep.SkipReasons[rec.ID] = "unsupported"
 				continue
 			}
 			return ProspectReport{}, prospectErr("drafting task", rec.ID, err)
@@ -118,6 +122,7 @@ func Prospect(ctx context.Context, cfg ProspectConfig) (ProspectReport, error) {
 		refText := rec.Resolution.RootCause + " " + rec.Resolution.Fix
 		if similarity.Assess(tc.Prompt, refText, similarity.DefaultN).Flagged(leakShingleThreshold) {
 			rep.Skipped["leak"]++
+			rep.SkipReasons[rec.ID] = "leak"
 			continue
 		}
 
@@ -125,12 +130,14 @@ func Prospect(ctx context.Context, cfg ProspectConfig) (ProspectReport, error) {
 		if err != nil {
 			if errors.Is(err, ErrDepsUnavailable) {
 				rep.Skipped["deps"]++
+				rep.SkipReasons[rec.ID] = "deps"
 				continue
 			}
 			return ProspectReport{}, prospectErr("control verify", rec.ID, err)
 		}
 		if !controlAvoided {
 			rep.Skipped["control"]++
+			rep.SkipReasons[rec.ID] = "control"
 			continue
 		}
 		rep.Drafted++
@@ -146,6 +153,7 @@ func Prospect(ctx context.Context, cfg ProspectConfig) (ProspectReport, error) {
 				// already incremented after control verify, we decrement it to keep report arithmetic coherent.
 				rep.Drafted--
 				rep.Skipped["deps"]++
+				rep.SkipReasons[rec.ID] = "deps"
 				continue
 			}
 			return ProspectReport{}, prospectErr("OFF verify", rec.ID, err)
@@ -167,6 +175,7 @@ func Prospect(ctx context.Context, cfg ProspectConfig) (ProspectReport, error) {
 				// already incremented after control verify, we decrement it to keep report arithmetic coherent.
 				rep.Drafted--
 				rep.Skipped["deps"]++
+				rep.SkipReasons[rec.ID] = "deps"
 				continue
 			}
 			return ProspectReport{}, prospectErr("ON verify", rec.ID, err)
