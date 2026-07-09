@@ -136,6 +136,48 @@ func TestProspect_EligibilitySkipsImporterWrongKindAndStatus(t *testing.T) {
 	}
 }
 
+// The aggregate Skipped counts answer "how many were skipped and why-category",
+// but auditing a specific record ("why was exp-X skipped?") required a one-record
+// re-run (#0144). SkipReasons carries the per-record reason so every future audit
+// is cheap: each skipped record id maps to its skip category.
+func TestProspect_SkipReasonsArePerRecord(t *testing.T) {
+	recs := []*record.Record{
+		mkProspectRecord("exp-0001", "convention", "validated", "horia"), // ineligible (wrong kind)
+		mkProspectRecord("exp-0002", "trap", "validated", "horia"),       // unsupported (drafter declines)
+		mkProspectRecord("exp-0003", "trap", "validated", "horia"),       // control-fail
+	}
+	drafter := &stubDrafter{
+		tasks: map[string]TaskCase{
+			"exp-0003": {TrapID: "exp-0003", Prompt: "control-fail prompt", VerifyID: "gobuild", Control: "ctrl"},
+		},
+		errs: map[string]error{"exp-0002": ErrTaskUnsupported},
+	}
+	runner := &prospectStubRunner{}
+	// exp-0003's control does NOT verify as avoided → control-fail skip.
+	verifier := &prospectStubVerifier{controlAvoided: map[string]bool{"ctrl": false}}
+
+	rep, err := Prospect(context.Background(), ProspectConfig{
+		Records: recs, Runner: runner, Verifier: verifier, Drafter: drafter, Max: 10,
+	})
+	if err != nil {
+		t.Fatalf("Prospect: %v", err)
+	}
+	want := map[string]string{
+		"exp-0001": "ineligible",
+		"exp-0002": "unsupported",
+		"exp-0003": "control",
+	}
+	for id, reason := range want {
+		if got := rep.SkipReasons[id]; got != reason {
+			t.Errorf("SkipReasons[%s] = %q, want %q; all=%v", id, got, reason, rep.SkipReasons)
+		}
+	}
+	// A record that was NOT skipped must not appear.
+	if _, ok := rep.SkipReasons["exp-9999"]; ok {
+		t.Errorf("SkipReasons must only contain skipped records; got %v", rep.SkipReasons)
+	}
+}
+
 func TestProspect_DrafterUnsupportedCountedAsSkip(t *testing.T) {
 	recs := []*record.Record{mkProspectRecord("exp-0001", "trap", "validated", "horia")}
 	drafter := &stubDrafter{errs: map[string]error{"exp-0001": ErrTaskUnsupported}}

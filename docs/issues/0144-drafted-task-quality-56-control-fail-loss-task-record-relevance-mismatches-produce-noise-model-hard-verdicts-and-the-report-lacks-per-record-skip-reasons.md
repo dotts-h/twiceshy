@@ -48,4 +48,20 @@ verdicts, and skips are aggregate counts only.
 - A task-record relevance guard voids mismatched drafts (counted, like leak).
 - Report carries per-record outcome (drafted/skipped+reason/verdict).
 
+## Progress
+
+- [x] **Acceptance 3 — per-record skip reasons (PR #574).** `ProspectReport.SkipReasons`
+  (record id → skip category) is populated at every skip site (ineligible / unsupported /
+  leak / deps / control) and serialized in the report JSON, so "why was record X skipped?"
+  needs no one-record re-run. This is the enabler the other two acceptance bullets lean on.
+- [ ] **Acceptance 1 — control-fail (56%).** Deferred: a live drafter-quality investigation.
+  The 0140 run characterized it (e.g. exp-2868/react19-useref: the drafter's own control
+  answer fails its drafted task), but the root-cause + drafter fix needs iterative live
+  prospector runs (now cheaper — the abort bugs #0142/#0143 are fixed, and skip reasons are
+  per-record). Best done as a focused live session.
+- [ ] **Acceptance 2 — relevance guard.** Deferred with acceptance 1: the leak guard's
+  5-word-shingle containment (tuned for near-verbatim leaks) scores ~0 for legitimate
+  task-vs-symptom relevance, so a relevance floor needs a different measure (token overlap
+  or a judge) calibrated against live drafts — the same live loop as acceptance 1.
+
 ## Notes
