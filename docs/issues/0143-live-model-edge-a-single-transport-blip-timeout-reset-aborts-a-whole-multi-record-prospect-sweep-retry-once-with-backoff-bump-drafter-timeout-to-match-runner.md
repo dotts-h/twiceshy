@@ -1,14 +1,14 @@
 ---
 id: 0143
 title: Live model edge: a single transport blip (timeout/reset) aborts a whole multi-record prospect sweep — retry once with backoff; bump drafter timeout to match runner
-status: open
+status: closed
 severity: medium
 group: 0112
 depends_on: []
 forgejo:
 links:
   adr:
-  prs: []
+  prs: [557]
   issues: [0112, 0140, 0142]
   regression:
 assets: []
