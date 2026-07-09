@@ -1,14 +1,14 @@
 ---
 id: 0111
 title: Extend the push stoplist with a static dev-vocabulary list (ADR-0017 cheap proxy)
-status: open
+status: closed
 severity: low
 group: 0106
 depends_on: []
 forgejo: 477
 links:
   adr:
-  prs: []
+  prs: [576]
   issues: [0106, 0068]
   regression:
 assets: []
