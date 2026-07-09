@@ -109,6 +109,34 @@ func advisoryRecord() *record.Record {
 	}
 }
 
+// A panel that fails at the TRANSPORT layer (context canceled by a SIGTERM, deadline
+// exceeded, connection refused) yields NO verdict about the record — the outcome must
+// be flagged Unjudged so the driver does NOT start its 168h hold cooldown on it. The
+// #0123 freeze: 3,043 of 3,238 "holds" one run were context-canceled judge calls, and
+// treating them as real declines re-froze the whole eligible backlog for a week. A
+// transport failure is fail-safe (quarantined, not a hard error) but must stay
+// re-judgeable next run — distinct from a real decline (!Approved), which DOES cooldown.
+func TestPromote_PanelTransportError_UnjudgedNotHeld(t *testing.T) {
+	panel, err := judge.NewPanel(
+		judge.PanelMember{Model: "gpt-oss:20b", Judge: &judge.StubJudge{Err: errors.New("call gpt-oss:20b: Post \"http://localhost:8723\": context canceled")}},
+		judge.PanelMember{Model: "claude-oss:20b", Judge: &judge.StubJudge{}},
+	)
+	if err != nil {
+		t.Fatalf("NewPanel: %v", err)
+	}
+	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, &judge.StubJudge{}, promote.WithAdvisoryPanel(panel))
+	out, err := p.Promote(context.Background(), advisoryRecord())
+	if err != nil {
+		t.Fatalf("a transport failure must be a fail-safe outcome, not a hard error: %v", err)
+	}
+	if out.Promoted {
+		t.Fatal("a record whose judge call was canceled must NOT be promoted")
+	}
+	if !out.Unjudged {
+		t.Fatalf("a transport/no-verdict panel error must be flagged Unjudged (so it does not start the hold cooldown, #0123); got Unjudged=false, reason=%q", out.Reason)
+	}
+}
+
 func TestPromote_HoldingPlusApprove_Promotes(t *testing.T) {
 	j := &captureJudge{verdict: judge.ApproveVerdict("gemini-2.5-pro")}
 	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, j)

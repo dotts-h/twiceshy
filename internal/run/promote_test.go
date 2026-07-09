@@ -184,3 +184,54 @@ func TestPromoteCorpus_NoJournalWhenPathEmpty(t *testing.T) {
 		t.Fatalf("empty journalPath must write no file; stat err = %v", statErr)
 	}
 }
+
+type unjudgedPromoter struct {
+	calls []string
+}
+
+func (u *unjudgedPromoter) Promote(ctx context.Context, rec *record.Record) (promote.Outcome, error) {
+	u.calls = append(u.calls, rec.ID)
+	return promote.Outcome{
+		Promoted: false,
+		Unjudged: true,
+		Reason:   "panel unavailable (fail-safe)",
+	}, nil
+}
+
+func TestPromoteCorpus_UnjudgedOutcome_DeferredAndNotHeld(t *testing.T) {
+	recs := []*record.Record{eligibleRec("exp-0100")}
+	up := &unjudgedPromoter{}
+	var buf bytes.Buffer
+	st, actions, err := PromoteCorpus(context.Background(), ".", recs, up, func(string, *record.Record) error { return nil }, guard.Guardrails{}, nil, nil, &buf, "")
+	if err != nil {
+		t.Fatalf("PromoteCorpus: %v", err)
+	}
+	if st.Deferred != 1 || st.Held != 0 {
+		t.Fatalf("stats = %+v, want Deferred=1, Held=0", st)
+	}
+	if len(actions) != 1 || actions[0].Outcome != "deferred" {
+		t.Fatalf("actions = %+v, want 1 action with Outcome='deferred'", actions)
+	}
+}
+
+func TestPromoteCorpus_ContextCanceled_BreaksCleanly(t *testing.T) {
+	recs := []*record.Record{eligibleRec("exp-0100"), eligibleRec("exp-0101")}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	up := &unjudgedPromoter{}
+	var buf bytes.Buffer
+	st, actions, err := PromoteCorpus(ctx, ".", recs, up, func(string, *record.Record) error { return nil }, guard.Guardrails{}, nil, nil, &buf, "")
+	if err != nil {
+		t.Fatalf("expected clean break on context cancellation, got error: %v", err)
+	}
+	if len(up.calls) != 1 {
+		t.Fatalf("expected promoter to be called exactly once (for the first record before breaking), got %d calls", len(up.calls))
+	}
+	if st.Deferred != 1 {
+		t.Fatalf("expected 1 deferred outcome, got %+v", st)
+	}
+	if len(actions) != 1 || actions[0].Outcome != "deferred" {
+		t.Fatalf("expected 1 action with outcome 'deferred', got %+v", actions)
+	}
+}

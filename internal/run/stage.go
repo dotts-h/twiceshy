@@ -80,15 +80,15 @@ func draftSummary(st DraftStats) string {
 func PromoteManifest(runID string, anomaly bool, st PromoteStats, judgeStats *judge.JudgeStats, actions []promote.RecordAction) promote.RunManifest {
 	return promote.RunManifest{
 		RunID: runID, Stage: "promote", Anomaly: anomaly,
-		Counts:     map[string]int{"promoted": st.Promoted, "held": st.Held, "ineligible": st.Ineligible},
+		Counts:     map[string]int{"promoted": st.Promoted, "held": st.Held, "ineligible": st.Ineligible, "deferred": st.Deferred},
 		JudgeStats: judgeStats,
 		Actions:    actions,
 	}
 }
 
 func WritePromoteSummary(out io.Writer, st PromoteStats) {
-	_, _ = fmt.Fprintf(out, "promote: promoted %d, held %d (attestation/judge declined), ineligible %d\n",
-		st.Promoted, st.Held, st.Ineligible)
+	_, _ = fmt.Fprintf(out, "promote: promoted %d, held %d (attestation/judge declined), ineligible %d, deferred %d\n",
+		st.Promoted, st.Held, st.Ineligible, st.Deferred)
 }
 
 func AdaptManifest(runID string, anomaly bool, st AdaptStats, judgeStats *judge.JudgeStats, actions []promote.RecordAction) promote.RunManifest {

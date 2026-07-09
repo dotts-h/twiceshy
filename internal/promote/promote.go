@@ -101,6 +101,7 @@ func NewPromoter(attestor Attestor, j judge.Judge, root string, opts ...Option) 
 // Outcome is the result of a promotion attempt.
 type Outcome struct {
 	Promoted    bool
+	Unjudged    bool   // the judge produced NO verdict (transport/substrate failure, not a decline) — fail-safe quarantined, but must NOT start the hold cooldown (#0123).
 	Reason      string // why it was NOT promoted (eligibility, attestation, or verdict)
 	Attestation repro.Attestation
 	Verdict     judge.Verdict
@@ -309,7 +310,7 @@ func (p *Promoter) promoteAdvisory(ctx context.Context, rec *record.Record) (Out
 	}
 	verdict, err := p.advisoryPanel.Judge(ctx, judge.Request{Record: rec})
 	if err != nil {
-		return Outcome{Reason: "advisory panel unavailable — stays quarantined (fail-safe): " + err.Error(), Verdict: verdict}, nil
+		return Outcome{Reason: "advisory panel unavailable — stays quarantined (fail-safe): " + err.Error(), Verdict: verdict, Unjudged: true}, nil
 	}
 	if !verdict.Approved() {
 		return Outcome{Reason: "advisory panel did not approve — stays quarantined", Verdict: verdict}, nil
@@ -350,7 +351,7 @@ func (p *Promoter) promoteProse(ctx context.Context, rec *record.Record) (Outcom
 	}
 	verdict, err := p.prosePanel.Judge(ctx, judge.Request{Record: rec, Prose: true})
 	if err != nil {
-		return Outcome{Reason: "prose panel unavailable — stays quarantined (fail-safe): " + err.Error(), Verdict: verdict}, nil
+		return Outcome{Reason: "prose panel unavailable — stays quarantined (fail-safe): " + err.Error(), Verdict: verdict, Unjudged: true}, nil
 	}
 	if !verdict.Approved() {
 		return Outcome{Reason: "prose panel did not approve — stays quarantined", Verdict: verdict}, nil

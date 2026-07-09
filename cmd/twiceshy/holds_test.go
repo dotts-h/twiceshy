@@ -21,6 +21,7 @@ func TestNoteOutcomes_HeldStartsPromotedClears(t *testing.T) {
 		{ID: "exp-0700", Outcome: "promoted"},   // now promoted -> clear
 		{ID: "exp-0701", Outcome: "held"},       // newly held -> start cooldown
 		{ID: "exp-0702", Outcome: "ineligible"}, // untouched
+		{ID: "exp-0703", Outcome: "deferred"},   // untouched (#0123)
 	}, now)
 
 	if l.inCooldown("exp-0700", now) {
@@ -31,6 +32,9 @@ func TestNoteOutcomes_HeldStartsPromotedClears(t *testing.T) {
 	}
 	if l.inCooldown("exp-0702", now) {
 		t.Fatal("an ineligible record must not be added to the ledger")
+	}
+	if l.inCooldown("exp-0703", now) {
+		t.Fatal("a deferred record must not be added to the ledger")
 	}
 }
 
