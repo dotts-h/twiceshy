@@ -1,14 +1,14 @@
 ---
 id: 0147
 title: wtf importer record-quality polish: synthetic anchor-slug error_signatures, auto-composed symptom summaries, empty-title heading skip
-status: open
+status: closed
 severity: low
 group: 0088
 depends_on: []
 forgejo:
 links:
   adr:
-  prs: []
+  prs: [572]
   issues: [0088, 0134]
   regression:
 assets: []
