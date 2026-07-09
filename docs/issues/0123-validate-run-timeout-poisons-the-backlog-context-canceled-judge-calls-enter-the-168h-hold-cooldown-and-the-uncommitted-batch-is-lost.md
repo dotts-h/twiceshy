@@ -1,15 +1,15 @@
 ---
 id: 0123
 title: Validate-run timeout poisons the backlog: context-canceled judge calls enter the 168h hold cooldown and the uncommitted batch is lost
-status: open
+status: closed
 severity: high
 group: 
 depends_on: []
 forgejo: 524
 links:
   adr:
-  prs: []
-  issues: []
+  prs: [571]
+  issues: [0148]
   regression:
 assets: []
 ---

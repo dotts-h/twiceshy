@@ -21,8 +21,13 @@ WorkingDirectory=/home/ori/twiceshy-validate
 EnvironmentFile=/home/ori/.config/twiceshy/validate.env
 ExecStart=/home/ori/twiceshy/scripts/scheduled-validate.sh
 # The merge of a soaked PR is done by a later run, so this unit never holds for
-# the soak; a generous cap still bounds a single promote/adapt sweep.
-TimeoutStartSec=3600
+# the soak. A full re-judge sweep at ~8s/record needs ~3.5h to reach the 200-promotion
+# clean cap; the old 1h default SIGTERMed mid-sweep, which (pre-#0123) marked every
+# unreached record held into the 168h cooldown and lost the uncommitted batch. 5h covers
+# the cap with margin; TWICESHY_MAX_PROMOTIONS is the real per-run governor. This bakes
+# into the repo the value a 2026-07-06 emergency drop-in (override.conf) already applied
+# in production, so a fresh deploy is correct without the manual override.
+TimeoutStartSec=18000
 Nice=10
 
 [Install]

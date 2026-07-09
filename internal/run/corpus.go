@@ -51,6 +51,7 @@ type PromoteStats struct {
 	Promoted   int // holding attestation + judge PASS → flipped to validated
 	Held       int // eligible but not promoted (attestation didn't hold or judge declined)
 	Ineligible int // not the execution-provable class (left for a human)
+	Deferred   int // judge produced NO verdict (transport/substrate failure, not a decline) — fail-safe quarantined, but must NOT start the hold cooldown (#0123)
 }
 
 // PrintEffectPreview reports the would-be transitions of a no-persist run; a
@@ -212,6 +213,18 @@ func PromoteCorpus(ctx context.Context, corpus string, recs []*record.Record, ru
 			return st, actions, promoteErr
 		}
 		if !outcome.Promoted {
+			if outcome.Unjudged {
+				st.Deferred++
+				_, _ = fmt.Fprintf(out, "  deferred %s (%s)\n", rec.ID, outcome.Reason)
+				log.Info("decision", "record_id", rec.ID, "outcome", "deferred", "reason", outcome.Reason, "duration_ms", dur)
+				action := promote.RecordAction{ID: rec.ID, Outcome: "deferred", FromStatus: from, ToStatus: rec.Status, Reason: outcome.Reason}
+				actions = append(actions, action)
+				journal.record(action)
+				if ctx.Err() != nil {
+					break
+				}
+				continue
+			}
 			st.Held++
 			_, _ = fmt.Fprintf(out, "  held %s (%s)\n", rec.ID, outcome.Reason)
 			log.Info("decision", "record_id", rec.ID, "outcome", "held", "reason", outcome.Reason, "duration_ms", dur)
@@ -268,7 +281,7 @@ func PromoteCorpus(ctx context.Context, corpus string, recs []*record.Record, ru
 		log.Warn("approval-rate anomaly", "outcome", "rate_anomaly", "promoted", budget.Actions(), "judged", budget.Runs(), "rate", budget.ActionRate())
 		alert.Alert(ctx, "rate_anomaly", msg)
 	}
-	log.Info("run complete", "outcome", "summary", "promoted", st.Promoted, "held", st.Held, "ineligible", st.Ineligible, "anomaly", anomaly, "duration_ms", time.Since(start).Milliseconds())
+	log.Info("run complete", "outcome", "summary", "promoted", st.Promoted, "held", st.Held, "deferred", st.Deferred, "ineligible", st.Ineligible, "anomaly", anomaly, "duration_ms", time.Since(start).Milliseconds())
 	// Marking complete here (including an anomaly halt or a budget-cap break) is
 	// deliberate: only a hard mid-record error is a resumable abort (it set
 	// StoppedAt). An anomaly halt is held for human review and a budget cap means
