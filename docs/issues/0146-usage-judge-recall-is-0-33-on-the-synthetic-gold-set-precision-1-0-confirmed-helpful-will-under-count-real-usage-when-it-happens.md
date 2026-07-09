@@ -1,14 +1,14 @@
 ---
 id: 0146
 title: Usage judge recall is 0.33 on the synthetic gold set (precision 1.0) — confirmed_helpful will under-count real usage when it happens
-status: open
+status: closed
 severity: medium
 group: 0064
 depends_on: []
 forgejo:
 links:
   adr:
-  prs: []
+  prs: [573]
   issues: [0064, 0069]
   regression:
 assets: []
@@ -38,5 +38,27 @@ Actual: {TP:1, FN:2, recall:0.33} - "both-used: exp-0002/exp-0006 judge=ignored 
 ## Acceptance
 - Synthetic recall materially improved without dropping precision below 1.0
   on the real all-negative sample (re-run both evals; record numbers here).
+
+## Resolution (2026-07-09)
+
+Root cause was NOT prompt wording — it was the **shim contract** (the #0099 class).
+`ModelUsageJudge` sent an empty `system`, so the shared retro-analyzer shim (:8729)
+injected its OWN default system — the trap-EXTRACTION contract ("respond with
+`{\"candidates\":[...]}`") — and gpt-oss dutifully returned candidates, never verdicts.
+`wireVerdicts` decoded zero verdicts → every served card scored FN → recall collapsed
+(measured 0.00 live at repro time, worse than the filed 0.33).
+
+Fix (`internal/retro/model_usage.go`): `NewModelUsageJudge` now defaults `system` to a
+verdicts-contract `defaultUsageSystem` when none is configured — it also states the recall
+rule ("a card is used if its lesson is APPLIED, even if the id is not cited"). Verified live
+against the :8729 shim (gpt-oss:20b):
+
+- Synthetic gold: precision 1.0, **recall 0.00 → 1.00** (TP 3, FP 0, FN 0).
+- Real all-negative sample (usage-cases-real-20260708.json, 8 cases / 18 served pairs):
+  **FP 0 preserved** (TP 0, FP 0, FN 0) — no false "used" introduced.
+
+Unit guard: `TestModelUsageJudge_ParsesVerdictsAndFramesTranscript` asserts the default
+system carries the verdicts contract; `TestModelUsageJudge_ExplicitSystemOverridesDefault`
+keeps an explicit `cfg.System` authoritative.
 
 ## Notes
