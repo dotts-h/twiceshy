@@ -57,13 +57,16 @@ func TestWtf_ParseFixtures(t *testing.T) {
 	}
 
 	var wtfjs, wtfpython int
-	bySig := map[string]ingest.Draft{}
+	byTitle := map[string]ingest.Draft{}
 	for _, d := range drafts {
-		bySig[d.Symptom.ErrorSignatures[0]] = d
-		if strings.HasPrefix(d.Symptom.ErrorSignatures[0], "wtfjs:") {
+		byTitle[d.Title] = d
+		if len(d.Symptom.ErrorSignatures) != 0 {
+			t.Errorf("expected empty error signatures, got %v for %q", d.Symptom.ErrorSignatures, d.Title)
+		}
+		if len(d.AppliesTo) > 0 && d.AppliesTo[0].Ecosystem == "npm" {
 			wtfjs++
 		}
-		if strings.HasPrefix(d.Symptom.ErrorSignatures[0], "wtfpython:") {
+		if len(d.AppliesTo) > 0 && d.AppliesTo[0].Ecosystem == "PyPI" {
 			wtfpython++
 		}
 	}
@@ -71,7 +74,7 @@ func TestWtf_ParseFixtures(t *testing.T) {
 		t.Fatalf("ecosystem counts: wtfjs=%d wtfpython=%d", wtfjs, wtfpython)
 	}
 
-	emptyArr, ok := bySig["wtfjs:-is-equal-"]
+	emptyArr, ok := byTitle["`[]` is equal `![]`"]
 	if !ok {
 		t.Fatalf("missing wtfjs [] == ![] draft: %+v", drafts)
 	}
@@ -81,8 +84,8 @@ func TestWtf_ParseFixtures(t *testing.T) {
 	if emptyArr.Title != "`[]` is equal `![]`" {
 		t.Errorf("title = %q", emptyArr.Title)
 	}
-	if !strings.Contains(emptyArr.Symptom.Summary, "Array is equal not array") {
-		t.Errorf("summary = %q", emptyArr.Symptom.Summary)
+	if emptyArr.Symptom.Summary != "`[]` is equal `![]`" {
+		t.Errorf("summary = %q, want just the title due to redundant one-liner", emptyArr.Symptom.Summary)
 	}
 	if !strings.Contains(emptyArr.Body, "[] == ![]") || !strings.Contains(emptyArr.Body, "abstract equality operator") {
 		t.Errorf("body missing snippet or explanation: %q", emptyArr.Body)
@@ -104,7 +107,7 @@ func TestWtf_ParseFixtures(t *testing.T) {
 		t.Errorf("source_url = %q, want %q", emptyArr.SourceURL, wantURL)
 	}
 
-	nan, ok := bySig["wtfjs:nan-is-not-a-nan"]
+	nan, ok := byTitle["`NaN` is not a `NaN`"]
 	if !ok {
 		t.Fatalf("missing NaN draft")
 	}
@@ -112,7 +115,7 @@ func TestWtf_ParseFixtures(t *testing.T) {
 		t.Errorf("fix should quote entry guidance: %q", nan.Resolution.Fix)
 	}
 
-	chained, ok := bySig["wtfpython:be-careful-with-chained-operations"]
+	chained, ok := byTitle["Be careful with chained operations"]
 	if !ok {
 		t.Fatalf("missing chained-operations draft")
 	}
@@ -127,18 +130,12 @@ func TestWtf_ParseFixtures(t *testing.T) {
 		t.Errorf("body missing python snippet: %q", chained.Body)
 	}
 
-	hash, ok := bySig["wtfpython:hash-brownies"]
+	hash, ok := byTitle["Hash brownies"]
 	if !ok {
 		t.Fatalf("missing hash brownies draft")
 	}
 	if !strings.Contains(hash.Resolution.Fix, "delete the key") {
 		t.Errorf("fix should carry entry-stated workaround: %q", hash.Resolution.Fix)
-	}
-
-	for _, sig := range []string{"wtfjs:-malformed-missing-explanation-", "wtfpython:-malformed-missing-explanation-"} {
-		if _, found := bySig[sig]; found {
-			t.Errorf("malformed entry %q must be skipped", sig)
-		}
 	}
 }
 
@@ -195,11 +192,11 @@ func TestWtf_DeterministicOrder(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var sigs []string
+		var titles []string
 		for _, draft := range d {
-			sigs = append(sigs, draft.Symptom.ErrorSignatures[0])
+			titles = append(titles, draft.Title)
 		}
-		return sigs
+		return titles
 	}
 	a, b := mk(), mk()
 	if strings.Join(a, ",") != strings.Join(b, ",") {
@@ -272,5 +269,126 @@ func TestWtf_PrepareQuarantinesAndDedups(t *testing.T) {
 	}
 	if out2.Novelty == index.NoveltyNovel {
 		t.Fatalf("second Prepare must dedup, got Novel")
+	}
+}
+
+func TestWtf_SkipEmptyHeadings(t *testing.T) {
+	const body = `# 👀 Examples
+
+## 
+
+` + "```js\n1;\n```" + `
+
+### 💡 Explanation:
+reasons
+
+## 
+
+` + "```js\n2;\n```" + `
+
+### 💡 Explanation:
+more reasons
+
+## Valid entry
+
+` + "```js\n3;\n```" + `
+
+### 💡 Explanation:
+valid reasons
+`
+	src := ingest.NewWtfSource(stubWtf(map[string]string{"wtfjs": body}))
+	drafts, err := src.Drafts(context.Background())
+	if err != nil {
+		t.Fatalf("Drafts: %v", err)
+	}
+	if len(drafts) != 1 {
+		t.Fatalf("expected 1 draft, got %d", len(drafts))
+	}
+	if drafts[0].Title != "Valid entry" {
+		t.Errorf("expected Title 'Valid entry', got %q", drafts[0].Title)
+	}
+}
+
+func TestWtfPython_SkipEmptyHeadings(t *testing.T) {
+	const body = `# 👀 Examples
+
+### ▶ 
+
+` + "```py\n1\n```" + `
+
+#### 💡 Explanation:
+reasons
+
+### ▶    
+
+` + "```py\n2\n```" + `
+
+#### 💡 Explanation:
+more reasons
+
+### ▶ Valid python entry
+
+` + "```py\n3\n```" + `
+
+#### 💡 Explanation:
+valid reasons
+`
+	src := ingest.NewWtfSource(stubWtf(map[string]string{"wtfpython": body}))
+	drafts, err := src.Drafts(context.Background())
+	if err != nil {
+		t.Fatalf("Drafts: %v", err)
+	}
+	if len(drafts) != 1 {
+		t.Fatalf("expected 1 draft, got %d", len(drafts))
+	}
+	if drafts[0].Title != "Valid python entry" {
+		t.Errorf("expected Title 'Valid python entry', got %q", drafts[0].Title)
+	}
+}
+
+func TestWtf_SummaryReadability(t *testing.T) {
+	// Case 1: Redundant one-liner (normalized one-liner is substring of normalized title or vice-versa)
+	{
+		const body = `# 👀 Examples
+## ` + "`[]` is equal `![]`" + `
+Array is equal not array
+` + "```js\n[] == ![];\n```" + `
+### 💡 Explanation:
+Because reasons.
+`
+		src := ingest.NewWtfSource(stubWtf(map[string]string{"wtfjs": body}))
+		drafts, err := src.Drafts(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(drafts) != 1 {
+			t.Fatalf("expected 1 draft, got %d", len(drafts))
+		}
+		if got := drafts[0].Symptom.Summary; got != "`[]` is equal `![]`" {
+			t.Errorf("expected summary to be just title, got %q", got)
+		}
+	}
+
+	// Case 2: Informative one-liner
+	{
+		const body = `# 👀 Examples
+## Adding arrays
+` + "```js\n[] + []; // -> ''\n```" + `
+### 💡 Explanation:
+Because reasons.
+`
+		src := ingest.NewWtfSource(stubWtf(map[string]string{"wtfjs": body}))
+		drafts, err := src.Drafts(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(drafts) != 1 {
+			t.Fatalf("expected 1 draft, got %d", len(drafts))
+		}
+		// The one-liner here is "[] + []; // -> ''"
+		want := "Adding arrays: [] + []; // -> ''"
+		if got := drafts[0].Symptom.Summary; got != want {
+			t.Errorf("expected summary %q, got %q", want, got)
+		}
 	}
 }

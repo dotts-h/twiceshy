@@ -141,9 +141,9 @@ func (s *WtfSource) Drafts(ctx context.Context) ([]Draft, error) {
 		}
 	}
 	sort.Slice(drafts, func(i, j int) bool {
-		si, sj := drafts[i].Symptom.ErrorSignatures[0], drafts[j].Symptom.ErrorSignatures[0]
-		if si != sj {
-			return si < sj
+		ki, kj := BatchKey(drafts[i]), BatchKey(drafts[j])
+		if ki != kj {
+			return ki < kj
 		}
 		return drafts[i].Title < drafts[j].Title
 	})
@@ -186,6 +186,9 @@ func parseWtfPython(body string) []Draft {
 	var drafts []Draft
 	for title, section := range wtfSplitSections(body, "### ▶ ") {
 		title = strings.TrimSpace(title)
+		if title == "" {
+			continue
+		}
 		snippet := wtfPythonSnippet(section)
 		explainM := wtfpythonExplainRe.FindStringSubmatch(section)
 		if snippet == "" || explainM == nil {
@@ -250,6 +253,9 @@ func wtfExamplesSlice(body string) string {
 }
 
 func wtfjsSkipTitle(title string) bool {
+	if strings.TrimSpace(title) == "" {
+		return true
+	}
 	switch title {
 	case "👀 Examples", "Table of Contents":
 		return true
@@ -318,10 +324,19 @@ func wtfpythonOneLiner(section, snippet string) string {
 }
 
 func wtfDraft(collection, title, oneLiner, snippet, explanation, sourceURL string, applies []record.AppliesTo) Draft {
-	sig := fmt.Sprintf("%s:%s", collection, githubHeadingAnchor(title))
 	summary := title
 	if oneLiner != "" {
-		summary = title + ": " + oneLiner
+		normTitle := normalize(title)
+		normOneLiner := normalize(oneLiner)
+		redundant := false
+		if normTitle != "" && normOneLiner != "" {
+			if strings.Contains(normTitle, normOneLiner) || strings.Contains(normOneLiner, normTitle) {
+				redundant = true
+			}
+		}
+		if !redundant {
+			summary = title + ": " + oneLiner
+		}
 	}
 	rootCause := wtfRootCause(explanation)
 	fix := wtfFixText(explanation)
@@ -331,7 +346,7 @@ func wtfDraft(collection, title, oneLiner, snippet, explanation, sourceURL strin
 		Title: title,
 		Symptom: &record.Symptom{
 			Summary:         summary,
-			ErrorSignatures: []string{sig},
+			ErrorSignatures: nil,
 		},
 		AppliesTo: applies,
 		Resolution: &record.Resolution{
@@ -342,6 +357,16 @@ func wtfDraft(collection, title, oneLiner, snippet, explanation, sourceURL strin
 		SourceLicense: wtfSourceLicense,
 		SourceURL:     sourceURL,
 	}
+}
+
+func normalize(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(unicode.ToLower(r))
+		}
+	}
+	return b.String()
 }
 
 func wtfRootCause(explanation string) string {
