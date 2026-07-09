@@ -1,14 +1,14 @@
 ---
 id: 0122
 title: Promotions-liveness alarm: alert on consecutive promoted=0 validate runs while quarantine is non-empty
-status: open
+status: closed
 severity: high
 group: 
 depends_on: []
 forgejo: 523
 links:
   adr:
-  prs: []
+  prs: [569]
   issues: []
   regression:
 assets: []
