@@ -59,6 +59,36 @@ func TestModelUsageJudge_ParsesVerdictsAndFramesTranscript(t *testing.T) {
 	if !strings.Contains(req.Prompt, transcriptBegin) || !strings.Contains(req.Prompt, "agent used exp-0149") {
 		t.Errorf("request prompt did not frame the transcript:\n%s", req.Prompt)
 	}
+	// With no cfg.System, the judge MUST send its own verdicts-contract system prompt
+	// so the shared shim does not override it with the trap-EXTRACTION contract (which
+	// yields {"candidates":...}, never verdicts — the #0099/#0146 recall-0 bug).
+	if !strings.Contains(req.System, `"verdicts"`) {
+		t.Errorf("default system must state the verdicts contract, got %q", req.System)
+	}
+}
+
+func TestModelUsageJudge_ExplicitSystemOverridesDefault(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		_, _ = io.WriteString(w, `{"verdicts":[]}`)
+	}))
+	defer srv.Close()
+
+	j, err := NewModelUsageJudge(ModelConfig{Endpoint: srv.URL, Model: "gpt-oss:20b", System: "CUSTOM SYSTEM", Client: srv.Client()})
+	if err != nil {
+		t.Fatalf("NewModelUsageJudge: %v", err)
+	}
+	if _, err := j.JudgeUsage(context.Background(), "t"); err != nil {
+		t.Fatalf("JudgeUsage: %v", err)
+	}
+	var req wireRequest
+	if err := json.Unmarshal(gotBody, &req); err != nil {
+		t.Fatalf("request body not wireRequest JSON: %v", err)
+	}
+	if req.System != "CUSTOM SYSTEM" {
+		t.Errorf("explicit cfg.System must win, got %q", req.System)
+	}
 }
 
 func TestModelUsageJudge_ErrorsAreNotSilentlyEmpty(t *testing.T) {
