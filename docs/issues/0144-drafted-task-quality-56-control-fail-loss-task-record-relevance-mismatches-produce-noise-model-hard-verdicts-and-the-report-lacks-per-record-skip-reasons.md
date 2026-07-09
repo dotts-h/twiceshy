@@ -1,14 +1,14 @@
 ---
 id: 0144
 title: Drafted-task quality: 56% control-fail loss, task-record relevance mismatches produce noise model-hard verdicts, and the report lacks per-record skip reasons
-status: open
+status: closed
 severity: high
 group: 0112
 depends_on: []
 forgejo:
 links:
   adr:
-  prs: []
+  prs: [574, 575]
   issues: [0112, 0140, 0119, 0061]
   regression:
 assets: []
@@ -48,20 +48,42 @@ verdicts, and skips are aggregate counts only.
 - A task-record relevance guard voids mismatched drafts (counted, like leak).
 - Report carries per-record outcome (drafted/skipped+reason/verdict).
 
-## Progress
+## Resolution (2026-07-09)
+
+All three acceptance bullets addressed across PRs #574 (part 3) and #575 (parts 1+2),
+the latter driven by a live prospector investigation.
 
 - [x] **Acceptance 3 — per-record skip reasons (PR #574).** `ProspectReport.SkipReasons`
-  (record id → skip category) is populated at every skip site (ineligible / unsupported /
-  leak / deps / control) and serialized in the report JSON, so "why was record X skipped?"
-  needs no one-record re-run. This is the enabler the other two acceptance bullets lean on.
-- [ ] **Acceptance 1 — control-fail (56%).** Deferred: a live drafter-quality investigation.
-  The 0140 run characterized it (e.g. exp-2868/react19-useref: the drafter's own control
-  answer fails its drafted task), but the root-cause + drafter fix needs iterative live
-  prospector runs (now cheaper — the abort bugs #0142/#0143 are fixed, and skip reasons are
-  per-record). Best done as a focused live session.
-- [ ] **Acceptance 2 — relevance guard.** Deferred with acceptance 1: the leak guard's
-  5-word-shingle containment (tuned for near-verbatim leaks) scores ~0 for legitimate
-  task-vs-symptom relevance, so a relevance floor needs a different measure (token overlap
-  or a judge) calibrated against live drafts — the same live loop as acceptance 1.
+  (record id → skip category) is populated at every skip site and serialized in the report
+  JSON, so "why was record X skipped?" needs no one-record re-run.
+
+- [x] **Acceptance 1 — control-fail root cause UNDERSTOOD & DOCUMENTED (the "or" clause).**
+  A live probe (`internal/agenteval/probe_controlfail_test.go`, PROBE_CONTROLFAIL=1,
+  qwen2.5-coder:14b + docker/runsc) drafted real records and ran their controls through the
+  broker. The dominant cause is **not** the trap biting — it's that the eligibility filter
+  (validated ∧ kind∈{trap,fix} ∧ non-importer) admits many records that are **not
+  code-reproducible traps**: workflow lessons (exp-2861 "do not close issues with failing
+  CI"), sandbox-infra lessons (exp-4231 "offline build needs a pre-fetched module"), and
+  ops/deploy lessons (exp-2840 "scheduled job dies on binary↔script version skew"). The
+  drafter faithfully tries and **fabricates a generic, unrelated task** whose own control
+  then fails `tsc`/`gobuild` for reasons unrelated to any trap:
+    - exp-2861 → drafted "concatenate two strings" (zero relation to the record).
+    - exp-4231 → drafted "print a random integer" (zero relation).
+    - exp-2868 (react19-useref) → drafted a `useRef<number>()` attached to a `<div>`, failing
+      TS2322 (an incidental type error), never even exercising the trap's TS2554.
+  So control-fail is dominated by **drafter fabrication on non-code-reproducible records**,
+  concentrated in the tsc/gobuild classes.
+
+- [x] **Acceptance 2 — relevance guard (PR #575).** The guard voids a drafted task whose
+  prompt shares NONE of the record's distinctive terms (title + symptom + error_signatures +
+  applies_to package, tokens ≥4 chars minus a generic-coding stopword set) — catching the
+  fabrications above before they burn a control-verify or emit a noise model-hard verdict.
+  It under-voids by design (one shared term keeps a draft), so a relevant-but-hard draft is
+  never silenced: verified live that exp-2861/exp-4231 void while exp-2868 (shares
+  "useref"/"react") is kept (`TestProbe_RelevanceGuardCalibration`, `Skipped["irrelevant"]`).
+
+Follow-up (not blocking): tightening `prospectEligible` to exclude non-code-reproducible
+kinds up front would cut the fabrication rate at the source; the relevance guard already
+neutralizes the noise downstream.
 
 ## Notes

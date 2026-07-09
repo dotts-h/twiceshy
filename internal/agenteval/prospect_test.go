@@ -136,6 +136,63 @@ func TestProspect_EligibilitySkipsImporterWrongKindAndStatus(t *testing.T) {
 	}
 }
 
+// The #0144 live probe showed the dominant control-fail cause: many "eligible"
+// validated records are workflow/ops/infra lessons, not code traps, so the drafter
+// fabricates an unrelated task (exp-2861 "do not close issues with failing CI" was
+// drafted as "concatenate two strings"). The relevance guard voids a draft whose
+// prompt shares NONE of the record's distinctive terms — but keeps a relevant-but-
+// hard draft (exp-2868 shares "useref"/"react"), so it can't silence real leads.
+func TestProspect_RelevanceGuardVoidsFabricatedDraft(t *testing.T) {
+	// A workflow record (no code trap) — its distinctive terms are about closing issues.
+	irrelevant := &record.Record{
+		ID: "exp-2861", Kind: "trap", Status: "validated",
+		Title:      "Do not close issues with failing acceptance criteria",
+		Provenance: record.Provenance{Source: record.Source{Author: "horia"}},
+		Symptom:    &record.Symptom{Summary: "Closing an issue before all acceptance checks pass can hide bugs"},
+		Resolution: &record.Resolution{RootCause: "Premature closure leads to regressions", Fix: "Keep the issue open until every check is green"},
+	}
+	// A real code trap — the faithful draft echoes its distinctive terms (useref/react).
+	relevant := &record.Record{
+		ID: "exp-2868", Kind: "trap", Status: "validated",
+		Title:      "React 19 removed the no-argument useRef overload; useRef now fails TS2554",
+		Provenance: record.Provenance{Source: record.Source{Author: "horia"}},
+		Symptom:    &record.Symptom{Summary: "useRef() with no initial value no longer type-checks", ErrorSignatures: []string{"TS2554"}},
+		Resolution: &record.Resolution{RootCause: "the no-arg overload was dropped", Fix: "pass an explicit initial value"},
+	}
+	drafter := &stubDrafter{tasks: map[string]TaskCase{
+		// Fabricated: nothing to do with closing issues.
+		"exp-2861": {TrapID: "exp-2861", Prompt: "Write a function in TypeScript that concatenates two strings", VerifyID: "gobuild", Control: "ctrl-2861"},
+		// Faithful: echoes the record's useRef/React vocabulary.
+		"exp-2868": {TrapID: "exp-2868", Prompt: "Upgrade a project to React 19 and fix the useRef hook type errors", VerifyID: "gobuild", Control: "ctrl-2868"},
+	}}
+	runner := &prospectStubRunner{}
+	// exp-2868's control passes and its OFF arm avoids (ends cleanly as OffAvoided).
+	// If the guard wrongly let exp-2861 through, its control (default-avoided) would
+	// make it Drafted too — caught below by Drafted==1 and the missing skip.
+	verifier := &prospectStubVerifier{offAvoided: map[string]bool{
+		"Upgrade a project to React 19 and fix the useRef hook type errors": true,
+	}}
+
+	rep, err := Prospect(context.Background(), ProspectConfig{
+		Records: []*record.Record{irrelevant, relevant}, Runner: runner, Verifier: verifier, Drafter: drafter, Max: 10,
+	})
+	if err != nil {
+		t.Fatalf("Prospect: %v", err)
+	}
+	if rep.Skipped["irrelevant"] != 1 {
+		t.Errorf("Skipped[irrelevant] = %d, want 1; skipped=%v", rep.Skipped["irrelevant"], rep.Skipped)
+	}
+	if rep.SkipReasons["exp-2861"] != "irrelevant" {
+		t.Errorf("SkipReasons[exp-2861] = %q, want irrelevant", rep.SkipReasons["exp-2861"])
+	}
+	if rep.SkipReasons["exp-2868"] == "irrelevant" {
+		t.Errorf("relevant draft (shares useref/react) must not be voided as irrelevant")
+	}
+	if rep.Drafted != 1 {
+		t.Errorf("Drafted = %d, want 1 (only the relevant record); a leaked fabrication would inflate this", rep.Drafted)
+	}
+}
+
 // The aggregate Skipped counts answer "how many were skipped and why-category",
 // but auditing a specific record ("why was exp-X skipped?") required a one-record
 // re-run (#0144). SkipReasons carries the per-record reason so every future audit
