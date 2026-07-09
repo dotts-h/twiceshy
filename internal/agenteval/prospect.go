@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/similarity"
@@ -60,7 +61,8 @@ type ProspectReport struct {
 	Scanned, Eligible, Drafted int
 	// Skipped counts records that never reached a verdict, by reason: "ineligible"
 	// (prospectEligible false), "unsupported" (drafter declined), "leak" (the leak
-	// guard tripped), "control" (the drafted control did not verify as avoided).
+	// guard tripped), "irrelevant" (the relevance guard), "control" (the drafted
+	// control did not verify as avoided).
 	Skipped map[string]int
 	// per-record skip reason so auditing 'why was record X skipped' needs no re-run (#0144).
 	SkipReasons map[string]string
@@ -123,6 +125,18 @@ func Prospect(ctx context.Context, cfg ProspectConfig) (ProspectReport, error) {
 		if similarity.Assess(tc.Prompt, refText, similarity.DefaultN).Flagged(leakShingleThreshold) {
 			rep.Skipped["leak"]++
 			rep.SkipReasons[rec.ID] = "leak"
+			continue
+		}
+
+		// Relevance Guard: Many eligible records are workflow/ops/infra lessons, not
+		// code traps, which can lead the drafter to fabricate an unrelated coding task
+		// (e.g., exp-2861 "do not close issues with failing CI" drafted as "concatenate
+		// two strings"). We void fabricated drafts that share no distinctive terms with the
+		// record's trap vocabulary. Under-voiding is the safe direction, so one shared
+		// distinctive term is sufficient to keep the draft.
+		if !draftRelevantToRecord(tc.Prompt, rec) {
+			rep.Skipped["irrelevant"]++
+			rep.SkipReasons[rec.ID] = "irrelevant"
 			continue
 		}
 
@@ -226,4 +240,117 @@ func renderProspectCard(rec *record.Record) string {
 		lines = append(lines, rec.Resolution.Fix)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// draftRelevantToRecord returns whether the prompt shares at least one distinctive
+// term with the record's trap vocabulary. If the record itself has no distinctive terms,
+// it cannot be judged, so we return true to avoid voiding it.
+func draftRelevantToRecord(prompt string, rec *record.Record) bool {
+	recTerms := recordDistinctiveTerms(rec)
+	if len(recTerms) == 0 {
+		return true
+	}
+	promptTerms := distinctiveTerms(prompt)
+	for term := range promptTerms {
+		if recTerms[term] {
+			return true
+		}
+	}
+	return false
+}
+
+// recordDistinctiveTerms gathers the record's trap vocabulary from rec.Title,
+// rec.Symptom.Summary, rec.Symptom.ErrorSignatures, and each rec.AppliesTo[].Package,
+// and extracts the distinctive terms.
+func recordDistinctiveTerms(rec *record.Record) map[string]bool {
+	var parts []string
+	parts = append(parts, rec.Title)
+	if rec.Symptom != nil {
+		parts = append(parts, rec.Symptom.Summary)
+		parts = append(parts, rec.Symptom.ErrorSignatures...)
+	}
+	for _, app := range rec.AppliesTo {
+		parts = append(parts, app.Package)
+	}
+	combined := strings.Join(parts, " ")
+	return distinctiveTerms(combined)
+}
+
+// distinctiveTerms extracts all distinctive (non-stopword) alphanumeric tokens
+// of length at least 4 from the input string s.
+func distinctiveTerms(s string) map[string]bool {
+	s = strings.ToLower(s)
+	tokens := strings.FieldsFunc(s, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	res := make(map[string]bool)
+	for _, tok := range tokens {
+		if len(tok) >= 4 && !relevanceStopwords[tok] && !isNumeric(tok) {
+			res[tok] = true
+		}
+	}
+	return res
+}
+
+func isNumeric(s string) bool {
+	for _, r := range s {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// relevanceStopwords contains ultra-generic coding-task tokens that must never
+// count as a shared distinctive term.
+var relevanceStopwords = map[string]bool{
+	"with":     true,
+	"that":     true,
+	"this":     true,
+	"then":     true,
+	"when":     true,
+	"code":     true,
+	"your":     true,
+	"from":     true,
+	"into":     true,
+	"have":     true,
+	"will":     true,
+	"must":     true,
+	"only":     true,
+	"also":     true,
+	"does":     true,
+	"test":     true,
+	"file":     true,
+	"line":     true,
+	"true":     true,
+	"false":    true,
+	"null":     true,
+	"value":    true,
+	"values":   true,
+	"using":    true,
+	"used":     true,
+	"uses":     true,
+	"should":   true,
+	"return":   true,
+	"returns":  true,
+	"function": true,
+	"write":    true,
+	"program":  true,
+	"example":  true,
+	"input":    true,
+	"output":   true,
+	"error":    true,
+	"errors":   true,
+	"type":     true,
+	"types":    true,
+	"print":    true,
+	"prints":   true,
+	"takes":    true,
+	"result":   true,
+	"number":   true,
+	"string":   true,
+	"strings":  true,
+	"title":    true,
+	"symptom":  true,
+	"summary":  true,
 }
