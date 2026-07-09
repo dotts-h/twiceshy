@@ -129,7 +129,7 @@ never a cycle).
 | [0108](0108-two-token-corroboration-for-prompt-triggered-push-error-trigger-keeps-single-token.md) | Two-token corroboration for prompt-triggered push; error trigger keeps single-token | closed | high | 0106 | |
 | [0109](0109-flag-gated-raw-query-text-on-gate-decision-telemetry.md) | Flag-gated raw query text on gate-decision telemetry | closed | medium | 0106 | |
 | [0110](0110-promotion-judge-gains-a-usefulness-dimension-would-this-card-change-a-competent-agent-s-action.md) | Promotion judge gains a usefulness dimension: would this card change a competent agent's action | closed | medium | 0106 | |
-| [0111](0111-extend-the-push-stoplist-with-a-static-dev-vocabulary-list-adr-0017-cheap-proxy.md) | Extend the push stoplist with a static dev-vocabulary list (ADR-0017 cheap proxy) | open | low | 0106 | |
+| [0111](0111-extend-the-push-stoplist-with-a-static-dev-vocabulary-list-adr-0017-cheap-proxy.md) | Extend the push stoplist with a static dev-vocabulary list (ADR-0017 cheap proxy) | closed | low | 0106 | |
 | [0112](0112-epic-model-hard-trap-prospector-measure-which-records-flip-a-base-model.md) | Epic: Model-hard trap prospector — measure which records flip a base model | open | high | — | |
 | [0113](0113-prospector-core-record-to-task-templating-off-arm-run-broker-verdict-model-hard-report.md) | Prospector core: record-to-task templating, OFF-arm run, broker verdict, model-hard report | closed | high | 0112 | |
 | [0114](0114-prospector-gold-emission-failed-tasks-become-0005-gold-cases-on-arm-delta-measured.md) | Prospector gold emission: failed tasks become #0005 gold cases; ON-arm delta measured | closed | medium | 0112 | |
