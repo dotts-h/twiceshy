@@ -149,21 +149,32 @@ func TestValidateCommercialArtifactsDetectsManifestAndNoticeDrift(t *testing.T) 
 	want := pack.BuildManifest(recs, true, false)
 	notices := pack.NoticeDocument(want)
 	materials := pack.MaterialFiles(recs, want)
+	records := pack.RecordFiles(recs, want)
+	for path, payload := range records {
+		if got := want.RecordSHA256[path]; got != pack.LicenseDigest(payload) {
+			t.Fatalf("record digest %s = %q, want exact payload digest", path, got)
+		}
+	}
 	packLicense := []byte("Commercial pack terms\n")
 	want.PackLicenseSHA256 = pack.LicenseDigest(packLicense)
-	if errs := pack.ValidateCommercialArtifacts(recs, want, notices, packLicense, materials); len(errs) != 0 {
+	if errs := pack.ValidateCommercialArtifacts(recs, want, notices, packLicense, materials, records); len(errs) != 0 {
 		t.Fatalf("canonical artifacts rejected: %v", errs)
 	}
 
 	badManifest := want
 	badManifest.Attribution = nil
-	if errs := pack.ValidateCommercialArtifacts(recs, badManifest, notices, packLicense, materials); len(errs) == 0 {
+	if errs := pack.ValidateCommercialArtifacts(recs, badManifest, notices, packLicense, materials, records); len(errs) == 0 {
 		t.Fatal("missing manifest notice entry must be rejected")
 	}
-	if errs := pack.ValidateCommercialArtifacts(recs, want, []byte("# incomplete\n"), packLicense, materials); len(errs) == 0 {
+	preLedgerManifest := want
+	preLedgerManifest.RecordSHA256 = nil
+	if errs := pack.ValidateCommercialArtifacts(recs, preLedgerManifest, notices, packLicense, materials, records); len(errs) == 0 {
+		t.Fatal("pre-record-ledger manifest must fail closed and require rebuild")
+	}
+	if errs := pack.ValidateCommercialArtifacts(recs, want, []byte("# incomplete\n"), packLicense, materials, records); len(errs) == 0 {
 		t.Fatal("incomplete notice document must be rejected")
 	}
-	if errs := pack.ValidateCommercialArtifacts(recs, want, notices, nil, materials); len(errs) == 0 {
+	if errs := pack.ValidateCommercialArtifacts(recs, want, notices, nil, materials, records); len(errs) == 0 {
 		t.Fatal("missing pack-level LICENSE terms must be rejected")
 	}
 	tampered := make(map[string][]byte, len(materials))
@@ -174,8 +185,19 @@ func TestValidateCommercialArtifactsDetectsManifestAndNoticeDrift(t *testing.T) 
 		tampered[path] = []byte("forged material")
 		break
 	}
-	if errs := pack.ValidateCommercialArtifacts(recs, want, notices, packLicense, tampered); len(errs) == 0 {
+	if errs := pack.ValidateCommercialArtifacts(recs, want, notices, packLicense, tampered, records); len(errs) == 0 {
 		t.Fatal("forged third-party material must be rejected")
+	}
+	forgedRecords := make(map[string][]byte, len(records))
+	for path, body := range records {
+		forgedRecords[path] = append([]byte(nil), body...)
+	}
+	for path := range forgedRecords {
+		forgedRecords[path] = []byte("forged experience")
+		break
+	}
+	if errs := pack.ValidateCommercialArtifacts(recs, want, notices, packLicense, materials, forgedRecords); len(errs) == 0 {
+		t.Fatal("forged experience record payload must be rejected")
 	}
 }
 

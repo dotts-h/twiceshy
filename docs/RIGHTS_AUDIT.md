@@ -82,9 +82,18 @@ twiceshy rights-audit \
 
 Manifest selection, bundled license/notice material, or pack-level LICENSE drift
 fails the command. All three files are required together. The manifest binds the
-pack terms by SHA-256. Validation inventories the entire pack root and rejects
-every missing, extra, stale, unreferenced, symlinked, or non-regular artifact;
-passing three valid files alongside an unreviewed payload is not sufficient.
+pack terms by SHA-256 and carries `record_sha256`, a deterministic path-to-digest
+ledger for every included experience Markdown payload. Validation reads each
+record through the rooted, symlink-rejecting pack filesystem and compares its
+exact bytes with both the ledger and the reviewed corpus. It also inventories
+the entire pack root and rejects every missing, extra, stale, unreferenced,
+symlinked, or non-regular artifact; passing three valid files alongside an
+unreviewed or modified payload is not sufficient.
+
+The record ledger is a fail-closed manifest evolution: manifests built before
+`record_sha256` are readable JSON but cannot prove bundled record bytes, so
+`rights-audit` rejects them. Rebuild those packs with the current `twiceshy pack`
+command; no compatibility mode synthesizes missing digests.
 
 `twiceshy pack -out` must name a new or empty directory. The command refuses to
 overlay or replace a non-empty directory, so a prior pack cannot leave stale

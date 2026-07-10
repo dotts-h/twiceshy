@@ -305,12 +305,16 @@ type Excluded struct {
 	Reason string `json:"reason"`
 }
 
-// Manifest is the plan for a pack: which record ids are in, which are out (with
-// reasons), and the attribution the pack must carry.
+// Manifest is the plan for a pack: which record ids are in, the SHA-256 of each
+// exact bundled record payload, which records are out (with reasons), and the
+// attribution the pack must carry. RecordSHA256 is required even when empty;
+// manifests created before this ledger was introduced fail closed and must be
+// rebuilt before artifact validation.
 type Manifest struct {
 	Commercial        bool               `json:"commercial"`
 	PackLicenseSHA256 string             `json:"pack_license_sha256,omitempty"`
 	Included          []string           `json:"included"`
+	RecordSHA256      map[string]string  `json:"record_sha256"`
 	Excluded          []Excluded         `json:"excluded"`
 	Attribution       []AttributionEntry `json:"attribution"`
 }
@@ -321,7 +325,7 @@ type Manifest struct {
 // commercial-eligible (Classify) are additionally excluded, and every included
 // record needing attribution is recorded. Pure and deterministic (sorted).
 func BuildManifest(recs []*record.Record, commercial, includeQuarantined bool) Manifest {
-	m := Manifest{Commercial: commercial}
+	m := Manifest{Commercial: commercial, RecordSHA256: make(map[string]string)}
 	for _, r := range recs {
 		if r.Status != "validated" && !includeQuarantined {
 			m.Excluded = append(m.Excluded, Excluded{ID: r.ID, Reason: "not validated (status " + r.Status + ")"})
@@ -333,6 +337,11 @@ func BuildManifest(recs []*record.Record, commercial, includeQuarantined bool) M
 			continue
 		}
 		m.Included = append(m.Included, r.ID)
+		digest := ""
+		if payload, err := record.Marshal(r); err == nil {
+			digest = LicenseDigest(payload)
+		}
+		m.RecordSHA256[filepath.ToSlash(r.Path)] = digest
 		if e.NeedsAttribution {
 			a := r.Provenance.SourceAttribution
 			entry := AttributionEntry{ID: r.ID, SourceLicense: r.Provenance.SourceLicense, SourceURL: r.Provenance.SourceURL}
@@ -416,10 +425,32 @@ func MaterialFiles(recs []*record.Record, m Manifest) map[string][]byte {
 	return out
 }
 
+// RecordFiles returns the exact canonical Markdown payload for every record
+// selected into the manifest, keyed by its pack-relative path.
+func RecordFiles(recs []*record.Record, m Manifest) map[string][]byte {
+	byID := make(map[string]*record.Record, len(recs))
+	for _, rec := range recs {
+		byID[rec.ID] = rec
+	}
+	out := make(map[string][]byte, len(m.Included))
+	for _, id := range m.Included {
+		rec := byID[id]
+		if rec == nil {
+			continue
+		}
+		payload, err := record.Marshal(rec)
+		if err != nil {
+			continue
+		}
+		out[filepath.ToSlash(rec.Path)] = payload
+	}
+	return out
+}
+
 // ValidateCommercialArtifacts verifies that a built commercial MANIFEST.json
 // and notice document exactly match the current corpus and pack policy. It is
 // deterministic and returns every drift finding in a stable order.
-func ValidateCommercialArtifacts(recs []*record.Record, got Manifest, notices, packLicense []byte, materials map[string][]byte) []string {
+func ValidateCommercialArtifacts(recs []*record.Record, got Manifest, notices, packLicense []byte, materials, records map[string][]byte) []string {
 	want := BuildManifest(recs, true, false)
 	var errs []string
 	if len(bytes.TrimSpace(packLicense)) == 0 {
@@ -434,6 +465,21 @@ func ValidateCommercialArtifacts(recs []*record.Record, got Manifest, notices, p
 	}
 	if !bytes.Equal(notices, NoticeDocument(want)) {
 		errs = append(errs, "source/license notice document does not match the current commercial manifest")
+	}
+	ledgerMatches := got.RecordSHA256 != nil && len(got.RecordSHA256) == len(records)
+	for path, payload := range records {
+		if got.RecordSHA256[path] != LicenseDigest(payload) {
+			ledgerMatches = false
+		}
+	}
+	if !ledgerMatches {
+		errs = append(errs, "manifest record_sha256 ledger does not bind every bundled experience record payload")
+	}
+	wantRecords := RecordFiles(recs, want)
+	wantRecordJSON, _ := json.Marshal(wantRecords)
+	gotRecordJSON, _ := json.Marshal(records)
+	if !bytes.Equal(wantRecordJSON, gotRecordJSON) {
+		errs = append(errs, "bundled experience record payloads do not match the manifest digests and reviewed corpus")
 	}
 	wantMaterials := MaterialFiles(recs, want)
 	wantMaterialJSON, _ := json.Marshal(wantMaterials)

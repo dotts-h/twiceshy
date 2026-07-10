@@ -216,7 +216,18 @@ func TestRightsAuditInventoriesEveryIncludedRecord(t *testing.T) {
 	if err := runRightsAudit(args, &bytes.Buffer{}); err != nil {
 		t.Fatalf("fresh complete pack: %v", err)
 	}
-	if err := os.Remove(filepath.Join(outDir, filepath.FromSlash(rec.Path))); err != nil {
+	recordPath := filepath.Join(outDir, filepath.FromSlash(rec.Path))
+	original, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(recordPath, append(original, []byte("\ntampered payload\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runRightsAudit(args, &bytes.Buffer{}); err == nil {
+		t.Fatal("modified included record payload must fail digest validation")
+	}
+	if err := os.Remove(recordPath); err != nil {
 		t.Fatal(err)
 	}
 	if err := runRightsAudit(args, &bytes.Buffer{}); err == nil {

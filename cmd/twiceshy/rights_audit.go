@@ -142,7 +142,28 @@ func validateRightsArtifacts(recs []*record.Record, manifestPath, noticesPath, p
 			materials[rel] = body
 		}
 	}
-	errs := pack.ValidateCommercialArtifacts(recs, manifest, notices, packLicense, materials)
+	records := make(map[string][]byte)
+	want := pack.BuildManifest(recs, true, false)
+	recordPaths := make([]string, 0, len(want.RecordSHA256))
+	for rel := range want.RecordSHA256 {
+		recordPaths = append(recordPaths, rel)
+	}
+	sort.Strings(recordPaths)
+	for _, rel := range recordPaths {
+		path, err := safeJoin(root, rel)
+		if err != nil {
+			return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: invalid record path %q: %w", rel, err)
+		}
+		if err := rejectSymlinkComponents(path, false); err != nil {
+			return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: record path %q: %w", rel, err)
+		}
+		body, err := packRoot.ReadFile(filepath.FromSlash(rel))
+		if err != nil {
+			return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: reading record %q: %w", rel, err)
+		}
+		records[rel] = body
+	}
+	errs := pack.ValidateCommercialArtifacts(recs, manifest, notices, packLicense, materials, records)
 	errs = append(errs, validatePackInventory(packRoot, recs)...)
 	sort.Strings(errs)
 	return rightsaudit.ArtifactValidation{Requested: true, Valid: len(errs) == 0, Errors: errs}, nil
