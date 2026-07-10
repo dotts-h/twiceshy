@@ -1,7 +1,7 @@
 ---
 id: 0061
 title: 'Importer transcription-fidelity bugs: mis-scoped ecosystem, malformed/mis-cased path, fixed-null fix-text contradiction, source_url/advisory-id mismatch, Go major-version-suffix errors'
-status: open
+status: closed
 severity: medium
 group: 0015
 depends_on: []
@@ -10,7 +10,7 @@ links:
   adr: ADR-0016
   prs: [272]
   issues: []
-  regression:
+  regression: internal/record/advisory_defects_test.go
 assets: []
 ---
 
@@ -93,12 +93,11 @@ is a genuine bug** (fabricated `/v2`), not a Sonnet over-rejection; only **exp-0
       version, else "no fix is published yet". Guard:
       `internal/ingest/osvlive_test.go::TestOSVLiveSource_NoFixedVersionFixText`.
       Dogfooded as exp-0745. Pairs with #0062 (the judge side). *(This PR.)*
-- [ ] **Defect 1 — ecosystem mislabel** (non-Go package labeled `ecosystem: Go`).
-      Not deterministically fixable in the importer: `github.com/strukturag/libheif`
-      is a *syntactically* valid Go module path, so only a semantic knowledge source
-      (a PURL/ecosystem cross-check against a real index, or a module-proxy probe)
-      can tell it is C/C++. The strict `aff.Package.Ecosystem != ecosystem` filter
-      already blocks any block OSV labels as a non-target ecosystem.
+- [x] **Defect 1 — ecosystem mislabel** (non-Go package labeled `ecosystem: Go`).
+      The deterministic consistency gate now carries the independently audited
+      advisory+ecosystem+package fact for the libheif case and quarantines/blocks it
+      as `consistency:ecosystem-package-mismatch`. It deliberately does not infer
+      ecosystem from module-path syntax.
 - [x] **Defect 2 — malformed package path** (`https://` URL as the package). Fixed:
       `normalizePackageName` (`internal/ingest/osvlive.go`) strips a leading
       http(s):// from the OSV `affected.package.name` so the identifier is the clean
@@ -110,18 +109,17 @@ is a genuine bug** (fabricated `/v2`), not a Sonnet over-rejection; only **exp-0
       (`ghsaIDPattern`); a URL citing a *different* advisory is rejected and the
       source_url falls back to the always-correct osv.dev page for this record's id.
       Guard: `osvlive_test.go::TestOSVLiveSource_SourceURLCrossCheck`. *(This PR.)*
-- [ ] **Defect 5 — Go major-version-suffix / case errors** (fabricated/missing
-      `/vN`, uppercase module paths). Deferred — a naive normalization is itself
-      harmful: lowercasing breaks legitimately mixed-case modules (e.g.
-      `github.com/Azure/...`), and exp-0054 shows *removing* a required `/vN` suffix is
-      the bug, not the fix. Correctly normalizing major-version + canonical case needs
-      a real module-proxy / `go.mod` knowledge source, not a string heuristic.
+- [x] **Defect 5 — Go major-version-suffix / case errors** (fabricated/missing
+      `/vN`, uppercase module paths). The consistency gate now quarantines and
+      promotion-blocks the three independently audited source facts (Prometheus,
+      Traefik, Ech0). It does not lowercase or rewrite paths and does not generalize
+      from `/vN` or uppercase syntax, avoiding false positives on legitimate modules.
 
-Issue stays **open** for Defects 1 and 5 — both need a semantic knowledge source
-(PURL/ecosystem cross-check or a module-proxy probe), not an in-importer string rule,
-and a wrong heuristic would create new defects. The records already mis-transcribed
-are held by the ADR-0016 panel, not served; this PR fixes the importer so new ones are
-clean for the source_url and URL-prefixed-package classes.
+All five audited classes now have deterministic regression coverage. Structural
+classes are detected generally; semantic scope/canonical-module facts are matched
+only to the exact independently audited advisory coordinates, so ambiguous source
+data is never guessed or auto-corrected. Every emitted #0061 flag is promotion-
+blocking, including alias-aware source-URL mismatches.
 
 ## Notes
 

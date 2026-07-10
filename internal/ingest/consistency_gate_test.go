@@ -83,3 +83,38 @@ func TestPrepare_ConsistencyGatePassesCleanAdvisory(t *testing.T) {
 		t.Errorf("clean advisory must have no consistency flags, got %v", out.Record.Provenance.ConsistencyFlags)
 	}
 }
+
+func TestPrepare_ConsistencyGateFlagsAuditedScopeAndModuleDefects(t *testing.T) {
+	tests := []struct{ id, pkg, want string }{
+		{"GHSA-22fx-6r9m-r8h9", "github.com/strukturag/libheif", "consistency:ecosystem-package-mismatch"},
+		{"GHSA-4v48-4q5m-8vx4", "github.com/prometheus/prometheus/v2", "consistency:go-major-version-path"},
+		{"GHSA-7v4p-328v-8v5g", "github.com/traefik/traefik", "consistency:go-major-version-path"},
+		{"GHSA-fpw6-hrg5-q5x5", "github.com/lin-snow/Ech0", "consistency:go-module-path-case"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.id, func(t *testing.T) {
+			ix := openIx(t)
+			d := advisoryContradictionDraft()
+			d.Symptom.ErrorSignatures = []string{tc.id}
+			d.AppliesTo = []record.AppliesTo{{Ecosystem: "Go", Package: tc.pkg, Versions: &record.VersionRange{Fixed: strptr("1.4.8")}}}
+			d.Resolution.Fix = "Upgrade affected packages past the fixed version."
+			d.SourceURL = "https://osv.dev/vulnerability/" + tc.id
+			out, err := ingest.Prepare(context.Background(), ix, repo, d, meta())
+			if err != nil {
+				t.Fatalf("Prepare: %v", err)
+			}
+			if out.Record == nil || !hasConsistencyPrefix(out.Record.Provenance.ConsistencyFlags, tc.want) {
+				t.Fatalf("expected quarantined %s flag, got %+v", tc.want, out.Record)
+			}
+		})
+	}
+}
+
+func hasConsistencyPrefix(flags []string, prefix string) bool {
+	for _, flag := range flags {
+		if strings.HasPrefix(flag, prefix) {
+			return true
+		}
+	}
+	return false
+}

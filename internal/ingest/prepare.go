@@ -136,7 +136,8 @@ func Prepare(ctx context.Context, ix *index.Index, repo string, d Draft, m Meta)
 
 	// Consistency gate (#0061): a deterministic, LLM-free check for advisory
 	// transcription defects (null-fixed/fix-text contradiction, source_url id
-	// mismatch, malformed package path). Mirrors the safety gate: a hit is
+	// mismatch, malformed package path, or an exact audited scope/module-path
+	// defect). Mirrors the safety gate: a hit is
 	// documented in consistency_flags and the record stays quarantined (it can
 	// never be promoted, see validateProvenance) — so the judge is not the sole
 	// gate; with RejectOnFlag the draft is refused outright.

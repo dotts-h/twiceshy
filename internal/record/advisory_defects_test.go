@@ -108,6 +108,49 @@ func TestAdvisoryDefects_MalformedPackagePath(t *testing.T) {
 	}
 }
 
+func TestAdvisoryDefects_KnownAuditedScopeAndGoModulePathDefects(t *testing.T) {
+	tests := []struct {
+		name, id, ecosystem, pkg, want string
+	}{
+		{"non-Go library mislabeled Go", "GHSA-22fx-6r9m-r8h9", "Go", "github.com/strukturag/libheif", "consistency:ecosystem-package-mismatch"},
+		{"fabricated Prometheus v2 suffix", "GHSA-4v48-4q5m-8vx4", "Go", "github.com/prometheus/prometheus/v2", "consistency:go-major-version-path"},
+		{"missing Traefik v2 suffix", "GHSA-7v4p-328v-8v5g", "Go", "github.com/traefik/traefik", "consistency:go-major-version-path"},
+		{"mis-cased Ech0 path", "GHSA-fpw6-hrg5-q5x5", "Go", "github.com/lin-snow/Ech0", "consistency:go-module-path-case"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := advisoryRec(tc.id, "No fix is published yet.", "https://osv.dev/vulnerability/"+tc.id,
+				[]record.AppliesTo{{Ecosystem: tc.ecosystem, Package: tc.pkg}})
+			got := record.AdvisoryDefects(rec)
+			if !hasFlagPrefix(got, tc.want) {
+				t.Fatalf("expected %s for audited defect, got %v", tc.want, got)
+			}
+			if !hasFlagPrefix(record.AdvisoryBlockingDefects(rec), tc.want) {
+				t.Fatalf("audited defect must block promotion, got %v", record.AdvisoryBlockingDefects(rec))
+			}
+		})
+	}
+}
+
+func TestAdvisoryDefects_DoesNotGeneralizeAuditedModuleFacts(t *testing.T) {
+	// Mixed case and v2+ release numbers are not intrinsically wrong in Go:
+	// canonical modules such as Azure use uppercase, while projects such as
+	// Prometheus publish v2 application releases from an unsuffixed module.
+	tests := []*record.Record{
+		advisoryRec("GHSA-aaaa-bbbb-cccc", "No fix is published yet.", "https://osv.dev/vulnerability/GHSA-aaaa-bbbb-cccc",
+			[]record.AppliesTo{{Ecosystem: "Go", Package: "github.com/Azure/azure-sdk-for-go"}}),
+		advisoryRec("GHSA-aaaa-bbbb-cccc", "No fix is published yet.", "https://osv.dev/vulnerability/GHSA-aaaa-bbbb-cccc",
+			[]record.AppliesTo{{Ecosystem: "Go", Package: "github.com/example/project", Versions: &record.VersionRange{Fixed: strptr("2.3.4")}}}),
+	}
+	for _, rec := range tests {
+		for _, flag := range record.AdvisoryDefects(rec) {
+			if strings.HasPrefix(flag, "consistency:go-") || strings.HasPrefix(flag, "consistency:ecosystem-package") {
+				t.Fatalf("ambiguous package evidence must not be auto-flagged: %v", record.AdvisoryDefects(rec))
+			}
+		}
+	}
+}
+
 func TestAdvisoryDefects_NonAdvisoryReturnsNil(t *testing.T) {
 	// A prose record (no vuln id) is out of scope for the advisory defect gate.
 	rec := &record.Record{
@@ -145,8 +188,7 @@ func TestConsistencyFlags_QuarantinedValidVsValidatedRejected(t *testing.T) {
 	}
 }
 
-// AdvisoryBlockingDefects is the promote pre-gate's precise subset: null-fixed and
-// malformed-package-path HARD-block; source-url-id-mismatch is advisory-only.
+// AdvisoryBlockingDefects hard-blocks every deterministic #0061 defect.
 func TestAdvisoryBlockingDefects_NullFixedAndMalformedAreBlocking(t *testing.T) {
 	id := "GHSA-aaaa-bbbb-cccc"
 	url := "https://github.com/x/y/security/advisories/" + id
@@ -162,31 +204,27 @@ func TestAdvisoryBlockingDefects_NullFixedAndMalformedAreBlocking(t *testing.T) 
 	}
 }
 
-func TestAdvisoryBlockingDefects_SourceURLIsAdvisoryOnly(t *testing.T) {
+func TestAdvisoryBlockingDefects_SourceURLMismatchBlocks(t *testing.T) {
 	id := "GHSA-aaaa-bbbb-cccc"
 	otherURL := "https://github.com/x/y/security/advisories/GHSA-zzzz-yyyy-xxxx"
 	rec := advisoryRec(id, "Upgrade past the fixed version; see "+otherURL+".", otherURL,
 		[]record.AppliesTo{{Ecosystem: "Go", Package: "github.com/x/y", Versions: &record.VersionRange{Fixed: strptr("1.2.3")}}})
-	// source-url mismatch is DETECTED (recorded) ...
 	if !hasFlagPrefix(record.AdvisoryDefects(rec), "consistency:source-url-id-mismatch") {
 		t.Fatal("source-url mismatch should be detected by AdvisoryDefects")
 	}
-	// ... but is NOT blocking (false-positives on OSV alias pairs).
-	if len(record.AdvisoryBlockingDefects(rec)) != 0 {
-		t.Fatalf("source-url mismatch must be advisory-only, got blocking %v", record.AdvisoryBlockingDefects(rec))
+	if !hasFlagPrefix(record.AdvisoryBlockingDefects(rec), "consistency:source-url-id-mismatch") {
+		t.Fatalf("source-url mismatch must block promotion, got %v", record.AdvisoryBlockingDefects(rec))
 	}
 }
 
-// A validated record carrying ONLY a soft source-url flag must validate — the
-// advisory-only class is recorded but not promotion-blocking.
-func TestConsistencyFlags_SourceURLOnlyIsSoftAtValidate(t *testing.T) {
+func TestConsistencyFlags_SourceURLMismatchRejectedAtValidate(t *testing.T) {
 	v := importerDraft()
 	v.Status = "validated"
 	vd := "2026-06-18"
 	v.Provenance.ValidatedAt = &vd
 	v.Provenance.ConsistencyFlags = []string{"consistency:source-url-id-mismatch:GHSA-zzzz-yyyy-xxxx"}
-	if err := record.Validate(v); err != nil {
-		t.Errorf("a validated record with only a soft source-url flag must validate: %v", err)
+	if err := record.Validate(v); err == nil {
+		t.Fatal("a validated record with source-url mismatch must be rejected")
 	}
 }
 

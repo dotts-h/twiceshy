@@ -1,7 +1,7 @@
 ---
 id: 0150
 title: server allocateNextID (record_experience/report intake) ignores -base and open PRs — live MCP writes can allocate colliding record ids
-status: open
+status: closed
 severity: medium
 group: 0064
 depends_on: []
@@ -10,7 +10,7 @@ links:
   adr:
   prs: []
   issues: [0121]
-  regression:
+  regression: internal/server/id_allocation_test.go
 assets: []
 ---
 
@@ -51,3 +51,11 @@ collides with the open PRs' range the moment they merge.
   log, not fail the agent's write — the write path is propose-only and the
   corpus dup-id guard still catches collisions at merge).
 - Residual same-seconds race stays TECH_DEBT M3 (central reservation) either way.
+
+## Close-out (2026-07-10)
+
+The shared server allocator now uses the index, local tree, configured base ref,
+open-PR high-water mark, and process-local allocations. Open-PR resolution is
+env-first and cached for 30 seconds; failures are cached and logged while writes
+continue against the last-known/base/local floor. Both `record_experience` and
+`report_outcome` use the guarded allocator.

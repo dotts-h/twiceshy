@@ -131,10 +131,11 @@ func gitCmd(t *testing.T, dir string, args ...string) string {
 
 func TestRunPackCommercialExcludesAndAttributes(t *testing.T) {
 	dir := tempCorpus(t)
-	writeFixture(t, dir, packFixture("0101", "validated", "MIT", ""))
+	writeFixture(t, dir, packFixture("0101", "validated", "MIT", "https://example.com/upstream/commit/0123456789abcdef"))
 	writeFixture(t, dir, packFixture("0102", "validated", "CC-BY-4.0", "https://github.com/advisories/GHSA-x"))
 	writeFixture(t, dir, packFixture("0103", "validated", "GPL-3.0-only", ""))
 	writeFixture(t, dir, packFixture("0104", "quarantined", "MIT", ""))
+	writeFixture(t, dir, packFixture("0105", "validated", record.SourceLicenseProjectAuthored, ""))
 
 	outDir := filepath.Join(t.TempDir(), "pack")
 	var out bytes.Buffer
@@ -147,8 +148,8 @@ func TestRunPackCommercialExcludesAndAttributes(t *testing.T) {
 		t.Fatalf("read manifest: %v", err)
 	}
 	ms := string(manifest)
-	if !strings.Contains(ms, "exp-0101") || !strings.Contains(ms, "exp-0102") {
-		t.Errorf("manifest should include exp-0101 + exp-0102:\n%s", ms)
+	if !strings.Contains(ms, "exp-0101") || !strings.Contains(ms, "exp-0102") || !strings.Contains(ms, "exp-0105") {
+		t.Errorf("manifest should include licensed and explicitly project-authored records:\n%s", ms)
 	}
 	for _, reason := range []string{"copyleft", "not validated"} {
 		if !strings.Contains(ms, reason) {
@@ -165,8 +166,10 @@ func TestRunPackCommercialExcludesAndAttributes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read attribution: %v", err)
 	}
-	if !strings.Contains(string(attr), "exp-0102") || !strings.Contains(string(attr), "GHSA-x") {
-		t.Errorf("ATTRIBUTION.md must attribute the CC-BY record:\n%s", attr)
+	for _, want := range []string{"Source and License Notices", "exp-0101", "MIT", "0123456789abcdef", "exp-0102", "GHSA-x"} {
+		if !strings.Contains(string(attr), want) {
+			t.Errorf("ATTRIBUTION.md must describe copied-source license/notice entries (missing %q):\n%s", want, attr)
+		}
 	}
 }
 

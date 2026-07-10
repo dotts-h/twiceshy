@@ -21,12 +21,19 @@ import (
 // found — the discriminative gate leaking common dev vocabulary as the corpus grew.
 func TestPushPrecisionOnLiveCorpus(t *testing.T) {
 	ctx := context.Background()
-	if _, err := os.Stat("../../experience"); err != nil {
-		t.Skip("live corpus not present at ../.. (decoupled to twiceshy-corpus, ADR-0021)")
+	root := os.Getenv("TWICESHY_LIVE_CORPUS")
+	if root == "" {
+		t.Skip("set TWICESHY_LIVE_CORPUS to a twiceshy-corpus checkout (or run make test-livecorpus)")
 	}
-	recs, err := record.LoadCorpus("../..")
+	if _, err := os.Stat(filepath.Join(root, "experience")); err != nil {
+		t.Fatalf("TWICESHY_LIVE_CORPUS=%q has no experience directory: %v", root, err)
+	}
+	recs, err := record.LoadCorpus(root)
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
+	}
+	if len(recs) == 0 {
+		t.Fatalf("TWICESHY_LIVE_CORPUS=%q loaded zero records", root)
 	}
 	ix, err := index.Open(filepath.Join(t.TempDir(), "push.db"))
 	if err != nil {

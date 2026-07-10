@@ -13,6 +13,7 @@
 //	twiceshy pack   -corpus <dir> -out <dir>          build a distributable pack
 //	twiceshy doctor <name> -corpus <dir>              run a doctor (staleness | revalidate)
 //	twiceshy eval   -corpus <dir> -db <file>          report retrieval recall@k / MRR
+//	twiceshy corpus-quality -corpus <dir>              report corpus quality + rights coverage
 //	twiceshy usage-flush -corpus <dir> -db <file>  materialize usage counters into provenance.usage
 //	twiceshy corpus-merge-check -corpus <dir> -base <ref> -head <ref>
 //	twiceshy corpus-pr-paths -corpus <dir> -base <ref> -head <ref>
@@ -197,7 +198,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|learned|draft|promote|repromote|adapt|intake-reports|intake-records|intake-issues|retro-intake|screen|report|pack|doctor|eval|usage-flush|gold-add|judge-eval|prospect|corpus-merge-check|corpus-pr-paths|nextid|token> [flags]")
+		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|learned|draft|promote|repromote|adapt|intake-reports|intake-records|intake-issues|retro-intake|screen|report|pack|doctor|eval|corpus-quality|usage-flush|gold-add|judge-eval|prospect|corpus-merge-check|corpus-pr-paths|nextid|token> [flags]")
 	}
 	switch args[0] {
 	case "index":
@@ -236,6 +237,8 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runDoctor(ctx, args[1:], out)
 	case "eval":
 		return runEval(ctx, args[1:], out, getenv)
+	case "corpus-quality":
+		return runCorpusQuality(args[1:], out)
 	case "usage-flush":
 		return runUsageFlush(ctx, args[1:], out)
 	case "gold-add":
@@ -261,7 +264,7 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	case "token":
 		return runToken(ctx, args[1:], out)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, learned, draft, promote, repromote, adapt, intake-reports, intake-records, intake-issues, retro-intake, screen, report, pack, doctor, eval, usage-flush, gold-add, judge-eval, prospect, self-audit, similarity, author, corpus-merge-check, corpus-pr-paths, nextid, token, or idf-build)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, learned, draft, promote, repromote, adapt, intake-reports, intake-records, intake-issues, retro-intake, screen, report, pack, doctor, eval, corpus-quality, usage-flush, gold-add, judge-eval, prospect, self-audit, similarity, author, corpus-merge-check, corpus-pr-paths, nextid, token, or idf-build)", args[0])
 	}
 }
 
@@ -399,6 +402,7 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 	issueQueue := fs.String("issue-queue", "", "directory report_issue enqueues agent-submitted issues into for `intake-issues` to materialize (#0066); empty = return PR-ready markdown")
 	telemetryLog := fs.String("telemetry-log", "", "append per-query gate-decision telemetry to this rotating JSONL file (#0067); empty = disabled")
 	telemetryQueryText := fs.Bool("telemetry-query-text", false, "also capture raw query text (truncated 256 bytes) on gate-decision telemetry lines (#0109, single-tenant deployments only); default off, no-op without -telemetry-log")
+	idBaseRef := fs.String("base", getenv("TWICESHY_ID_BASE_REF"), "base git ref for merge-safe live write id allocation (env: TWICESHY_ID_BASE_REF)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -449,7 +453,7 @@ func runServe(ctx context.Context, args []string, out io.Writer, getenv func(str
 	if err != nil {
 		return fmt.Errorf("TWICESHY_TRUSTED_PROXIES: %w", err)
 	}
-	handler, err := server.New(server.Config{Index: ix, RecordCount: n, Token: token, TokenStore: ix, TokenIssuer: ix, SignupEnabled: signupEnabled, DemoEnabled: demoEnabled, TrustedProxies: trustedProxies, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue, RetroQueue: *retroQueue, IssueQueue: *issueQueue, RecordQueue: *recordQueue, Logger: logger, Corpus: c.corpus, Telemetry: tele, TelemetryQueryText: *telemetryQueryText})
+	handler, err := server.New(server.Config{Index: ix, RecordCount: n, Token: token, TokenStore: ix, TokenIssuer: ix, SignupEnabled: signupEnabled, DemoEnabled: demoEnabled, TrustedProxies: trustedProxies, Repo: c.repo, Embedder: embedderFor(c), ReportQueue: *reportQueue, RetroQueue: *retroQueue, IssueQueue: *issueQueue, RecordQueue: *recordQueue, Logger: logger, Corpus: c.corpus, IDBaseRef: *idBaseRef, IDFloorResolver: serveIDFloorResolver(c.corpus, getenv), Telemetry: tele, TelemetryQueryText: *telemetryQueryText})
 	if err != nil {
 		alerter.Alert(ctx, "serve-fatal", fmt.Sprintf("serve could not build the handler: %v", err))
 		return err
@@ -1352,12 +1356,33 @@ func openPRFloors(ctx context.Context, corpusRoot string, openPRs bool, getenv f
 	if getenv == nil {
 		getenv = os.Getenv
 	}
-	api, token, err := ingest.ForgejoAPIFromOrigin(ctx, corpusRoot, getenv)
+	maxID, err := forgejoOpenPRMaxID(ctx, corpusRoot, getenv, 30*time.Second)
 	if err != nil {
 		return nil, err
 	}
+	return []int{maxID}, nil
+}
+
+// serveIDFloorResolver is the live-write counterpart to openPRFloors. Config
+// resolution happens inside the cached callback so env-first Forgejo settings
+// work in containers without a usable git origin. The server caches calls for
+// its short TTL and degrades loudly to base/local allocation on any error.
+func serveIDFloorResolver(corpusRoot string, getenv func(string) string) server.IDFloorResolver {
+	return func(ctx context.Context) (int, error) {
+		return forgejoOpenPRMaxID(ctx, corpusRoot, getenv, 5*time.Second)
+	}
+}
+
+func forgejoOpenPRMaxID(ctx context.Context, corpusRoot string, getenv func(string) string, timeout time.Duration) (int, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	api, token, err := ingest.ForgejoAPIFromOrigin(ctx, corpusRoot, getenv)
+	if err != nil {
+		return 0, err
+	}
 	client := &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: timeout,
 		// A redirect would strip the Authorization header cross-host and
 		// resurface as a misleading 401; an API root that redirects is a
 		// misconfig — surface the 3xx itself via the non-2xx check instead.
@@ -1365,11 +1390,7 @@ func openPRFloors(ctx context.Context, corpusRoot string, openPRs bool, getenv f
 			return http.ErrUseLastResponse
 		},
 	}
-	maxID, err := ingest.OpenPRMaxID(ctx, client, api, token)
-	if err != nil {
-		return nil, err
-	}
-	return []int{maxID}, nil
+	return ingest.OpenPRMaxID(ctx, client, api, token)
 }
 
 // runIntakeReports drains the report queue (ADR-0013 §E1, #0042): each queued
@@ -1546,7 +1567,7 @@ func runPack(args []string, out io.Writer) error {
 	if *commercial {
 		kind = "commercial"
 	}
-	_, _ = fmt.Fprintf(out, "pack (%s): included %d, excluded %d, attribution %d -> %s\n",
+	_, _ = fmt.Fprintf(out, "pack (%s): included %d, excluded %d, source/license notices %d -> %s\n",
 		kind, len(m.Included), len(m.Excluded), len(m.Attribution), *outDir)
 	return nil
 }
@@ -1554,12 +1575,12 @@ func runPack(args []string, out io.Writer) error {
 // attributionDoc renders the pack's ATTRIBUTION.md from its manifest.
 func attributionDoc(m pack.Manifest) []byte {
 	var b strings.Builder
-	b.WriteString("# Attribution\n\n")
+	b.WriteString("# Source and License Notices\n\n")
 	if len(m.Attribution) == 0 {
-		b.WriteString("No records in this pack require attribution.\n")
+		b.WriteString("No records in this pack require a source/license notice entry.\n")
 		return []byte(b.String())
 	}
-	b.WriteString("This pack includes records distilled from the following attributed sources:\n\n")
+	b.WriteString("This pack includes records from the following licensed sources. Preserve the applicable attribution, copyright, license, and NOTICE terms identified by each source and license:\n\n")
 	for _, a := range m.Attribution {
 		_, _ = fmt.Fprintf(&b, "- `%s` — %s — %s\n", a.ID, a.SourceLicense, a.SourceURL)
 	}

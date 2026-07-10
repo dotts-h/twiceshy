@@ -270,9 +270,10 @@ func countPrefixLines(fm, prefix string) int {
 	return n
 }
 
-// setupIssuesRepo builds a throwaway git repo carrying the REAL new-issue.sh and a
-// seeded docs/issues/, so intake-issues exercises the same allocator the human path
-// uses (the #0075 "no second allocator" requirement) rather than a test double.
+// setupIssuesRepo builds a throwaway git repo carrying the REAL new-issue.sh and
+// its issue-index generator plus a seeded docs/issues/, so intake-issues exercises
+// the same allocator and derived-index path the human workflow uses rather than a
+// test double.
 func setupIssuesRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
@@ -280,15 +281,17 @@ func setupIssuesRepo(t *testing.T) string {
 	if out, err := runGit(repo, "init"); err != nil {
 		t.Fatalf("git init: %v (%s)", err, out)
 	}
-	script, err := os.ReadFile(filepath.Join("..", "..", "scripts", "new-issue.sh"))
-	if err != nil {
-		t.Fatalf("read new-issue.sh: %v", err)
-	}
 	if err := os.MkdirAll(filepath.Join(repo, "scripts"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, "scripts", "new-issue.sh"), script, 0o755); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"new-issue.sh", "generate-issues-index.sh"} {
+		script, err := os.ReadFile(filepath.Join("..", "..", "scripts", name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, "scripts", name), script, 0o755); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
 	}
 	issuesDir := filepath.Join(repo, "docs", "issues")
 	if err := os.MkdirAll(issuesDir, 0o755); err != nil {

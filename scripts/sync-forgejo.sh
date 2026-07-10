@@ -22,13 +22,35 @@ cd "$(git rev-parse --show-toplevel)"
 
 origin="$(git remote get-url origin 2>/dev/null || echo)"
 
-# API base: derive <scheme://host>/api/v1 from an https origin unless overridden.
+# API base: derive <scheme://host>/api/v1 from an HTTP(S) origin unless
+# overridden. Parse rather than regex-slicing so token-embedded userinfo is
+# never retained in the API URL (#0149). A malformed origin fails open without
+# echoing it: deployment origins may contain credentials.
 API="${FORGEJO_API:-}"
 if [ -z "$API" ]; then
-  host="$(printf '%s' "$origin" | sed -nE 's#^(https?://[^/]+)/.*#\1#p')"
-  [ -n "$host" ] && API="$host/api/v1"
+	if ! API="$(printf '%s' "$origin" | python3 -c '
+import sys
+from urllib.parse import urlsplit
+
+try:
+    parsed = urlsplit(sys.stdin.read().strip())
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ValueError
+    port = parsed.port  # forces validation; malformed ports raise ValueError
+    host = parsed.hostname
+    if ":" in host:  # urlsplit removes IPv6 brackets; restore them for the URL.
+        host = f"[{host}]"
+    authority = f"{host}:{port}" if port is not None else host
+except Exception:
+    raise SystemExit(1) from None
+
+print(f"{parsed.scheme}://{authority}/api/v1")
+')"; then
+		echo "could not safely derive Forgejo API from origin — skipping mirror (local store stays canonical)"
+		exit 0
+	fi
 fi
-[ -n "$API" ] || { echo "set FORGEJO_API (could not derive from origin) — skipping mirror (local store stays canonical)"; exit 0; }
+[ -n "$API" ] || { echo "set FORGEJO_API (could not safely derive from origin) — skipping mirror (local store stays canonical)"; exit 0; }
 
 # Repo (owner/name) from origin unless overridden.
 if [ -z "${FORGEJO_REPO:-}" ]; then

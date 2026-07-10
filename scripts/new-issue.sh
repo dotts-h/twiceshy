@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # new-issue.sh "<title>" [--epic] [--group <epic-id>] [--severity <low|medium|high|critical>] [--depends id,id]
 # Creates docs/issues/NNNN-title.md from the canonical format (docs/issues/TEMPLATE.md),
-# appends its row to docs/issues/INDEX.md, and prints the file path.
+# regenerates the derived docs/issues/INDEX.md, and prints the file path.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
@@ -66,13 +66,6 @@ Actual:
 ## Notes
 EOF
 
-# Append the row to the INDEX's Issues table (it is the last table in the file).
-idx="$dir/INDEX.md"
-if [ -f "$idx" ]; then
-  printf '| [%s](%s) | %s | open | %s | %s | |\n' \
-    "$id" "$(basename "$path")" "$title" "$sev" "${group:-—}" >> "$idx"
-else
-  echo "WARN: $idx missing — row not recorded; create the index (issues recipe) and add it" >&2
-fi
+scripts/generate-issues-index.sh
 
 echo "$path"

@@ -1,7 +1,7 @@
 ---
 id: 0141
 title: INDEX.md is hand-maintained derived state — generate it from issue frontmatter (or teach next-issue.sh to read frontmatter) so drift is impossible, not just detected
-status: open
+status: closed
 severity: low
 group: 
 depends_on: []
@@ -10,7 +10,7 @@ links:
   adr:
   prs: []
   issues: []
-  regression:
+  regression: scripts/issues-index.test.sh
 assets: []
 ---
 

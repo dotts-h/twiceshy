@@ -98,6 +98,18 @@ type Config struct {
 	// against a live index that has drifted behind the committed corpus (#0059).
 	// Empty falls back to index-only allocation.
 	Corpus string
+	// IDBaseRef is an optional git ref whose experience tree contributes a
+	// merge-safe high-water mark to record_experience/report_outcome allocation.
+	IDBaseRef string
+	// IDFloorResolver returns an external allocation high-water mark, normally
+	// the maximum record id on open corpus PR heads. The server caches it for a
+	// short TTL so the Forgejo API is not scanned on every write. nil disables
+	// the external floor while retaining index/tree/base allocation.
+	IDFloorResolver IDFloorResolver
+	// IDFloorTTL controls the external-floor cache. Values <= 0 use the safe
+	// default. Resolver failures are logged and cached for this interval while
+	// allocation degrades to the last known floor plus index/tree/base.
+	IDFloorTTL time.Duration
 	// Telemetry, when set, records per-query gate decisions for /push and
 	// search_experience (#0067) — write-only, off the hot path, never read by
 	// retrieval. nil disables it.
@@ -108,6 +120,12 @@ type Config struct {
 	// off; single-tenant deployments only. No-op if Telemetry is nil.
 	TelemetryQueryText bool
 }
+
+// IDFloorResolver supplies a merge-safe external record-id high-water mark.
+// It is injectable so the allocation policy can be tested without network I/O.
+type IDFloorResolver func(context.Context) (int, error)
+
+const defaultIDFloorTTL = 30 * time.Second
 
 // Tool descriptions are load-bearing: description text alone produces
 // large swings in tool-use quality (research §3). They must tell the model
@@ -156,7 +174,11 @@ func New(cfg Config) (*Server, error) {
 		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	}
 
-	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, retroQueue: cfg.RetroQueue, issueQueue: cfg.IssueQueue, recordQueue: cfg.RecordQueue, corpus: cfg.Corpus, telemetry: cfg.Telemetry, queryText: cfg.TelemetryQueryText, signupEnabled: cfg.SignupEnabled, signupIssuer: cfg.TokenIssuer, signupLimiter: newSignupIPLimiter(time.Now), demoEnabled: cfg.DemoEnabled, demoLimiter: newDemoLimiter(time.Now), trustedProxies: cfg.TrustedProxies}
+	idFloorTTL := cfg.IDFloorTTL
+	if idFloorTTL <= 0 {
+		idFloorTTL = defaultIDFloorTTL
+	}
+	h := &handlers{ix: cfg.Index, repo: cfg.Repo, emb: cfg.Embedder, logger: logger, reportQueue: cfg.ReportQueue, retroQueue: cfg.RetroQueue, issueQueue: cfg.IssueQueue, recordQueue: cfg.RecordQueue, corpus: cfg.Corpus, idBaseRef: cfg.IDBaseRef, idFloorResolver: cfg.IDFloorResolver, idFloorTTL: idFloorTTL, idNow: time.Now, telemetry: cfg.Telemetry, queryText: cfg.TelemetryQueryText, signupEnabled: cfg.SignupEnabled, signupIssuer: cfg.TokenIssuer, signupLimiter: newSignupIPLimiter(time.Now), demoEnabled: cfg.DemoEnabled, demoLimiter: newDemoLimiter(time.Now), trustedProxies: cfg.TrustedProxies}
 	h.recordCount.Store(int64(cfg.RecordCount))
 	h.usage = newUsageRecorder(cfg.Index, logger, time.Now)
 	h.tenantCalls = cfg.Index
@@ -277,6 +299,13 @@ type handlers struct {
 
 	idMu   sync.Mutex // serializes record-id allocation (#0089)
 	lastID int        // high-water mark of ids handed out this process; 0 = none yet
+
+	idBaseRef       string          // optional merge-base ref high-water mark (#0150)
+	idFloorResolver IDFloorResolver // optional open-PR/external high-water resolver (#0150)
+	idFloorTTL      time.Duration
+	idNow           func() time.Time
+	idFloor         int
+	idFloorUntil    time.Time
 }
 
 // allocateNextID hands out a fresh exp-NNNN id. ingest.NextID is corpus/index-derived
@@ -284,7 +313,11 @@ type handlers struct {
 // id (TECH_DEBT M3 / #0089 — the field-report collision). The in-process high-water mark
 // closes that for a single server; the draft is still propose-only and PR-reviewed.
 func (h *handlers) allocateNextID(ctx context.Context) (string, error) {
-	next, err := ingest.NextID(ctx, h.ix, h.corpus)
+	h.idMu.Lock()
+	defer h.idMu.Unlock()
+
+	floor := h.cachedIDFloor(ctx)
+	next, err := ingest.NextIDWithBase(ctx, h.ix, h.corpus, h.idBaseRef, floor)
 	if err != nil {
 		return "", err
 	}
@@ -292,13 +325,48 @@ func (h *handlers) allocateNextID(ctx context.Context) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("allocateNextID: NextID returned malformed id %q", next)
 	}
-	h.idMu.Lock()
-	defer h.idMu.Unlock()
 	if n <= h.lastID {
 		n = h.lastID + 1
 	}
 	h.lastID = n
 	return record.FormatID(n), nil
+}
+
+// cachedIDFloor resolves at most once per TTL. A resolver failure is loud but
+// non-fatal: these writes are propose-only, so allocation falls back to the
+// last successful external floor (if any) plus the index/tree/base high-water
+// marks. Failure is cached too, preventing a Forgejo outage from turning every
+// write into a network retry storm. The residual cross-process same-second race
+// remains TECH_DEBT M3.
+//
+// h.idMu must be held by the caller.
+func (h *handlers) cachedIDFloor(ctx context.Context) int {
+	if h.idFloorResolver == nil {
+		return 0
+	}
+	now := time.Now()
+	if h.idNow != nil {
+		now = h.idNow()
+	}
+	if now.Before(h.idFloorUntil) {
+		return h.idFloor
+	}
+	ttl := h.idFloorTTL
+	if ttl <= 0 {
+		ttl = defaultIDFloorTTL
+	}
+	h.idFloorUntil = now.Add(ttl)
+	floor, err := h.idFloorResolver(ctx)
+	if err != nil {
+		if h.logger != nil {
+			h.logger.Warn("server ID floor resolver failed; using cached/base/local fallback", slog.Any("err", err), slog.Int("cached_floor", h.idFloor))
+		}
+		return h.idFloor
+	}
+	if floor > h.idFloor {
+		h.idFloor = floor
+	}
+	return h.idFloor
 }
 
 // SearchArgs is the search_experience input.

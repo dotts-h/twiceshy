@@ -16,92 +16,75 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 exec python3 - "$@" <<'PY'
-import re, sys, pathlib
+import json, re, sys, pathlib
 
-idx = pathlib.Path("docs/issues/INDEX.md")
-if not idx.exists():
-    print("no docs/issues/INDEX.md — install the issues recipe first, or run from the repo root.")
+issue_dir = pathlib.Path("docs/issues")
+if not issue_dir.is_dir():
+    print("no docs/issues/ — install the issues recipe first, or run from the repo root.")
     sys.exit(2)
-lines = idx.read_text().splitlines()
 
-def rows(after_header_contains):
-    """Yield cell-lists for markdown table rows after a header line matching the marker."""
-    started = False
-    for ln in lines:
-        if not started:
-            if ln.strip().startswith("|") and after_header_contains in ln:
-                started = True
-            continue
-        if not ln.strip().startswith("|"):
-            if started: break
-            continue
-        cells = [c.strip() for c in ln.strip().strip("|").split("|")]
-        if set("".join(cells)) <= set("-: "):  # separator row
-            continue
-        yield cells
+def unquote(value):
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] == '"':
+        try: return json.loads(value)
+        except json.JSONDecodeError: return value[1:-1]
+    if len(value) >= 2 and value[0] == value[-1] == "'":
+        return value[1:-1].replace("''", "'")
+    return "" if value.lower() in ("null", "~") else value
 
-def idnum(cell):
-    m = re.search(r"\[(\d+)\]", cell) or re.search(r"(\d+)", cell)
-    return m.group(1) if m else cell
-
-# --- parse epics table (| id | title | status | children |)
-epics = {}
-for c in rows("children"):
-    if len(c) < 4: continue
-    eid = idnum(c[0])
-    kids = [k.strip() for k in re.split(r"[,\s]+", c[-1]) if k.strip() and k.strip() != "—"]
-    epics[eid] = {"title": c[1], "status": c[2].lower(), "children": kids}
-
-# --- parse issues table (| id | title | status | severity | group | links |)
-# Epics may be filed in THIS table (title starts "Epic:") rather than the epics
-# table above — recognize them either way.
-issues = {}
-inline_epics = {}
-for c in rows("severity"):
-    if len(c) < 5: continue
-    iid = idnum(c[0])
-    grp = idnum(c[4]) if c[4] and c[4] != "—" else ""
-    rec = {"title": c[1], "status": c[2].lower(), "severity": c[3].lower(), "group": grp}
-    issues[iid] = rec
-    if re.match(r"\s*Epic\b", c[1]) and iid not in epics:
-        inline_epics[iid] = {"title": c[1], "status": c[2].lower(), "children": []}
-
-def is_open(s): return s not in ("closed", "done", "shipped", "resolved")
-
-# --- depends_on edges, read from each issue file's frontmatter --------------
-def load_depends(iid):
-    """Return the list of issue ids `iid` is blocked by (depends_on)."""
-    matches = list(pathlib.Path("docs/issues").glob(f"{iid}-*.md"))
-    if not matches: return []
-    txt = matches[0].read_text().splitlines()
+def load_issue(path):
+    """Read the picker fields directly from canonical issue frontmatter."""
+    lines = path.read_text().splitlines()
     fm, seen = [], 0
-    for ln in txt:
-        if ln.strip() == "---":
+    for line in lines:
+        if line.strip() == "---":
             seen += 1
             if seen == 2: break
             continue
-        if seen == 1: fm.append(ln)
+        if seen == 1: fm.append(line)
+    fields = {}
+    for line in fm:
+        match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$", line)
+        if match: fields[match.group(1)] = unquote(match.group(2))
+    issue_id = fields.get("id", path.name[:4])
     deps = []
-    for i, ln in enumerate(fm):
-        m = re.match(r"\s*depends_on:\s*(.*)$", ln)
-        if not m: continue
-        inline = m.group(1).strip()
+    for pos, line in enumerate(fm):
+        match = re.match(r"^depends_on:\s*(.*)$", line)
+        if not match: continue
+        inline = match.group(1).strip()
         if inline and inline not in ("[]", "~", "null"):
-            deps += re.findall(r"\d+", inline)            # depends_on: [0001, 0002]
-        else:                                              # block list form
-            for ln2 in fm[i+1:]:
-                b = re.match(r"\s*-\s*(\d+)", ln2)
-                if b: deps.append(b.group(1))
-                elif ln2.strip() and not ln2.startswith((" ", "\t")): break
+            deps.extend(re.findall(r"\d+", inline))
+        else:
+            for child in fm[pos + 1:]:
+                item = re.match(r"\s*-\s*(\d+)", child)
+                if item: deps.append(item.group(1))
+                elif child.strip() and not child.startswith((" ", "\t")): break
         break
-    return [f"{int(d):04d}" for d in deps]
+    return issue_id, {
+        "title": fields.get("title", ""),
+        "status": fields.get("status", "open").lower(),
+        "severity": fields.get("severity", "medium").lower(),
+        "group": fields.get("group", ""),
+        "depends": [f"{int(dep):04d}" for dep in deps],
+    }
 
-depends = {i: load_depends(i) for i in issues}
+issues = {}
+for path in sorted(issue_dir.glob("[0-9][0-9][0-9][0-9]-*.md")):
+    issue_id, record = load_issue(path)
+    issues[issue_id] = record
+epics = {
+    issue_id: {"title": record["title"], "status": record["status"], "children": []}
+    for issue_id, record in issues.items()
+    if record["title"].lstrip().lower().startswith("epic:")
+}
+
+def is_open(s): return s not in ("closed", "done", "shipped", "resolved")
+
+depends = {issue_id: record["depends"] for issue_id, record in issues.items()}
 def open_blockers(iid):
     return [d for d in depends.get(iid, []) if d in issues and is_open(issues[d]["status"])]
 
-all_epics = dict(epics); all_epics.update(inline_epics)
-open_epics = {e: v for e, v in all_epics.items() if is_open(v["status"])}
+open_epics = {e: v for e, v in epics.items() if is_open(v["status"])}
 sev_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 recs, flags, blocked, buildable = [], [], [], []
 
@@ -127,7 +110,7 @@ seen_cycles = set()
 for i in issues:
     for d in depends.get(i, []):
         if d not in issues:
-            flags.append(f"[!] issue {i} depends_on {d}, which is not in the index — dangling edge.")
+            flags.append(f"[!] issue {i} depends_on {d}, which has no canonical issue file — dangling edge.")
         elif i in depends.get(d, []):
             pair = tuple(sorted((i, d)))
             if pair not in seen_cycles:
