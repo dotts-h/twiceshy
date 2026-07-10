@@ -112,7 +112,9 @@ func Build(corpus string, recs []*record.Record) Report {
 
 func unresolvedEvidence(code string) bool {
 	switch code {
-	case pack.ReasonMissingEvidence, pack.ReasonMissingSourceURL, pack.ReasonMissingNoticeEvidence, pack.ReasonUnrecognizedLicense:
+	case pack.ReasonMissingEvidence, pack.ReasonMissingSourceURL, pack.ReasonMissingNoticeEvidence,
+		pack.ReasonMissingRightsReview, pack.ReasonRightsDigestMismatch, pack.ReasonUnapprovedLicenseText,
+		pack.ReasonUnrecognizedLicense:
 		return true
 	default:
 		return false
@@ -127,6 +129,10 @@ func remediationAction(code string) string {
 		return "verify the licensed source and record its immutable source URL in a human-reviewed corpus PR"
 	case pack.ReasonMissingNoticeEvidence:
 		return "collect complete source attribution, notice, and license text evidence in a human-reviewed corpus PR"
+	case pack.ReasonMissingRightsReview, pack.ReasonRightsDigestMismatch:
+		return "complete or correct the immutable human rights-review attestation; never auto-populate it"
+	case pack.ReasonUnapprovedLicenseText:
+		return "keep excluded until the declared license has approved canonical material under a versioned policy"
 	case pack.ReasonUnrecognizedLicense:
 		return "verify the source terms and record a supported SPDX license or keep the record excluded"
 	default:

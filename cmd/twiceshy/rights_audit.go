@@ -98,7 +98,24 @@ func validateRightsArtifacts(recs []*record.Record, manifestPath, noticesPath, p
 	if err != nil {
 		return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: reading pack license: %w", err)
 	}
-	errs := pack.ValidateCommercialArtifacts(recs, manifest, notices, packLicense)
+	materials := make(map[string][]byte)
+	for _, entry := range manifest.Attribution {
+		for _, rel := range []string{entry.LicenseFile, entry.CopyrightFile, entry.NoticeFile} {
+			if rel == "" {
+				continue
+			}
+			path, err := safeJoin(filepath.Dir(manifestPath), rel)
+			if err != nil {
+				return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: invalid material path %q: %w", rel, err)
+			}
+			body, err := os.ReadFile(path)
+			if err != nil {
+				return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: reading material %q: %w", rel, err)
+			}
+			materials[rel] = body
+		}
+	}
+	errs := pack.ValidateCommercialArtifacts(recs, manifest, notices, packLicense, materials)
 	return rightsaudit.ArtifactValidation{Requested: true, Valid: len(errs) == 0, Errors: errs}, nil
 }
 

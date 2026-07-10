@@ -44,6 +44,10 @@
 - Set requirements for immutable source revisions, rights-holder identity,
   copied/adapted expression, contributor grants, and review sign-off.
 - Define retention periods and who may approve a remediation queue item.
+- Review the `twiceshy-rights-v1` human-attestation fields and decide whether
+  reviewer qualifications, dual control, source snapshots, or stronger signing
+  are required. The attestation is not currently a cryptographic signature and
+  does not claim counsel review.
 
 ### 5. Takedown and dispute process
 

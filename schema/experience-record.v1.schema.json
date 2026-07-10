@@ -293,6 +293,18 @@
             "license_text": { "type": "string" }
           }
         },
+        "rights_review": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reviewer", "reviewed_at", "source_sha256", "evidence_sha256", "policy"],
+          "properties": {
+            "reviewer": { "type": "string" },
+            "reviewed_at": { "type": "string", "format": "date-time" },
+            "source_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+            "evidence_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+            "policy": { "type": "string" }
+          }
+        },
         "security_flags": {
           "type": "array",
           "items": { "type": "string" }

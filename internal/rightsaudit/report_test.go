@@ -3,6 +3,7 @@
 package rightsaudit_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/dotts-h/twiceshy/internal/pack"
@@ -57,8 +58,14 @@ func TestBuildClassifiesAndQueuesOnlyUnresolvedEvidence(t *testing.T) {
 }
 
 func auditRecord(id, license, url string) *record.Record {
-	return &record.Record{
+	r := &record.Record{
 		ID: id, Path: "experience/2026/" + id[4:] + "-fixture.md", Status: "validated",
 		Provenance: record.Provenance{SourceLicense: license, SourceURL: url},
 	}
+	r.Provenance.RightsReview = &record.RightsReview{
+		Reviewer: "Jane Rights Reviewer", ReviewedAt: "2026-07-10T12:00:00Z",
+		SourceSHA256: "sha256:" + strings.Repeat("a", 64), Policy: pack.RightsPolicyV1,
+	}
+	r.Provenance.RightsReview.EvidenceSHA256 = pack.EvidenceDigest(r)
+	return r
 }

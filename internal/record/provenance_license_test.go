@@ -188,6 +188,11 @@ func TestProvenance_SourceAttributionRoundTripsAndSatisfiesSchema(t *testing.T) 
 		LicenseURL: "https://creativecommons.org/licenses/by/4.0/",
 		Changes:    "Adapted into a concise record.", LicenseText: "Canonical legal code.",
 	}
+	r.Provenance.RightsReview = &record.RightsReview{
+		Reviewer: "Jane Rights Reviewer", ReviewedAt: "2026-07-10T12:00:00Z",
+		SourceSHA256: "sha256:" + strings.Repeat("a", 64), EvidenceSHA256: "sha256:" + strings.Repeat("b", 64),
+		Policy: "twiceshy-rights-v1",
+	}
 	out, err := record.Marshal(r)
 	if err != nil {
 		t.Fatal(err)
@@ -198,6 +203,9 @@ func TestProvenance_SourceAttributionRoundTripsAndSatisfiesSchema(t *testing.T) 
 	}
 	if got.Provenance.SourceAttribution == nil || got.Provenance.SourceAttribution.Creator != "Example Creator" {
 		t.Fatalf("round trip lost source attribution: %+v", got.Provenance.SourceAttribution)
+	}
+	if got.Provenance.RightsReview == nil || got.Provenance.RightsReview.Reviewer != "Jane Rights Reviewer" {
+		t.Fatalf("round trip lost rights review: %+v", got.Provenance.RightsReview)
 	}
 	if err := loadRecordSchema(t).Validate(frontmatterValue(t, out)); err != nil {
 		t.Fatalf("source attribution must satisfy JSON Schema: %v", err)

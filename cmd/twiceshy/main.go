@@ -1575,6 +1575,18 @@ func runPack(args []string, out io.Writer) error {
 			return err
 		}
 	}
+	for rel, body := range pack.MaterialFiles(recs, m) {
+		dst, err := safeJoin(*outDir, rel)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(dst, body, 0o644); err != nil {
+			return err
+		}
+	}
 
 	mj, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {

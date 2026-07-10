@@ -81,12 +81,32 @@ func TestClassifyReasonCodesAreStableAndRecordAware(t *testing.T) {
 		t.Fatalf("licensed record without complete notice evidence = %+v", got)
 	}
 	licensed.Provenance.SourceAttribution = &record.SourceAttribution{
-		CopyrightNotice: "Copyright 2026 Example Authors",
-		LicenseText:     "Permission is hereby granted...",
+		CopyrightNotice: "Copyright 2026 Upstream Authors",
+		LicenseText:     pack.ApprovedMITLicenseText,
 	}
+	attestRights(licensed)
 	got = pack.ClassifyRecord(licensed)
 	if !got.Commercial || got.Code != pack.ReasonLicensedNotice {
 		t.Fatalf("licensed record with complete notice evidence = %+v", got)
+	}
+}
+
+func TestClassifyRecordRequiresHumanReviewAndRejectsPlaceholderOrForgedAttestation(t *testing.T) {
+	r := rec("exp-0001", "validated", record.SourceLicenseProjectAuthored, "")
+	r.Provenance.RightsReview = nil
+	if got := pack.ClassifyRecord(r); got.Commercial || got.Code != pack.ReasonMissingRightsReview {
+		t.Fatalf("missing review attestation passed: %+v", got)
+	}
+	attestRights(r)
+	r.Provenance.RightsReview.Reviewer = "TODO"
+	r.Provenance.RightsReview.EvidenceSHA256 = pack.EvidenceDigest(r)
+	if got := pack.ClassifyRecord(r); got.Commercial || got.Code != pack.ReasonMissingRightsReview {
+		t.Fatalf("placeholder reviewer passed: %+v", got)
+	}
+	attestRights(r)
+	r.Provenance.RightsReview.EvidenceSHA256 = "sha256:" + strings.Repeat("f", 64)
+	if got := pack.ClassifyRecord(r); got.Commercial || got.Code != pack.ReasonRightsDigestMismatch {
+		t.Fatalf("forged evidence digest passed: %+v", got)
 	}
 }
 
@@ -97,22 +117,34 @@ func TestValidateCommercialArtifactsDetectsManifestAndNoticeDrift(t *testing.T) 
 	}
 	want := pack.BuildManifest(recs, true, false)
 	notices := pack.NoticeDocument(want)
+	materials := pack.MaterialFiles(recs, want)
 	packLicense := []byte("Commercial pack terms\n")
 	want.PackLicenseSHA256 = pack.LicenseDigest(packLicense)
-	if errs := pack.ValidateCommercialArtifacts(recs, want, notices, packLicense); len(errs) != 0 {
+	if errs := pack.ValidateCommercialArtifacts(recs, want, notices, packLicense, materials); len(errs) != 0 {
 		t.Fatalf("canonical artifacts rejected: %v", errs)
 	}
 
 	badManifest := want
 	badManifest.Attribution = nil
-	if errs := pack.ValidateCommercialArtifacts(recs, badManifest, notices, packLicense); len(errs) == 0 {
+	if errs := pack.ValidateCommercialArtifacts(recs, badManifest, notices, packLicense, materials); len(errs) == 0 {
 		t.Fatal("missing manifest notice entry must be rejected")
 	}
-	if errs := pack.ValidateCommercialArtifacts(recs, want, []byte("# incomplete\n"), packLicense); len(errs) == 0 {
+	if errs := pack.ValidateCommercialArtifacts(recs, want, []byte("# incomplete\n"), packLicense, materials); len(errs) == 0 {
 		t.Fatal("incomplete notice document must be rejected")
 	}
-	if errs := pack.ValidateCommercialArtifacts(recs, want, notices, nil); len(errs) == 0 {
+	if errs := pack.ValidateCommercialArtifacts(recs, want, notices, nil, materials); len(errs) == 0 {
 		t.Fatal("missing pack-level LICENSE terms must be rejected")
+	}
+	tampered := make(map[string][]byte, len(materials))
+	for path, body := range materials {
+		tampered[path] = append([]byte(nil), body...)
+	}
+	for path := range tampered {
+		tampered[path] = []byte("forged material")
+		break
+	}
+	if errs := pack.ValidateCommercialArtifacts(recs, want, notices, packLicense, tampered); len(errs) == 0 {
+		t.Fatal("forged third-party material must be rejected")
 	}
 }
 
@@ -127,8 +159,9 @@ func TestClassifyRecordCCBYRequiresCompleteAttributionDetails(t *testing.T) {
 		t.Fatalf("missing change details must fail closed: %+v", got)
 	}
 	r.Provenance.SourceAttribution.Changes = "Condensed into an experience record; no source prose copied."
-	if got := pack.ClassifyRecord(r); !got.Commercial || got.Code != pack.ReasonCCBYNotice {
-		t.Fatalf("complete CC-BY evidence rejected: %+v", got)
+	attestRights(r)
+	if got := pack.ClassifyRecord(r); got.Commercial || got.Code != pack.ReasonUnapprovedLicenseText {
+		t.Fatalf("CC-BY without an approved canonical digest must remain fail-closed: %+v", got)
 	}
 }
 
@@ -140,24 +173,20 @@ func TestClassifyRecordApacheRequiresCopyrightNoticeAndLicenseText(t *testing.T)
 	if got := pack.ClassifyRecord(r); got.Commercial || got.Code != pack.ReasonMissingNoticeEvidence {
 		t.Fatalf("Apache record missing upstream NOTICE evidence must fail closed: %+v", got)
 	}
-	r.Provenance.SourceAttribution.Notice = "Example upstream NOTICE material"
-	if got := pack.ClassifyRecord(r); !got.Commercial || got.Code != pack.ReasonLicensedNotice {
-		t.Fatalf("complete Apache evidence rejected: %+v", got)
+	r.Provenance.SourceAttribution.Notice = "Upstream NOTICE material"
+	attestRights(r)
+	if got := pack.ClassifyRecord(r); got.Commercial || got.Code != pack.ReasonUnapprovedLicenseText {
+		t.Fatalf("non-canonical Apache text must remain fail-closed: %+v", got)
 	}
 }
 
 func TestNoticeDocumentBundlesLicenseAndAttributionMaterial(t *testing.T) {
 	recs := []*record.Record{
 		withMITNotice(rec("exp-0001", "validated", "MIT", "https://example.test/mit")),
-		withCCBYNotice(rec("exp-0002", "validated", "CC-BY-4.0", "https://example.test/cc")),
 	}
 	doc := string(pack.NoticeDocument(pack.BuildManifest(recs, true, false)))
 	for _, want := range []string{
-		"Copyright 2026 Example Authors", "Permission is hereby granted...",
-		"Creator: Example Creator", "Work title: Example Work",
-		"License link: https://creativecommons.org/licenses/by/4.0/",
-		"Changes: Condensed into an experience record.",
-		"Creative Commons Attribution 4.0 legal code",
+		"THIRD_PARTY/exp-0001-COPYRIGHT.txt", "THIRD_PARTY/exp-0001-LICENSE.txt",
 	} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("notice document missing %q:\n%s", want, doc)
@@ -165,25 +194,58 @@ func TestNoticeDocumentBundlesLicenseAndAttributionMaterial(t *testing.T) {
 	}
 }
 
+func TestNoticeDocumentEscapesHostileMetadataAndRawMaterialIsSeparate(t *testing.T) {
+	r := withMITNotice(rec("exp-0001", "validated", "MIT", "https://example.test/mit"))
+	r.Provenance.SourceAttribution.Title = "</script> [click](javascript:alert(1)) ```fence"
+	r.Provenance.SourceAttribution.CopyrightNotice = "<b>raw copyright</b>"
+	r.Provenance.SourceAttribution.Notice = "```html\n<img src=x onerror=alert(1)>\n```"
+	attestRights(r)
+	m := pack.BuildManifest([]*record.Record{r}, true, false)
+	doc := string(pack.NoticeDocument(m))
+	for _, hostile := range []string{"</script>", "javascript:alert", "```", "<b>"} {
+		if strings.Contains(doc, hostile) {
+			t.Fatalf("ATTRIBUTION contains unescaped/raw material %q:\n%s", hostile, doc)
+		}
+	}
+	materials := pack.MaterialFiles([]*record.Record{r}, m)
+	var joined string
+	for _, body := range materials {
+		joined += string(body)
+	}
+	if !strings.Contains(joined, "<img src=x onerror=alert(1)>") || !strings.Contains(joined, "Permission is hereby granted") {
+		t.Fatalf("separate material files lost verbatim content: %q", joined)
+	}
+}
+
 func withMITNotice(r *record.Record) *record.Record {
 	r.Provenance.SourceAttribution = &record.SourceAttribution{
-		CopyrightNotice: "Copyright 2026 Example Authors",
-		LicenseText:     "Permission is hereby granted...",
+		Title: "Upstream MIT Work", CopyrightNotice: "Copyright 2026 Upstream Authors",
+		LicenseText: pack.ApprovedMITLicenseText,
 	}
+	attestRights(r)
 	return r
 }
 
 func withCCBYNotice(r *record.Record) *record.Record {
 	r.Provenance.SourceAttribution = &record.SourceAttribution{
-		Creator: "Example Creator", Title: "Example Work",
+		Creator: "Upstream Creator", Title: "Upstream Work",
 		LicenseURL: "https://creativecommons.org/licenses/by/4.0/",
 		Changes:    "Condensed into an experience record.", LicenseText: "Creative Commons Attribution 4.0 legal code",
 	}
+	attestRights(r)
 	return r
 }
 
+func attestRights(r *record.Record) {
+	r.Provenance.RightsReview = &record.RightsReview{
+		Reviewer: "Jane Rights Reviewer", ReviewedAt: "2026-07-10T12:00:00Z",
+		SourceSHA256: "sha256:" + strings.Repeat("a", 64), Policy: pack.RightsPolicyV1,
+	}
+	r.Provenance.RightsReview.EvidenceSHA256 = pack.EvidenceDigest(r)
+}
+
 func rec(id, status, license, url string) *record.Record {
-	return &record.Record{
+	r := &record.Record{
 		ID:     id,
 		Status: status,
 		Provenance: record.Provenance{
@@ -191,6 +253,8 @@ func rec(id, status, license, url string) *record.Record {
 			SourceURL:     url,
 		},
 	}
+	attestRights(r)
+	return r
 }
 
 func TestBuildManifest_CommercialExcludesCopyleftAndAttributesCCBY(t *testing.T) {
@@ -208,14 +272,15 @@ func TestBuildManifest_CommercialExcludesCopyleftAndAttributesCCBY(t *testing.T)
 	for _, id := range m.Included {
 		got[id] = true
 	}
-	// MIT, CC-BY (w/ attribution), and explicitly authored are in; CC-BY-SA,
+	// MIT and explicitly authored are in; CC-BY stays fail-closed until its
+	// canonical license digest is approved; CC-BY-SA,
 	// quarantined, and missing-rights records are out.
-	for _, want := range []string{"exp-0001", "exp-0002", "exp-0004"} {
+	for _, want := range []string{"exp-0001", "exp-0004"} {
 		if !got[want] {
 			t.Errorf("commercial pack should include %s; included=%v", want, m.Included)
 		}
 	}
-	for _, no := range []string{"exp-0003", "exp-0005", "exp-0006"} {
+	for _, no := range []string{"exp-0002", "exp-0003", "exp-0005", "exp-0006"} {
 		if got[no] {
 			t.Errorf("commercial pack must NOT include %s", no)
 		}
@@ -228,9 +293,8 @@ func TestBuildManifest_CommercialExcludesCopyleftAndAttributesCCBY(t *testing.T)
 	if reasons["exp-0003"] == "" || reasons["exp-0005"] == "" || reasons["exp-0006"] == "" {
 		t.Errorf("excluded records must carry reasons: %+v", m.Excluded)
 	}
-	// Copied MIT and CC-BY material both need source/license notice entries.
-	if len(m.Attribution) != 2 || m.Attribution[0].ID != "exp-0001" || m.Attribution[1].ID != "exp-0002" {
-		t.Errorf("attribution = %+v, want exp-0001 and exp-0002", m.Attribution)
+	if len(m.Attribution) != 1 || m.Attribution[0].ID != "exp-0001" {
+		t.Errorf("attribution = %+v, want exp-0001", m.Attribution)
 	}
 }
 

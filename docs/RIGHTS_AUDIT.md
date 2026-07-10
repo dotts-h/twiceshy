@@ -32,6 +32,15 @@ change description, and license text. Empty fields fail closed. These mechanical
 checks are conservative engineering controls, not a legal opinion; counsel must
 approve the final policy and pack terms before distribution.
 
+Every commercially eligible record also needs a human `rights_review`
+attestation under the versioned `twiceshy-rights-v1` mechanical policy. The
+attestation binds reviewer identity, review time, source SHA-256, and the exact
+record evidence digest. Placeholder identities and digest mismatches fail
+closed. This is an operator review control, not counsel approval. MIT text is
+checked against the built-in approved template; Apache-2.0 against an approved
+canonical digest. CC-BY remains ineligible until an exact canonical legal-code
+digest/template is approved and implemented.
+
 Use the CI posture after the baseline is understood:
 
 ```sh
@@ -70,6 +79,11 @@ twiceshy rights-audit \
 Manifest selection, bundled license/notice material, or pack-level LICENSE drift
 fails the command. All three files are required together. The manifest binds the
 pack terms by SHA-256.
+
+Raw third-party copyright, NOTICE, and license text is emitted only under
+`THIRD_PARTY/*.txt`, with hashes referenced from `MANIFEST.json` and escaped
+metadata references in `ATTRIBUTION.md`. Raw third-party text is never rendered
+as Markdown or HTML.
 
 ## Live-corpus smoke check
 

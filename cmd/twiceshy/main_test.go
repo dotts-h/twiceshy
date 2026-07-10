@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dotts-h/twiceshy/internal/pack"
 	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/testcorpus"
 )
@@ -74,7 +75,7 @@ func packFixture(id, status, license, url string) *record.Record {
 	}
 	switch strings.ToLower(license) {
 	case "mit":
-		prov.SourceAttribution = &record.SourceAttribution{CopyrightNotice: "Copyright 2026 Fixture Authors", LicenseText: "Permission is hereby granted..."}
+		prov.SourceAttribution = &record.SourceAttribution{Title: "Fixture Work", CopyrightNotice: "Copyright 2026 Fixture Authors", LicenseText: pack.ApprovedMITLicenseText}
 	case "cc-by-4.0":
 		prov.SourceAttribution = &record.SourceAttribution{Creator: "Fixture Creator", Title: "Fixture Work", LicenseURL: "https://creativecommons.org/licenses/by/4.0/", Changes: "Condensed into a test record.", LicenseText: "Creative Commons Attribution 4.0 legal code"}
 	}
@@ -82,7 +83,7 @@ func packFixture(id, status, license, url string) *record.Record {
 		v := "2026-06-18"
 		prov.ValidatedAt = &v // a validated record must record validated_at
 	}
-	return &record.Record{
+	r := &record.Record{
 		SchemaVersion: 1,
 		ID:            "exp-" + id,
 		Kind:          "convention",
@@ -93,6 +94,9 @@ func packFixture(id, status, license, url string) *record.Record {
 		Body:          "Distilled fact for the pack-builder test.",
 		Path:          "experience/2026/" + id + "-pack-fixture.md",
 	}
+	r.Provenance.RightsReview = &record.RightsReview{Reviewer: "Jane Rights Reviewer", ReviewedAt: "2026-07-10T12:00:00Z", SourceSHA256: "sha256:" + strings.Repeat("a", 64), Policy: pack.RightsPolicyV1}
+	r.Provenance.RightsReview.EvidenceSHA256 = pack.EvidenceDigest(r)
+	return r
 }
 
 func corpusWithLocal2758AndBase2768(t *testing.T) (string, string) {
@@ -161,7 +165,7 @@ func TestRunPackCommercialExcludesAndAttributes(t *testing.T) {
 		t.Fatalf("read manifest: %v", err)
 	}
 	ms := string(manifest)
-	if !strings.Contains(ms, "exp-0101") || !strings.Contains(ms, "exp-0102") || !strings.Contains(ms, "exp-0105") {
+	if !strings.Contains(ms, "exp-0101") || !strings.Contains(ms, "exp-0105") {
 		t.Errorf("manifest should include licensed and explicitly project-authored records:\n%s", ms)
 	}
 	for _, reason := range []string{"copyleft", "not validated"} {
@@ -179,10 +183,13 @@ func TestRunPackCommercialExcludesAndAttributes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read attribution: %v", err)
 	}
-	for _, want := range []string{"Source and License Notices", "exp-0101", "MIT", "0123456789abcdef", "exp-0102", "GHSA-x"} {
+	for _, want := range []string{"Source and License Notices", "exp-0101", "MIT", "0123456789abcdef", "THIRD_PARTY/exp-0101-LICENSE.txt"} {
 		if !strings.Contains(string(attr), want) {
 			t.Errorf("ATTRIBUTION.md must describe copied-source license/notice entries (missing %q):\n%s", want, attr)
 		}
+	}
+	if got, err := os.ReadFile(filepath.Join(outDir, "THIRD_PARTY", "exp-0101-LICENSE.txt")); err != nil || string(got) != pack.ApprovedMITLicenseText {
+		t.Fatalf("bundled MIT license = %q, %v", got, err)
 	}
 }
 
