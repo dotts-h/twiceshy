@@ -709,7 +709,7 @@
     <div class="wrap">
       <ul>
         <li>Open source (AGPL) — self-hosting is free forever</li>
-        <li>4,346 traps recorded · validated nightly by a cross-model judge panel</li>
+        <li>Versioned experience corpus · records are gated before they are served</li>
         <li>Free while in alpha — fair pricing later</li>
       </ul>
     </div>
@@ -817,7 +817,7 @@
       var micro = block.querySelector(".signup-micro");
       if (micro) { micro.hidden = true; }
       tokenField.textContent = token;
-      snippetCode.textContent = "claude mcp add -t http twiceshy https://api.twiceshy.dev \\\n  --header \"Authorization: Bearer " + token + "\"";
+      snippetCode.textContent = "claude mcp add -t http twiceshy https://api.twiceshy.app \\\n  --header \"Authorization: Bearer " + token + "\"";
       resultBox.hidden = false;
     }
 
