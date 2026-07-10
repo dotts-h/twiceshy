@@ -1,7 +1,7 @@
 ---
 id: 0120
 title: Live-corpus push recall guard dormant since ADR-0021 — fails 0/6 on the grown corpus
-status: open
+status: closed
 severity: medium
 group:
 depends_on: []
@@ -10,7 +10,7 @@ links:
   adr: docs/adr/ADR-0021-corpus-repo-decoupling.md
   prs: []
   issues: [0117, 0067]
-  regression:
+  regression: internal/eval/eval_livecorpus_test.go
 assets: []
 ---
 
@@ -45,3 +45,13 @@ Expected: recall 1.00 (6/6). Actual: 0.00 (0/6), `got []` for every positive cas
 Found 2026-07-03 while landing the 0117 IDF asset: the asset PR's acceptance
 ("live-corpus test stays green") could not be met because the guard was already
 red when awakened; 0117 ships with the no-regression control documented instead.
+
+## Close-out (2026-07-10)
+
+The apparent 0/6 result came from a directory symlink that `WalkDir` never
+followed, so the test loaded zero records. Live tests now load the explicit
+`TWICESHY_LIVE_CORPUS` root, and `make test-livecorpus LIVE_CORPUS=<path>`
+fails loudly when it is absent. The canonical positives now use exp-0001's
+exact fingerprint signature and exclude importer-origin exp-0045, matching the
+fixed push-eligibility policy. The real eval/index live guards pass without
+changing any relevance, DF, corroboration, or eligibility threshold.

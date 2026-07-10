@@ -67,11 +67,10 @@ func TestPromote_ConsistencyPreGate_CleanAdvisoryPromotes(t *testing.T) {
 	}
 }
 
-// A legacy advisory whose ONLY defect is a source_url id mismatch (advisory-only —
-// it false-positives on OSV alias pairs) must NOT be blocked by the promote
-// pre-gate: it proceeds to the panel and promotes on approval. source-url stays soft
-// until the detector is alias-aware.
-func TestPromote_ConsistencyPreGate_SourceURLMismatchNotBlocked(t *testing.T) {
+// A legacy advisory whose source_url names an id absent from the record's complete
+// primary-id + alias set must be held before the panel. The detector is alias-aware,
+// so this is concrete misdirection, not an ambiguous alias reference.
+func TestPromote_ConsistencyPreGate_SourceURLMismatchHeld(t *testing.T) {
 	p := newPromoter(t, &stubAttestor{att: holdingAtt()}, &judge.StubJudge{}, promote.WithAdvisoryPanel(approvingAdvisoryPanel(t)))
 	rec := advisoryRecord() // clean fixed version (no null-fixed contradiction)
 	// source_url cites a DIFFERENT GHSA id than the record's error_signatures.
@@ -81,7 +80,7 @@ func TestPromote_ConsistencyPreGate_SourceURLMismatchNotBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Promote: %v", err)
 	}
-	if !out.Promoted {
-		t.Fatalf("a source-url-mismatch-only advisory must NOT be gate-blocked, got held: %q", out.Reason)
+	if out.Promoted || !strings.Contains(out.Reason, "consistency defect") {
+		t.Fatalf("a source-url mismatch must be held by the pre-gate, got %+v", out)
 	}
 }

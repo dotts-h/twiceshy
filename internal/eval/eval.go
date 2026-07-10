@@ -194,15 +194,22 @@ func PushNegatives() []PushCase {
 // fts5+bm25, servemux+catch-all, fork/exec+tmpdir/noexec, rand.Seed+staticcheck,
 // setup-go+forgejo/runner) — not common dev vocabulary — because a prompt-triggered
 // push now requires TWO independent discriminative tokens landing on the SAME
-// eligible record (#0108's corroboration rule), not one. Ids are the validated
-// engineering traps (the original 9).
+// eligible record (#0108's corroboration rule), not one. Every expected id is
+// push-eligible under the current kind/origin policy; pull-only records do not
+// masquerade as recall failures.
 func PushPositives() []PushCase {
 	return []PushCase{
-		{Query: `fts5 match throws a syntax error near "." when the query has a dotted module path`, ExpectID: "exp-0001"},
+		// exp-0001's broad prompt form is no longer discriminative in the grown
+		// corpus (fts5/syntax now occur in >pushMaxDF eligible records). Its exact
+		// error signature remains a high-precision fingerprint bypass and is the
+		// honest push-positive contract.
+		{Query: `fts5: syntax error near "."`, ExpectID: "exp-0001"},
 		{Query: "fts5 bm25 scores are negative so order by rank desc returns the worst rows", ExpectID: "exp-0002"},
 		{Query: "go servemux POST pattern lets other methods fall through to the catch-all not a 405", ExpectID: "exp-0006"},
 		{Query: "go test fork/exec permission denied because TMPDIR is a noexec mount", ExpectID: "exp-0017"},
-		{Query: "rand.Seed is deprecated since go 1.20, staticcheck flags the global source", ExpectID: "exp-0045"},
+		// exp-0045 is intentionally absent: its origin is twiceshy-importer, which
+		// #0107 makes pull-only even though the record is validated. Treating it as
+		// a push-recall positive contradicts the eligibility policy.
 		{Query: "actions/setup-go cache step hangs for five minutes on a self-hosted forgejo runner", ExpectID: "exp-0005"},
 	}
 }

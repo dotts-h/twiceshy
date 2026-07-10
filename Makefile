@@ -6,6 +6,10 @@ COVER_FLOOR ?= 80
 # engine repo keeps only the frozen fixture. `eval` defaults to it for a smoke run —
 # override with a corpus checkout (`make eval CORPUS=/path/to/twiceshy-corpus`).
 CORPUS      ?= internal/testcorpus/corpus
+# Opt-in cross-repo guard input. Ordinary CI never reads it; `test-livecorpus`
+# fails loudly when the separate data-product checkout is absent instead of
+# turning a requested guard run into a suite of skips (#0120, ADR-0021).
+LIVE_CORPUS ?= ../twiceshy-corpus
 
 .PHONY: ci lint test test-scripts cover cover-check build tidy doctor sec vuln secret-scan eval test-livecorpus
 
@@ -53,7 +57,11 @@ test-scripts:
 	@for test_script in scripts/*.test.sh; do bash "$$test_script" || exit 1; done
 
 test-livecorpus:
-	$(GO) test -tags livecorpus ./...
+	@test -d "$(LIVE_CORPUS)/experience" || { \
+		echo "FAIL: live corpus not found at $(LIVE_CORPUS) (set LIVE_CORPUS=/path/to/twiceshy-corpus)"; \
+		exit 1; \
+	}
+	TWICESHY_LIVE_CORPUS="$(abspath $(LIVE_CORPUS))" $(GO) test -tags livecorpus ./internal/eval ./internal/index
 
 cover:
 	$(GO) test -race -covermode=atomic -coverprofile=coverage.out ./...

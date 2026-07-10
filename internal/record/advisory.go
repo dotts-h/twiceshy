@@ -36,11 +36,16 @@ func fixTextClaimsFixedVersion(fix string) bool {
 //     record does not carry in its error_signatures (the URL points elsewhere).
 //   - malformed-package-path: a package coordinate with a scheme prefix or
 //     whitespace — never a valid module/package path.
+//   - audited source facts: the four semantic #0061 cases whose canonical scope
+//     was independently established (libheif, Prometheus, Traefik, Ech0). These
+//     are exact advisory+ecosystem+package matches, not unsafe generic casing or
+//     semantic-import-version heuristics.
 func AdvisoryDefects(rec *Record) []string {
 	if !IsAdvisoryClass(rec) {
 		return nil
 	}
 	var defects []string
+	ownIDs := recordVulnIDs(rec)
 
 	if rec.Resolution != nil && fixTextClaimsFixedVersion(rec.Resolution.Fix) && !anyFixedVersion(rec.AppliesTo) {
 		defects = append(defects, "consistency:null-fixed-fix-text")
@@ -54,20 +59,27 @@ func AdvisoryDefects(rec *Record) []string {
 		if malformedPackagePath(a.Package) {
 			defects = append(defects, "consistency:malformed-package-path:"+strings.TrimSpace(a.Package))
 		}
+		for _, known := range knownAdvisoryScopeDefects {
+			if ownIDs[known.advisoryID] && strings.EqualFold(strings.TrimSpace(a.Ecosystem), known.ecosystem) && strings.TrimSpace(a.Package) == known.pkg {
+				defects = appendUnique(defects, known.flag+":"+known.pkg)
+			}
+		}
 	}
 
 	return defects
 }
 
-// blockingConsistencyPrefixes are the consistency-defect classes precise enough to
-// HARD-block promotion (the validate rule + the live promote pre-gate). The
-// source-url-id-mismatch class is intentionally EXCLUDED: it false-positives on OSV
-// alias pairs (one vuln published under several valid GHSA ids, the source_url
-// citing a sibling alias), so it stays advisory-only (recorded, never blocking)
-// until the detector is made alias-aware.
+// blockingConsistencyPrefixes are the deterministic transcription defects precise
+// enough to HARD-block promotion. Source-url comparison is alias-aware: recordVulnIDs
+// includes every primary id and alias carried by the record, so a mismatch means the
+// URL names an advisory absent from that complete set.
 var blockingConsistencyPrefixes = []string{
 	"consistency:null-fixed-fix-text",
 	"consistency:malformed-package-path",
+	"consistency:source-url-id-mismatch",
+	"consistency:ecosystem-package-mismatch",
+	"consistency:go-major-version-path",
+	"consistency:go-module-path-case",
 }
 
 // IsBlockingConsistencyFlag reports whether a consistency flag (stored or freshly
@@ -81,12 +93,10 @@ func IsBlockingConsistencyFlag(flag string) bool {
 	return false
 }
 
-// AdvisoryBlockingDefects returns only the live-detected defects that HARD-block
-// promotion — the confirmed-precise classes (null-fixed-fix-text,
-// malformed-package-path). It is the promote-path pre-gate: a LEGACY record that
-// carries no STORED consistency_flags (ingested before the ingest gate existed) is
-// still held if it trips one of these, computed fresh from its content. Returns nil
-// for a clean, non-advisory, or advisory-only-flagged (e.g. source-url) record.
+// AdvisoryBlockingDefects returns the live-detected #0061 defects that HARD-block
+// promotion. It is the promote-path pre-gate: a legacy record with no stored flag
+// (ingested before the consistency gate existed) is still held when its content
+// trips a deterministic structural or exact audited-source rule.
 func AdvisoryBlockingDefects(rec *Record) []string {
 	var blocking []string
 	for _, f := range AdvisoryDefects(rec) {
@@ -148,6 +158,32 @@ func recordVulnIDs(rec *Record) map[string]bool {
 		}
 	}
 	return ids
+}
+
+// knownAdvisoryScopeDefects is deliberately narrow. Each entry is one concrete
+// source transcription rejected by the full #0061 audit. Go module casing and /vN
+// suffixes cannot be inferred safely from strings alone (Azure legitimately uses
+// uppercase; Prometheus v2 releases legitimately use an unsuffixed module), so do
+// not generalize this table into a normalizer. New facts require their own evidence.
+var knownAdvisoryScopeDefects = []struct {
+	advisoryID string
+	ecosystem  string
+	pkg        string
+	flag       string
+}{
+	{"GHSA-22FX-6R9M-R8H9", "Go", "github.com/strukturag/libheif", "consistency:ecosystem-package-mismatch"},
+	{"GHSA-4V48-4Q5M-8VX4", "Go", "github.com/prometheus/prometheus/v2", "consistency:go-major-version-path"},
+	{"GHSA-7V4P-328V-8V5G", "Go", "github.com/traefik/traefik", "consistency:go-major-version-path"},
+	{"GHSA-FPW6-HRG5-Q5X5", "Go", "github.com/lin-snow/Ech0", "consistency:go-module-path-case"},
+}
+
+func appendUnique(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 // malformedPackagePath reports whether a package coordinate is structurally invalid:
