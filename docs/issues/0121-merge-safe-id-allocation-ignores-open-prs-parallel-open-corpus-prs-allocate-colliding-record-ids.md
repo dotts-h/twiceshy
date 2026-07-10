@@ -1,14 +1,14 @@
 ---
 id: 0121
 title: Merge-safe ID allocation ignores OPEN PRs — parallel-open corpus PRs allocate colliding record IDs
-status: open
+status: closed
 severity: medium
 group: 0064
 depends_on: []
 forgejo: 522
 links:
   adr: docs/adr/ADR-0021-corpus-data-product-split.md
-  prs: []
+  prs: [609]
   issues: [0105]
   regression:
 assets: []
