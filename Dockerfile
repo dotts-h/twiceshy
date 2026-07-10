@@ -2,7 +2,7 @@
 # twiceshy server image (ADR-0001 §9: one Go service in Docker).
 # Pure-Go / CGO-free (ADR-0009) → a static binary on a distroless nonroot base.
 
-FROM golang:1.25.11-bookworm@sha256:b96f24a8d7d010ea0acb9c3ba99064740f02b6b984612b28bd3c9c5ab9453e38 AS build
+FROM golang:1.25.12-bookworm@sha256:a9c020ee3d1508c7be5435c262434e3d3fc1d0e76a11afeb9ddae7d60bc86aa4 AS build
 WORKDIR /src
 # Cache modules first.
 COPY go.mod go.sum ./
