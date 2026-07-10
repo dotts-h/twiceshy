@@ -299,6 +299,26 @@ To capture contributions from alpha users without exposing the private corpus re
    - Spooled issues are pulled to the brain but are not processed automatically. They must be drained manually using `twiceshy intake-issues` since `report_issue` is a triage surface and out of scope for automated phase-2 pipeline integration.
 5. **Fail-Closed Behavior:** If a spool directory becomes unwritable, the corresponding client write tool call (e.g. `record_experience`) fails with an error rather than silently discarding the user's submission (PR #547).
 
+## Disabled team-plan foundation
+
+Organization/workspace identity and plan entitlements are installed as an
+additive part of the durable tenant registry, but all administration is disabled
+by default. The public-alpha signup path and operator token retain their existing
+behavior. See [ADR-0035](adr/ADR-0035-feature-gated-team-plan-foundation.md).
+
+For local/operator evaluation only, set `TWICESHY_TEAM_PLANS=1`, then use:
+
+```sh
+twiceshy token issue -index twiceshy.db -label platform \
+  -organization org_acme -workspace ws_platform -plan team
+twiceshy token assign -index twiceshy.db -id tok_ab12cd34 \
+  -organization org_acme -workspace ws_platform -plan team
+twiceshy token report -index twiceshy.db
+```
+
+Do not enable the flag as a claim of private-corpus isolation, payment status,
+or pricing enforcement; none is part of this foundation.
+
 ## Known limitation at launch — signup rate limit behind the proxy (#0131)
 
 The signup per-IP daily cap (3/day) keys on `RemoteAddr`, which behind this

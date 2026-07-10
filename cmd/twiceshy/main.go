@@ -262,7 +262,7 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	case "idf-build":
 		return runIdfBuild(args[1:], out)
 	case "token":
-		return runToken(ctx, args[1:], out)
+		return runToken(ctx, args[1:], out, getenv)
 	default:
 		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, learned, draft, promote, repromote, adapt, intake-reports, intake-records, intake-issues, retro-intake, screen, report, pack, doctor, eval, corpus-quality, usage-flush, gold-add, judge-eval, prospect, self-audit, similarity, author, corpus-merge-check, corpus-pr-paths, nextid, token, or idf-build)", args[0])
 	}

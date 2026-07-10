@@ -3,6 +3,11 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -26,5 +31,60 @@ func TestFormatTokenListLines(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(lines, "\n"), "secret") {
 		t.Fatal("list output must never mention secrets")
+	}
+}
+
+func TestTeamPlanCLIIsDisabledByDefault(t *testing.T) {
+	var out bytes.Buffer
+	db := filepath.Join(t.TempDir(), "ix.db")
+	err := runToken(context.Background(), []string{"report", "-index", db}, &out, func(string) string { return "" })
+	if err == nil || !strings.Contains(err.Error(), "TWICESHY_TEAM_PLANS") {
+		t.Fatalf("disabled team-plan report error = %v", err)
+	}
+	err = runToken(context.Background(), []string{"issue", "-index", db, "-plan", "team", "-organization", "org", "-workspace", "ws"}, &out, func(string) string { return "" })
+	if err == nil || !strings.Contains(err.Error(), "TWICESHY_TEAM_PLANS") {
+		t.Fatalf("disabled team-plan issue error = %v", err)
+	}
+	if _, statErr := os.Stat(db); !os.IsNotExist(statErr) {
+		t.Fatalf("disabled feature must not create a registry, stat err=%v", statErr)
+	}
+}
+
+func TestTeamPlanCLIReportAndAssignment(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "ix.db")
+	enabled := func(key string) string {
+		if key == "TWICESHY_TEAM_PLANS" {
+			return "1"
+		}
+		return ""
+	}
+	var issued bytes.Buffer
+	if err := runToken(context.Background(), []string{"issue", "-index", db, "-label", "platform", "-plan", "team", "-organization", "org_acme", "-workspace", "ws_platform"}, &issued, enabled); err != nil {
+		t.Fatalf("planned token issue: %v", err)
+	}
+	var report bytes.Buffer
+	if err := runToken(context.Background(), []string{"report", "-index", db}, &report, enabled); err != nil {
+		t.Fatalf("report: %v", err)
+	}
+	for _, want := range []string{"org_acme", "ws_platform", "plan=team", "quota=20000", "rate=600"} {
+		if !strings.Contains(report.String(), want) {
+			t.Errorf("report %q missing %q", report.String(), want)
+		}
+	}
+}
+
+func TestTeamPlanCLIPreservesCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	enabled := func(key string) string {
+		if key == "TWICESHY_TEAM_PLANS" {
+			return "1"
+		}
+		return ""
+	}
+	var out bytes.Buffer
+	err := runToken(ctx, []string{"issue", "-index", filepath.Join(t.TempDir(), "ix.db"), "-plan", "team", "-organization", "org", "-workspace", "ws"}, &out, enabled)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled planned issue = %v, want context.Canceled", err)
 	}
 }

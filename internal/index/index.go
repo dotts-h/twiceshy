@@ -369,6 +369,23 @@ CREATE TABLE IF NOT EXISTS contribution_usage (
   calls    INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (token_id, day, tool)
 );
+CREATE TABLE IF NOT EXISTS organizations (
+  id         TEXT PRIMARY KEY,
+  label      TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS workspaces (
+  id              TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL,
+  label           TEXT NOT NULL DEFAULT '',
+  created_at      TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS token_entitlements (
+  token_id        TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL,
+  workspace_id    TEXT NOT NULL,
+  plan            TEXT NOT NULL
+);
 `
 
 // migrations are additive, idempotent in-place schema changes for index files

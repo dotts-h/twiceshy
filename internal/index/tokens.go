@@ -3,6 +3,7 @@
 package index
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -12,6 +13,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/dotts-h/twiceshy/internal/entitlement"
 )
 
 // ErrTokenUnknown is returned when a token id or secret does not match.
@@ -22,17 +25,30 @@ var ErrTokenRevoked = errors.New("token revoked")
 
 // TokenInfo is metadata for an issued tenant token (never includes the secret).
 type TokenInfo struct {
-	ID         string
-	Label      string
-	CreatedAt  string
-	RevokedAt  *string
-	DailyQuota int
-	RatePerMin int
-	CallsToday int
+	ID             string
+	Label          string
+	CreatedAt      string
+	RevokedAt      *string
+	DailyQuota     int
+	RatePerMin     int
+	CallsToday     int
+	OrganizationID string
+	WorkspaceID    string
+	Plan           entitlement.Plan
 }
 
 // IssueToken creates a new tenant token. The full bearer value is returned once.
 func (ix *Index) IssueToken(label string, dailyQuota, ratePerMin int, now time.Time) (full string, id string, err error) {
+	return ix.issueToken(context.Background(), label, dailyQuota, ratePerMin, now, nil)
+}
+
+type tokenAssignment struct {
+	organizationID string
+	workspaceID    string
+	plan           entitlement.Plan
+}
+
+func (ix *Index) issueToken(ctx context.Context, label string, dailyQuota, ratePerMin int, now time.Time, assignment *tokenAssignment) (full string, id string, err error) {
 	var idBytes [4]byte
 	var secretBytes [16]byte
 	if _, err := rand.Read(idBytes[:]); err != nil {
@@ -46,14 +62,111 @@ func (ix *Index) IssueToken(label string, dailyQuota, ratePerMin int, now time.T
 	full = id + "_" + secret
 	hash := sha256.Sum256([]byte(secret))
 	created := now.UTC().Format(time.RFC3339)
-	if _, err := ix.db.Exec(
+	tx, err := ix.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("issue token: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO tokens (id, secret_hash, label, created_at, daily_quota, rate_per_min)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 		id, hash[:], label, created, dailyQuota, ratePerMin,
 	); err != nil {
 		return "", "", fmt.Errorf("issue token: %w", err)
 	}
+	if assignment != nil {
+		if err := storeAssignment(ctx, tx, id, *assignment, created); err != nil {
+			return "", "", err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return "", "", fmt.Errorf("issue token: commit: %w", err)
+	}
 	return full, id, nil
+}
+
+// IssuePlannedToken issues a token whose quotas are derived from plan
+// entitlements and associates it with organization/workspace identity.
+func (ix *Index) IssuePlannedToken(ctx context.Context, label, organizationID, workspaceID string, plan entitlement.Plan, now time.Time) (string, string, error) {
+	if err := validateAssignment(organizationID, workspaceID); err != nil {
+		return "", "", err
+	}
+	entitlements, err := entitlement.ForPlan(plan)
+	if err != nil {
+		return "", "", err
+	}
+	return ix.issueToken(ctx, label, entitlements.Quota.DailyCalls, entitlements.Quota.RatePerMinute, now,
+		&tokenAssignment{organizationID: organizationID, workspaceID: workspaceID, plan: plan})
+}
+
+type sqlExecutor interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func storeAssignment(ctx context.Context, exec sqlExecutor, tokenID string, assignment tokenAssignment, created string) error {
+	if _, err := exec.ExecContext(ctx, `INSERT OR IGNORE INTO organizations (id, label, created_at) VALUES (?, ?, ?)`, assignment.organizationID, assignment.organizationID, created); err != nil {
+		return fmt.Errorf("assign token plan: organization: %w", err)
+	}
+	if _, err := exec.ExecContext(ctx, `INSERT OR IGNORE INTO workspaces (id, organization_id, label, created_at) VALUES (?, ?, ?, ?)`, assignment.workspaceID, assignment.organizationID, assignment.workspaceID, created); err != nil {
+		return fmt.Errorf("assign token plan: workspace: %w", err)
+	}
+	var owner string
+	if err := exec.QueryRowContext(ctx, `SELECT organization_id FROM workspaces WHERE id = ?`, assignment.workspaceID).Scan(&owner); err != nil {
+		return fmt.Errorf("assign token plan: workspace owner: %w", err)
+	}
+	if owner != assignment.organizationID {
+		return fmt.Errorf("assign token plan: workspace %q belongs to another organization", assignment.workspaceID)
+	}
+	if _, err := exec.ExecContext(ctx, `INSERT INTO token_entitlements (token_id, organization_id, workspace_id, plan) VALUES (?, ?, ?, ?)
+		ON CONFLICT(token_id) DO UPDATE SET organization_id=excluded.organization_id, workspace_id=excluded.workspace_id, plan=excluded.plan`, tokenID, assignment.organizationID, assignment.workspaceID, assignment.plan); err != nil {
+		return fmt.Errorf("assign token plan: entitlement: %w", err)
+	}
+	return nil
+}
+
+func validateAssignment(organizationID, workspaceID string) error {
+	for name, value := range map[string]string{"organization": organizationID, "workspace": workspaceID} {
+		if value == "" || len(value) > 128 {
+			return fmt.Errorf("%s id must be 1..128 characters", name)
+		}
+		for _, r := range value {
+			if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' && r != '-' && r != '.' {
+				return fmt.Errorf("%s id %q contains an invalid character", name, value)
+			}
+		}
+	}
+	return nil
+}
+
+// AssignTokenPlan additively migrates an existing token onto a plan.
+func (ix *Index) AssignTokenPlan(ctx context.Context, id, organizationID, workspaceID string, plan entitlement.Plan, now time.Time) error {
+	if err := validateAssignment(organizationID, workspaceID); err != nil {
+		return err
+	}
+	entitlements, err := entitlement.ForPlan(plan)
+	if err != nil {
+		return err
+	}
+	tx, err := ix.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("assign token plan: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `UPDATE tokens SET daily_quota = ?, rate_per_min = ? WHERE id = ?`, entitlements.Quota.DailyCalls, entitlements.Quota.RatePerMinute, id)
+	if err != nil {
+		return fmt.Errorf("assign token plan: token: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrTokenUnknown
+	}
+	if err := storeAssignment(ctx, tx, id, tokenAssignment{organizationID, workspaceID, plan}, now.UTC().Format(time.RFC3339)); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("assign token plan: commit: %w", err)
+	}
+	return nil
 }
 
 // RevokeToken marks a token revoked at now.
@@ -86,8 +199,10 @@ func (ix *Index) ListTokens(now time.Time) ([]TokenInfo, error) {
 	day := now.UTC().Format("2006-01-02")
 	rows, err := ix.db.Query(
 		`SELECT t.id, t.label, t.created_at, t.revoked_at, t.daily_quota, t.rate_per_min,
+		        COALESCE(e.organization_id, ''), COALESCE(e.workspace_id, ''), COALESCE(e.plan, ''),
 		        COALESCE(u.calls, 0)
 		 FROM tokens t
+		 LEFT JOIN token_entitlements e ON e.token_id = t.id
 		 LEFT JOIN token_usage u ON u.token_id = t.id AND u.day = ?
 		 ORDER BY t.created_at`,
 		day,
@@ -104,7 +219,7 @@ func (ix *Index) ListTokens(now time.Time) ([]TokenInfo, error) {
 			revoked sql.NullString
 			calls   int
 		)
-		if err := rows.Scan(&info.ID, &info.Label, &info.CreatedAt, &revoked, &info.DailyQuota, &info.RatePerMin, &calls); err != nil {
+		if err := rows.Scan(&info.ID, &info.Label, &info.CreatedAt, &revoked, &info.DailyQuota, &info.RatePerMin, &info.OrganizationID, &info.WorkspaceID, &info.Plan, &calls); err != nil {
 			return nil, fmt.Errorf("list tokens: %w", err)
 		}
 		if revoked.Valid {
@@ -132,9 +247,10 @@ func (ix *Index) AuthenticateToken(full string, now time.Time) (TokenInfo, error
 		revoked sql.NullString
 	)
 	err := ix.db.QueryRow(
-		`SELECT label, created_at, revoked_at, daily_quota, rate_per_min, secret_hash
-		 FROM tokens WHERE id = ?`, id,
-	).Scan(&info.Label, &info.CreatedAt, &revoked, &info.DailyQuota, &info.RatePerMin, &hash)
+		`SELECT t.label, t.created_at, t.revoked_at, t.daily_quota, t.rate_per_min, t.secret_hash,
+		        COALESCE(e.organization_id, ''), COALESCE(e.workspace_id, ''), COALESCE(e.plan, '')
+		 FROM tokens t LEFT JOIN token_entitlements e ON e.token_id = t.id WHERE t.id = ?`, id,
+	).Scan(&info.Label, &info.CreatedAt, &revoked, &info.DailyQuota, &info.RatePerMin, &hash, &info.OrganizationID, &info.WorkspaceID, &info.Plan)
 	if errors.Is(err, sql.ErrNoRows) {
 		return TokenInfo{}, ErrTokenUnknown
 	}
@@ -159,6 +275,34 @@ func (ix *Index) AuthenticateToken(full string, now time.Time) (TokenInfo, error
 		return TokenInfo{}, fmt.Errorf("authenticate token: usage: %w", err)
 	}
 	return info, nil
+}
+
+// PlanReport returns token metadata for the gated operator report surface.
+func (ix *Index) PlanReport(ctx context.Context) ([]TokenInfo, error) {
+	rows, err := ix.db.QueryContext(ctx, `SELECT t.id, t.label, t.created_at, t.revoked_at, t.daily_quota, t.rate_per_min,
+		COALESCE(e.organization_id, ''), COALESCE(e.workspace_id, ''), COALESCE(e.plan, '')
+		FROM tokens t LEFT JOIN token_entitlements e ON e.token_id=t.id ORDER BY t.created_at`)
+	if err != nil {
+		return nil, fmt.Errorf("plan report: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []TokenInfo
+	for rows.Next() {
+		var info TokenInfo
+		var revoked sql.NullString
+		if err := rows.Scan(&info.ID, &info.Label, &info.CreatedAt, &revoked, &info.DailyQuota, &info.RatePerMin, &info.OrganizationID, &info.WorkspaceID, &info.Plan); err != nil {
+			return nil, fmt.Errorf("plan report: %w", err)
+		}
+		if revoked.Valid {
+			value := revoked.String
+			info.RevokedAt = &value
+		}
+		out = append(out, info)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("plan report: %w", err)
+	}
+	return out, nil
 }
 
 // CountTokenCall atomically increments today's call count for id, UNLESS it
