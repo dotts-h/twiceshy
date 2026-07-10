@@ -49,6 +49,7 @@ real corpus through the `-corpus <dir>` seam.
 | `internal/retro/` | Extracts reusable records from coding-agent session transcripts. `Analyzer` seam (the only model in the loop, drafts only); feeds candidates into the quarantine → PR ladder via `ingest.Prepare`. | [18](adr/ADR-0018-session-retro-capture.md) |
 | `internal/selfaudit/` | Dogfoods twiceshy on its own `go.mod`: matches dependencies against ingested advisories and reports affected versions. | #0014 |
 | `internal/eval/` | Retrieval-effectiveness eval (recall@k / near-miss rate over the real `search_experience` pull path) — the evidence gate for the store. Cheap, deterministic, no LLM. | §8, [11](adr/ADR-0011-corpus-growth-and-validation-engine.md) §6 |
+| `internal/corpusquality/` | Deterministic corpus quality and rights-coverage reporting: lifecycle/kind mix, validated non-advisory behavioral records, declared vs stageable repros, and source-license coverage. Pure report core. | — |
 | `internal/similarity/` | Word-shingle (n-gram) overlap — `Shingles`/`Assess`. The optional ADR-0011 §5 net that flags authored prose running near-verbatim to a supplied reference. A lead for review, never an auto-reject. Pure core; stdlib only. | [11](adr/ADR-0011-corpus-growth-and-validation-engine.md) §5 |
 | `internal/author/` | `Scaffold` pre-stages a §5-clean authored record + repro skeleton(s) (authored-internal provenance pre-filled) — the file generation behind `twiceshy author`. Pure core; returns the files, caller owns the disk. | [11](adr/ADR-0011-corpus-growth-and-validation-engine.md) §5, #0091 |
 
@@ -75,6 +76,7 @@ Dispatch is the `switch args[0]` in `cmd/twiceshy/main.go` (~L197).
 | `pack` | Build a distributable, license-clean experience pack (#0007, `runPack`). |
 | `doctor` | Run a store-hygiene doctor (e.g. `staleness`) and print its proposed deltas (`runDoctor`). The `revalidate` execution doctor is `runRevalidate`. |
 | `eval` | Run the retrieval-effectiveness eval over the corpus; `runEvalPush` covers push precision (`runEval`). |
+| `corpus-quality` | Report deterministic corpus quality and provenance/license coverage; `-json` emits the machine-readable snapshot (`runCorpusQuality`). |
 | `usage-flush` | Materialize SQLite usage counters into each record's `provenance.usage` (`runUsageFlush`). |
 | `gold-add` | Turn an audit-miss record into one `gold.yaml` judge-eval case (#0058, `runGoldAdd`). |
 | `judge-eval` | Drive the diverse-model judge against the labelled gold set (#0028, `runJudgeEval`). |

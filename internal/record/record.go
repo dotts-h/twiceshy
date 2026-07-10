@@ -139,8 +139,10 @@ type Provenance struct {
 	// SourceLicense and SourceURL are additive, optional importer-provenance
 	// fields (ADR-0003 §4): they let the pack builder mechanically keep
 	// commercial packs license-clean. SourceLicense is an SPDX id, the
-	// SourceLicenseFactsOnly sentinel, or the SourceLicenseAuthoredInternal
-	// sentinel (ADR-0011 §5, internal-only); all are omitted when empty.
+	// SourceLicenseFactsOnly, SourceLicenseProjectAuthored, or the
+	// SourceLicenseAuthoredInternal sentinel (ADR-0011 §5, internal-only); all
+	// are omitted when empty. An empty value is valid for legacy records but is
+	// not rights evidence and is excluded from commercial packs.
 	SourceLicense string  `yaml:"source_license,omitempty"`
 	SourceURL     string  `yaml:"source_url,omitempty"`
 	SupersededBy  *string `yaml:"superseded_by"`
@@ -176,6 +178,12 @@ type Provenance struct {
 // distills only non-copyrightable facts (no third-party expression), so it
 // carries no license obligation. (ADR-0003 §4)
 const SourceLicenseFactsOnly = "none (facts only)"
+
+// SourceLicenseProjectAuthored is explicit rights evidence that the record's
+// expression was authored by the project rather than copied or adapted from an
+// external work. Unlike an empty source_license, this sentinel may make a
+// record eligible for a commercial pack. It cannot be combined with source_url.
+const SourceLicenseProjectAuthored = "none (project-authored)"
 
 // SourceLicenseAuthoredInternal is the source_license sentinel for a record
 // authored under ADR-0011 §5: the *topic* came from public awareness (Stack
@@ -704,9 +712,8 @@ func (r *Record) validateProvenance(fail func(string, ...any), now time.Time) {
 		fail("status validated is not allowed with provenance.security_flags %v — a flagged record cannot be promoted", p.SecurityFlags)
 	}
 	// Only BLOCKING-class consistency flags forbid promotion (#0061). The
-	// advisory-only classes (source-url-id-mismatch) are recorded but soft — they
-	// false-positive on OSV alias pairs, so they must not gate a validated record
-	// until the detector is alias-aware (see blockingConsistencyPrefixes).
+	// deterministic detector is alias-aware and intentionally leaves ambiguous
+	// source data unflagged; every emitted #0061 class is therefore fail-closed.
 	if r.Status == "validated" {
 		var blocking []string
 		for _, f := range p.ConsistencyFlags {
@@ -805,8 +812,8 @@ func (r *Record) validateProvenance(fail func(string, ...any), now time.Time) {
 			checkDate(fail, "provenance.usage.last_hit", *u.LastHit)
 		}
 	}
-	if lic := p.SourceLicense; lic != "" && lic != SourceLicenseFactsOnly && lic != SourceLicenseAuthoredInternal && !reSPDX.MatchString(lic) {
-		fail("provenance.source_license %q is not an SPDX id, %q, or %q", lic, SourceLicenseFactsOnly, SourceLicenseAuthoredInternal)
+	if lic := p.SourceLicense; lic != "" && lic != SourceLicenseFactsOnly && lic != SourceLicenseProjectAuthored && lic != SourceLicenseAuthoredInternal && !reSPDX.MatchString(lic) {
+		fail("provenance.source_license %q is not an SPDX id, %q, %q, or %q", lic, SourceLicenseFactsOnly, SourceLicenseProjectAuthored, SourceLicenseAuthoredInternal)
 	}
 	if u := p.SourceURL; u != "" && !reHTTPURL.MatchString(u) {
 		fail("provenance.source_url %q is not an http(s) URL", u)
@@ -815,6 +822,9 @@ func (r *Record) validateProvenance(fail func(string, ...any), now time.Time) {
 	// URL, so it must carry no source_url — enforce the discipline mechanically.
 	if p.SourceLicense == SourceLicenseAuthoredInternal && p.SourceURL != "" {
 		fail("provenance.source_url must be empty when source_license is %q (ADR-0011 §5: re-derived, not distilled from a URL)", SourceLicenseAuthoredInternal)
+	}
+	if p.SourceLicense == SourceLicenseProjectAuthored && p.SourceURL != "" {
+		fail("provenance.source_url must be empty when source_license is %q", SourceLicenseProjectAuthored)
 	}
 }
 

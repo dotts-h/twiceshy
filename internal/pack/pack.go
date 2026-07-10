@@ -3,8 +3,9 @@
 // Package pack builds distributable experience packs from validated records and
 // mechanically keeps commercial packs license-clean (ADR-0002 §4, ADR-0003 §4):
 // copyleft / share-alike / contract-encumbered sources are excluded from
-// commercial packs, and CC-BY sources are included only with attribution. This
-// turns ADR-0002's licensing intent into a build-time check, not a manual audit.
+// commercial packs, and copied licensed sources are included only with a
+// source/license notice entry. This turns ADR-0002's licensing intent into a
+// build-time check, not a manual audit.
 //
 // This is the pure core (classification + manifest); the file I/O lives in the
 // twiceshy pack command (thin edge).
@@ -31,7 +32,9 @@ type Eligibility struct {
 	Reason           string // why — especially why a record is excluded
 }
 
-// permissiveLicenses impose no copyleft and need no attribution. Keys are
+// permissiveLicenses impose no copyleft. A record carrying one of these IDs is
+// treated as copied licensed material, so the pack still emits a source/license
+// notice entry; "permissive" does not mean "obligation-free". Keys are
 // lower-cased SPDX ids.
 var permissiveLicenses = map[string]bool{
 	"mit":          true,
@@ -56,9 +59,11 @@ func Classify(sourceLicense string) Eligibility {
 	s := strings.TrimSpace(sourceLicense)
 	switch s {
 	case "":
-		return Eligibility{Commercial: true, Reason: "twiceshy-authored (no external source)"}
+		return Eligibility{Reason: "missing explicit rights evidence — excluded fail-closed"}
 	case record.SourceLicenseFactsOnly:
 		return Eligibility{Commercial: true, Reason: "distilled facts only — no license obligation"}
+	case record.SourceLicenseProjectAuthored:
+		return Eligibility{Commercial: true, Reason: "explicitly project-authored"}
 	case record.SourceLicenseAuthoredInternal:
 		// ADR-0011 §5: the fact was re-derived from a public-awareness topic for the
 		// INTERNAL corpus only; the commercial pack stays gated on a real legal
@@ -68,7 +73,7 @@ func Classify(sourceLicense string) Eligibility {
 
 	low := strings.ToLower(s)
 	if permissiveLicenses[low] {
-		return Eligibility{Commercial: true, Reason: "permissive license (" + s + ")"}
+		return Eligibility{Commercial: true, NeedsAttribution: true, Reason: "permissive license (" + s + ") — source/license notice required"}
 	}
 	// Attribution-only CC-BY (no -SA/-NC/-ND modifier) is the one commercial-safe
 	// CC variant; matched precisely so a modifier can never slip through.
@@ -89,7 +94,9 @@ func Classify(sourceLicense string) Eligibility {
 	return Eligibility{Reason: "unrecognized license (" + s + ") — excluded fail-closed"}
 }
 
-// AttributionEntry records a source a pack must attribute (e.g. CC-BY).
+// AttributionEntry records a source/license notice a pack must carry. For some
+// licenses this is attribution; for permissive code licenses it ensures the
+// source and applicable license/notice obligations are not silently dropped.
 type AttributionEntry struct {
 	ID            string `json:"id"`
 	SourceLicense string `json:"source_license"`
@@ -126,6 +133,10 @@ func BuildManifest(recs []*record.Record, commercial, includeQuarantined bool) M
 		e := Classify(r.Provenance.SourceLicense)
 		if commercial && !e.Commercial {
 			m.Excluded = append(m.Excluded, Excluded{ID: r.ID, Reason: e.Reason})
+			continue
+		}
+		if commercial && e.NeedsAttribution && strings.TrimSpace(r.Provenance.SourceURL) == "" {
+			m.Excluded = append(m.Excluded, Excluded{ID: r.ID, Reason: "source URL required for license/attribution notice"})
 			continue
 		}
 		m.Included = append(m.Included, r.ID)

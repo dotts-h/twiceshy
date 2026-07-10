@@ -274,7 +274,7 @@
         },
         "source_license": {
           "type": "string",
-          "pattern": "^(none \\(facts only\\)|none \\(authored, internal-only\\)|[A-Za-z0-9][A-Za-z0-9.+-]*)$"
+          "pattern": "^(none \\(facts only\\)|none \\(project-authored\\)|none \\(authored, internal-only\\)|[A-Za-z0-9][A-Za-z0-9.+-]*)$"
         },
         "source_url": {
           "type": "string",

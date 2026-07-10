@@ -15,18 +15,19 @@ func TestClassify(t *testing.T) {
 		commercial  bool
 		attribution bool
 	}{
-		{"", true, false}, // twiceshy-authored
+		{"", false, false},                                   // missing rights evidence — fail closed
 		{record.SourceLicenseFactsOnly, true, false},         // distilled facts
+		{record.SourceLicenseProjectAuthored, true, false},   // explicitly project-authored
 		{record.SourceLicenseAuthoredInternal, false, false}, // §5-authored — internal-only, commercial-gated
-		{"MIT", true, false},                                 // permissive
-		{"Apache-2.0", true, false},                          //
-		{"apache-2.0", true, false},                          // case-insensitive
-		{"BSD-3-Clause", true, false},                        //
-		{"BSD-2-Clause", true, false},                        //
-		{"ISC", true, false},                                 //
-		{"0BSD", true, false},                                //
-		{"CC0-1.0", true, false},                             //
-		{"Unlicense", true, false},                           //
+		{"MIT", true, true},                                  // permissive copied material still carries notices
+		{"Apache-2.0", true, true},                           //
+		{"apache-2.0", true, true},                           // case-insensitive
+		{"BSD-3-Clause", true, true},                         //
+		{"BSD-2-Clause", true, true},                         //
+		{"ISC", true, true},                                  //
+		{"0BSD", true, true},                                 //
+		{"CC0-1.0", true, true},                              // retain source/license notice in the pack ledger
+		{"Unlicense", true, true},                            //
 		{"CC-BY-4.0", true, true},                            // includable WITH attribution
 		{"CC-BY-3.0", true, true},                            //
 		{"cc-by-4.0", true, true},                            // case-insensitive
@@ -74,11 +75,12 @@ func rec(id, status, license, url string) *record.Record {
 
 func TestBuildManifest_CommercialExcludesCopyleftAndAttributesCCBY(t *testing.T) {
 	recs := []*record.Record{
-		rec("exp-0001", "validated", "MIT", ""),
+		rec("exp-0001", "validated", "MIT", "https://example.com/upstream"),
 		rec("exp-0002", "validated", "CC-BY-4.0", "https://github.com/advisories/GHSA-x"),
 		rec("exp-0003", "validated", "CC-BY-SA-4.0", "https://example/sa"),
-		rec("exp-0004", "validated", "", ""), // twiceshy-authored
+		rec("exp-0004", "validated", record.SourceLicenseProjectAuthored, ""),
 		rec("exp-0005", "quarantined", "MIT", ""),
+		rec("exp-0006", "validated", "", ""), // missing rights evidence
 	}
 	m := pack.BuildManifest(recs, true /*commercial*/, false /*includeQuarantined*/)
 
@@ -86,13 +88,14 @@ func TestBuildManifest_CommercialExcludesCopyleftAndAttributesCCBY(t *testing.T)
 	for _, id := range m.Included {
 		got[id] = true
 	}
-	// MIT, CC-BY (w/ attribution), and authored are in; CC-BY-SA out; quarantined out.
+	// MIT, CC-BY (w/ attribution), and explicitly authored are in; CC-BY-SA,
+	// quarantined, and missing-rights records are out.
 	for _, want := range []string{"exp-0001", "exp-0002", "exp-0004"} {
 		if !got[want] {
 			t.Errorf("commercial pack should include %s; included=%v", want, m.Included)
 		}
 	}
-	for _, no := range []string{"exp-0003", "exp-0005"} {
+	for _, no := range []string{"exp-0003", "exp-0005", "exp-0006"} {
 		if got[no] {
 			t.Errorf("commercial pack must NOT include %s", no)
 		}
@@ -102,12 +105,29 @@ func TestBuildManifest_CommercialExcludesCopyleftAndAttributesCCBY(t *testing.T)
 	for _, e := range m.Excluded {
 		reasons[e.ID] = e.Reason
 	}
-	if reasons["exp-0003"] == "" || reasons["exp-0005"] == "" {
+	if reasons["exp-0003"] == "" || reasons["exp-0005"] == "" || reasons["exp-0006"] == "" {
 		t.Errorf("excluded records must carry reasons: %+v", m.Excluded)
 	}
-	// CC-BY needs attribution; nothing else does.
-	if len(m.Attribution) != 1 || m.Attribution[0].ID != "exp-0002" {
-		t.Errorf("attribution = %+v, want only exp-0002", m.Attribution)
+	// Copied MIT and CC-BY material both need source/license notice entries.
+	if len(m.Attribution) != 2 || m.Attribution[0].ID != "exp-0001" || m.Attribution[1].ID != "exp-0002" {
+		t.Errorf("attribution = %+v, want exp-0001 and exp-0002", m.Attribution)
+	}
+}
+
+func TestBuildManifest_CommercialCopiedMaterialNeedsSourceForNotice(t *testing.T) {
+	m := pack.BuildManifest([]*record.Record{rec("exp-0001", "validated", "MIT", "")}, true, false)
+	if len(m.Included) != 0 || len(m.Excluded) != 1 {
+		t.Fatalf("copied licensed material without source URL must be excluded; manifest=%+v", m)
+	}
+}
+
+func TestBuildManifest_CommercialMissingLicenseIsFailClosed(t *testing.T) {
+	m := pack.BuildManifest([]*record.Record{rec("exp-0001", "validated", "", "")}, true, false)
+	if len(m.Included) != 0 || len(m.Excluded) != 1 {
+		t.Fatalf("missing source_license must be excluded; manifest=%+v", m)
+	}
+	if m.Excluded[0].Reason == "" {
+		t.Fatal("missing-rights exclusion must explain the fail-closed verdict")
 	}
 }
 

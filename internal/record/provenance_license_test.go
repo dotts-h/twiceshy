@@ -48,13 +48,35 @@ func TestProvenance_SourceLicenseAcceptsSPDXAndSentinel(t *testing.T) {
 	for _, lic := range []string{
 		"MIT", "Apache-2.0", "CC-BY-4.0", "CC0-1.0", "GPL-3.0-only",
 		record.SourceLicenseFactsOnly,
+		record.SourceLicenseProjectAuthored,
 	} {
 		r := importerDraft()
 		r.Provenance.SourceLicense = lic
-		r.Provenance.SourceURL = "https://github.com/advisories/GHSA-jfh8-c2jp-5v3q"
+		if lic != record.SourceLicenseProjectAuthored {
+			r.Provenance.SourceURL = "https://github.com/advisories/GHSA-jfh8-c2jp-5v3q"
+		}
 		if err := record.Validate(r); err != nil {
 			t.Errorf("source_license %q must be accepted: %v", lic, err)
 		}
+	}
+}
+
+func TestProvenance_ProjectAuthoredSentinelValidatesAndForbidsSourceURL(t *testing.T) {
+	r := importerDraft()
+	r.Provenance.SourceLicense = record.SourceLicenseProjectAuthored
+	if err := record.Validate(r); err != nil {
+		t.Fatalf("explicitly project-authored record must validate: %v", err)
+	}
+	out, err := record.Marshal(r)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if err := loadRecordSchema(t).Validate(frontmatterValue(t, out)); err != nil {
+		t.Fatalf("project-authored sentinel must satisfy the JSON Schema: %v", err)
+	}
+	r.Provenance.SourceURL = "https://example.com/not-project-authored"
+	if err := record.Validate(r); err == nil {
+		t.Fatal("project-authored rights evidence must not be combined with an external source URL")
 	}
 }
 
