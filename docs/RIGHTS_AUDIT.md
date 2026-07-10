@@ -34,9 +34,13 @@ approve the final policy and pack terms before distribution.
 
 Every commercially eligible record also needs a human `rights_review`
 attestation under the versioned `twiceshy-rights-v1` mechanical policy. The
-attestation binds reviewer identity, review time, source SHA-256, and the exact
-record evidence digest. Placeholder identities and digest mismatches fail
-closed. This is an operator review control, not counsel approval. MIT text is
+attestation binds reviewer identity, review time, source SHA-256, and the
+canonical serialization of every distributed record field and narrative byte,
+including the pack-relative path. Only the self-referential evidence digest is
+blanked while calculating it. Changing a title, body, error signature, source
+metadata, status, or any other distributed field invalidates the review.
+Placeholder identities and digest mismatches fail closed. This is an operator
+review control, not counsel approval. MIT text is
 checked against the built-in approved template; Apache-2.0 against an approved
 canonical digest. CC-BY remains ineligible until an exact canonical legal-code
 digest/template is approved and implemented.
@@ -78,7 +82,17 @@ twiceshy rights-audit \
 
 Manifest selection, bundled license/notice material, or pack-level LICENSE drift
 fails the command. All three files are required together. The manifest binds the
-pack terms by SHA-256.
+pack terms by SHA-256. Validation inventories the entire pack root and rejects
+every missing, extra, stale, unreferenced, symlinked, or non-regular artifact;
+passing three valid files alongside an unreviewed payload is not sufficient.
+
+`twiceshy pack -out` must name a new or empty directory. The command refuses to
+overlay or replace a non-empty directory, so a prior pack cannot leave stale
+files in a new release. Every existing component of corpus, license, output,
+audit-artifact, and remediation-queue paths must be a real directory or regular
+file, never a symbolic link. Pack files are created exclusively and never
+follow an existing leaf link. Build into a fresh directory and publish that
+directory only after `rights-audit` passes.
 
 Raw third-party copyright, NOTICE, and license text is emitted only under
 `THIRD_PARTY/*.txt`, with hashes referenced from `MANIFEST.json` and escaped

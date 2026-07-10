@@ -110,6 +110,37 @@ func TestClassifyRecordRequiresHumanReviewAndRejectsPlaceholderOrForgedAttestati
 	}
 }
 
+func TestEvidenceDigestBindsEveryDistributedRecordFieldAndProse(t *testing.T) {
+	base := rec("exp-0001", "validated", record.SourceLicenseProjectAuthored, "")
+	base.Title = "Original reviewed title"
+	base.Body = "Original reviewed prose."
+	base.Symptom = &record.Symptom{Summary: "Original symptom", ErrorSignatures: []string{"original error"}}
+	attestRights(base)
+	if got := pack.ClassifyRecord(base); !got.Commercial {
+		t.Fatalf("reviewed baseline rejected: %+v", got)
+	}
+
+	mutations := map[string]func(*record.Record){
+		"title":         func(r *record.Record) { r.Title = "Changed title" },
+		"body":          func(r *record.Record) { r.Body = "Changed prose." },
+		"signature":     func(r *record.Record) { r.Symptom.ErrorSignatures[0] = "changed error" },
+		"status":        func(r *record.Record) { r.Status = "quarantined" },
+		"source author": func(r *record.Record) { r.Provenance.Source.Author = "changed-author" },
+	}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			clone := *base
+			symptom := *base.Symptom
+			symptom.ErrorSignatures = append([]string(nil), base.Symptom.ErrorSignatures...)
+			clone.Symptom = &symptom
+			mutate(&clone)
+			if got := pack.ClassifyRecord(&clone); got.Commercial || got.Code != pack.ReasonRightsDigestMismatch {
+				t.Fatalf("distributed record mutation did not invalidate review: %+v", got)
+			}
+		})
+	}
+}
+
 func TestValidateCommercialArtifactsDetectsManifestAndNoticeDrift(t *testing.T) {
 	recs := []*record.Record{
 		withMITNotice(rec("exp-0001", "validated", "MIT", "https://example.test/upstream/commit/abc")),

@@ -156,3 +156,87 @@ func TestRightsAuditRejectsManifestTrailingData(t *testing.T) {
 		t.Fatal("manifest trailing bytes must be rejected")
 	}
 }
+
+func TestRightsAuditRejectsExtraArtifactAndSymlinkInput(t *testing.T) {
+	recs, err := record.LoadCorpus(testcorpus.Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := pack.BuildManifest(recs, true, false)
+	packLicense := []byte("pack terms\n")
+	manifest.PackLicenseSHA256 = pack.LicenseDigest(packLicense)
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "MANIFEST.json")
+	noticesPath := filepath.Join(dir, "ATTRIBUTION.md")
+	licensePath := filepath.Join(dir, "LICENSE")
+	writeAuditArtifacts(t, manifestPath, noticesPath, licensePath, manifest, packLicense)
+	if err := os.WriteFile(filepath.Join(dir, "stale.txt"), []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-corpus", testcorpus.Root(), "-manifest", manifestPath, "-notices", noticesPath, "-pack-license", licensePath}
+	if err := runRightsAudit(args, &bytes.Buffer{}); err == nil {
+		t.Fatal("unreferenced pack artifact must fail exact validation")
+	}
+	if err := os.Remove(filepath.Join(dir, "stale.txt")); err != nil {
+		t.Fatal(err)
+	}
+	realManifest := filepath.Join(dir, "real-manifest.json")
+	if err := os.Rename(manifestPath, realManifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realManifest, manifestPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := runRightsAudit(args, &bytes.Buffer{}); err == nil {
+		t.Fatal("symlink manifest path must be rejected")
+	}
+	linkedParent := filepath.Join(t.TempDir(), "linked-parent")
+	if err := os.Symlink(dir, linkedParent); err != nil {
+		t.Fatal(err)
+	}
+	linkedArgs := []string{"-corpus", testcorpus.Root(), "-manifest", filepath.Join(linkedParent, "MANIFEST.json"), "-notices", filepath.Join(linkedParent, "ATTRIBUTION.md"), "-pack-license", filepath.Join(linkedParent, "LICENSE")}
+	if err := runRightsAudit(linkedArgs, &bytes.Buffer{}); err == nil {
+		t.Fatal("symlink in an artifact parent component must be rejected")
+	}
+}
+
+func TestRightsAuditInventoriesEveryIncludedRecord(t *testing.T) {
+	corpusDir := tempCorpus(t)
+	rec := packFixture("0101", "validated", record.SourceLicenseProjectAuthored, "")
+	writeFixture(t, corpusDir, rec)
+	license := filepath.Join(t.TempDir(), "LICENSE")
+	if err := os.WriteFile(license, []byte("pack terms\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(t.TempDir(), "pack")
+	if err := runPack([]string{"-corpus", corpusDir, "-out", outDir, "-commercial", "-license", license}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-corpus", corpusDir, "-manifest", filepath.Join(outDir, "MANIFEST.json"), "-notices", filepath.Join(outDir, "ATTRIBUTION.md"), "-pack-license", filepath.Join(outDir, "LICENSE")}
+	if err := runRightsAudit(args, &bytes.Buffer{}); err != nil {
+		t.Fatalf("fresh complete pack: %v", err)
+	}
+	if err := os.Remove(filepath.Join(outDir, filepath.FromSlash(rec.Path))); err != nil {
+		t.Fatal(err)
+	}
+	if err := runRightsAudit(args, &bytes.Buffer{}); err == nil {
+		t.Fatal("missing included record artifact must fail exact inventory")
+	}
+}
+
+func writeAuditArtifacts(t *testing.T, manifestPath, noticesPath, licensePath string, manifest pack.Manifest, packLicense []byte) {
+	t.Helper()
+	body, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, append(body, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(noticesPath, pack.NoticeDocument(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(licensePath, packLicense, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}

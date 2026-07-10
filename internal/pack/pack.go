@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -224,20 +225,29 @@ func placeholder(value string) bool {
 	}
 }
 
-// EvidenceDigest binds the human attestation to the exact record rights fields.
+// EvidenceDigest binds the human attestation to the canonical serialization of
+// every field and prose byte distributed for the record, plus its pack-relative
+// path. The digest field itself is the sole exclusion because including it would
+// make the digest self-referential. Raw is an input encoding cache; Marshal is
+// the canonical distributed representation.
 func EvidenceDigest(rec *record.Record) string {
-	type reviewDigest struct {
-		ID, Path, SourceLicense, SourceURL         string
-		Attribution                                *record.SourceAttribution
-		Reviewer, ReviewedAt, SourceSHA256, Policy string
+	if rec == nil {
+		return ""
 	}
-	r := rec.Provenance.RightsReview
-	v := reviewDigest{ID: rec.ID, Path: rec.Path, SourceLicense: rec.Provenance.SourceLicense, SourceURL: rec.Provenance.SourceURL, Attribution: rec.Provenance.SourceAttribution}
-	if r != nil {
-		v.Reviewer, v.ReviewedAt, v.SourceSHA256, v.Policy = r.Reviewer, r.ReviewedAt, r.SourceSHA256, r.Policy
+	clone := *rec
+	clone.Raw = nil
+	clone.Provenance = rec.Provenance
+	if rec.Provenance.RightsReview != nil {
+		review := *rec.Provenance.RightsReview
+		review.EvidenceSHA256 = ""
+		clone.Provenance.RightsReview = &review
 	}
-	b, _ := json.Marshal(v)
-	return LicenseDigest(b)
+	canonical, err := record.Marshal(&clone)
+	if err != nil {
+		return ""
+	}
+	bound := append([]byte(filepath.ToSlash(clone.Path)+"\n"), canonical...)
+	return LicenseDigest(bound)
 }
 
 func completeSourceAttribution(rec *record.Record) bool {

@@ -47,7 +47,9 @@
 - Review the `twiceshy-rights-v1` human-attestation fields and decide whether
   reviewer qualifications, dual control, source snapshots, or stronger signing
   are required. The attestation is not currently a cryptographic signature and
-  does not claim counsel review.
+  does not claim counsel review. Its evidence digest mechanically covers the
+  canonical full distributed record and path (excluding only the digest itself),
+  but that integrity check does not prove reviewer identity or legal authority.
 
 ### 5. Takedown and dispute process
 

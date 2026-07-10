@@ -1527,10 +1527,19 @@ func runPack(args []string, out io.Writer) error {
 	if *outDir == "" {
 		return errors.New("pack requires -out <dir>")
 	}
+	if err := rejectSymlinkComponents(*corpus, false); err != nil {
+		return fmt.Errorf("pack corpus path: %w", err)
+	}
+	if err := requireEmptyOutput(*outDir); err != nil {
+		return fmt.Errorf("pack output path: %w", err)
+	}
 	var packLicense []byte
 	if *commercial {
 		if *licensePath == "" {
 			return errors.New("commercial pack requires -license <file> with pack-level terms")
+		}
+		if err := rejectSymlinkComponents(*licensePath, false); err != nil {
+			return fmt.Errorf("pack license path: %w", err)
 		}
 		data, err := os.ReadFile(*licensePath)
 		if err != nil {
@@ -1558,32 +1567,21 @@ func runPack(args []string, out io.Writer) error {
 	if err := os.MkdirAll(*outDir, 0o755); err != nil {
 		return err
 	}
+	if err := rejectSymlinkComponents(*outDir, false); err != nil {
+		return fmt.Errorf("pack output path: %w", err)
+	}
 	for _, id := range m.Included {
 		r := byID[id]
 		md, err := record.Marshal(r)
 		if err != nil {
 			return err
 		}
-		dst, err := safeJoin(*outDir, r.Path)
-		if err != nil {
-			return err
-		}
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(dst, md, 0o644); err != nil {
+		if err := writePackFile(*outDir, r.Path, md); err != nil {
 			return err
 		}
 	}
 	for rel, body := range pack.MaterialFiles(recs, m) {
-		dst, err := safeJoin(*outDir, rel)
-		if err != nil {
-			return err
-		}
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(dst, body, 0o644); err != nil {
+		if err := writePackFile(*outDir, rel, body); err != nil {
 			return err
 		}
 	}
@@ -1592,14 +1590,14 @@ func runPack(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(*outDir, "MANIFEST.json"), append(mj, '\n'), 0o644); err != nil {
+	if err := writePackFile(*outDir, "MANIFEST.json", append(mj, '\n')); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(*outDir, "ATTRIBUTION.md"), pack.NoticeDocument(m), 0o644); err != nil {
+	if err := writePackFile(*outDir, "ATTRIBUTION.md", pack.NoticeDocument(m)); err != nil {
 		return err
 	}
 	if *commercial {
-		if err := os.WriteFile(filepath.Join(*outDir, "LICENSE"), packLicense, 0o644); err != nil {
+		if err := writePackFile(*outDir, "LICENSE", packLicense); err != nil {
 			return err
 		}
 	}

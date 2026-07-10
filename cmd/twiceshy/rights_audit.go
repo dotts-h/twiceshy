@@ -9,8 +9,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	iofs "io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/dotts-h/twiceshy/internal/pack"
 	"github.com/dotts-h/twiceshy/internal/record"
@@ -37,6 +39,9 @@ func runRightsAudit(args []string, out io.Writer) error {
 	}
 	if artifactArgs != 0 && artifactArgs != 3 {
 		return errors.New("rights-audit requires -manifest, -notices, and -pack-license together")
+	}
+	if err := rejectSymlinkComponents(*corpus, false); err != nil {
+		return fmt.Errorf("rights-audit: corpus path: %w", err)
 	}
 
 	recs, err := record.LoadCorpus(*corpus)
@@ -74,7 +79,26 @@ func runRightsAudit(args []string, out io.Writer) error {
 }
 
 func validateRightsArtifacts(recs []*record.Record, manifestPath, noticesPath, packLicensePath string) (rightsaudit.ArtifactValidation, error) {
-	manifestData, err := os.ReadFile(manifestPath)
+	root := filepath.Clean(filepath.Dir(manifestPath))
+	for _, artifact := range []struct{ label, path string }{
+		{"manifest", manifestPath}, {"notices", noticesPath}, {"pack license", packLicensePath},
+	} {
+		if err := rejectSymlinkComponents(artifact.path, false); err != nil {
+			return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: %s path: %w", artifact.label, err)
+		}
+		if filepath.Clean(filepath.Dir(artifact.path)) != root {
+			return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: %s must be in the manifest pack root", artifact.label)
+		}
+	}
+	if filepath.Base(manifestPath) != "MANIFEST.json" || filepath.Base(noticesPath) != "ATTRIBUTION.md" || filepath.Base(packLicensePath) != "LICENSE" {
+		return rightsaudit.ArtifactValidation{}, errors.New("rights-audit: pack artifacts must use canonical names MANIFEST.json, ATTRIBUTION.md, and LICENSE")
+	}
+	packRoot, err := os.OpenRoot(root)
+	if err != nil {
+		return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: opening pack root: %w", err)
+	}
+	defer func() { _ = packRoot.Close() }()
+	manifestData, err := packRoot.ReadFile("MANIFEST.json")
 	if err != nil {
 		return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: reading manifest: %w", err)
 	}
@@ -90,11 +114,11 @@ func validateRightsArtifacts(recs []*record.Record, manifestPath, noticesPath, p
 		}
 		return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: manifest has trailing data: %w", err)
 	}
-	notices, err := os.ReadFile(noticesPath)
+	notices, err := packRoot.ReadFile("ATTRIBUTION.md")
 	if err != nil {
 		return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: reading notices: %w", err)
 	}
-	packLicense, err := os.ReadFile(packLicensePath)
+	packLicense, err := packRoot.ReadFile("LICENSE")
 	if err != nil {
 		return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: reading pack license: %w", err)
 	}
@@ -108,7 +132,10 @@ func validateRightsArtifacts(recs []*record.Record, manifestPath, noticesPath, p
 			if err != nil {
 				return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: invalid material path %q: %w", rel, err)
 			}
-			body, err := os.ReadFile(path)
+			if err := rejectSymlinkComponents(path, false); err != nil {
+				return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: material path %q: %w", rel, err)
+			}
+			body, err := packRoot.ReadFile(filepath.FromSlash(rel))
 			if err != nil {
 				return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: reading material %q: %w", rel, err)
 			}
@@ -116,7 +143,77 @@ func validateRightsArtifacts(recs []*record.Record, manifestPath, noticesPath, p
 		}
 	}
 	errs := pack.ValidateCommercialArtifacts(recs, manifest, notices, packLicense, materials)
+	errs = append(errs, validatePackInventory(packRoot, recs)...)
+	sort.Strings(errs)
 	return rightsaudit.ArtifactValidation{Requested: true, Valid: len(errs) == 0, Errors: errs}, nil
+}
+
+func validatePackInventory(root *os.Root, recs []*record.Record) []string {
+	expected := map[string]bool{"MANIFEST.json": true, "ATTRIBUTION.md": true, "LICENSE": true}
+	manifest := pack.BuildManifest(recs, true, false)
+	byID := make(map[string]*record.Record, len(recs))
+	for _, rec := range recs {
+		byID[rec.ID] = rec
+	}
+	for _, id := range manifest.Included {
+		if rec := byID[id]; rec != nil {
+			expected[filepath.ToSlash(rec.Path)] = true
+		}
+	}
+	for _, entry := range manifest.Attribution {
+		for _, rel := range []string{entry.LicenseFile, entry.CopyrightFile, entry.NoticeFile} {
+			if rel != "" {
+				expected[filepath.ToSlash(rel)] = true
+			}
+		}
+	}
+
+	actual := make(map[string]bool)
+	var errs []string
+	walkErr := iofs.WalkDir(root.FS(), ".", func(path string, entry iofs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == "." {
+			return nil
+		}
+		rel := filepath.ToSlash(path)
+		if entry.Type()&os.ModeSymlink != 0 {
+			errs = append(errs, fmt.Sprintf("pack artifact path is a symbolic link: %s", rel))
+			if entry.IsDir() {
+				return iofs.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			errs = append(errs, fmt.Sprintf("pack artifact is not a regular file: %s", rel))
+			return nil
+		}
+		actual[rel] = true
+		return nil
+	})
+	if walkErr != nil {
+		errs = append(errs, fmt.Sprintf("cannot inventory pack root: %v", walkErr))
+	}
+	for rel := range expected {
+		if !actual[rel] {
+			errs = append(errs, "pack artifact is missing: "+rel)
+		}
+	}
+	for rel := range actual {
+		if !expected[rel] {
+			errs = append(errs, "unreferenced pack artifact: "+rel)
+		}
+	}
+	sort.Strings(errs)
+	return errs
 }
 
 func writeJSON(out io.Writer, value any) error {
@@ -133,10 +230,16 @@ func writeRemediationQueue(path string, queue []rightsaudit.Remediation) error {
 	if err != nil {
 		return err
 	}
+	if err := rejectSymlinkComponents(path, true); err != nil {
+		return fmt.Errorf("rights-audit: remediation queue path: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("rights-audit: creating remediation queue directory: %w", err)
 	}
-	if err := os.WriteFile(path, append(body, '\n'), 0o644); err != nil {
+	if err := rejectSymlinkComponents(filepath.Dir(path), false); err != nil {
+		return fmt.Errorf("rights-audit: remediation queue path: %w", err)
+	}
+	if err := writeFileAtomic(path, append(body, '\n'), 0o644); err != nil {
 		return fmt.Errorf("rights-audit: writing remediation queue: %w", err)
 	}
 	return nil

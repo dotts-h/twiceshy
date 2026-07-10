@@ -202,6 +202,56 @@ func TestRunPackCommercialRequiresPackLicenseTerms(t *testing.T) {
 	}
 }
 
+func TestRunPackRejectsNonEmptyOutputWithoutChangingIt(t *testing.T) {
+	dir := tempCorpus(t)
+	writeFixture(t, dir, packFixture("0101", "validated", record.SourceLicenseProjectAuthored, ""))
+	outDir := t.TempDir()
+	marker := filepath.Join(outDir, "keep.txt")
+	if err := os.WriteFile(marker, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	license := filepath.Join(t.TempDir(), "LICENSE")
+	if err := os.WriteFile(license, []byte("pack terms"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := runPack([]string{"-corpus", dir, "-out", outDir, "-commercial", "-license", license}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("non-empty output directory must be rejected")
+	}
+	got, readErr := os.ReadFile(marker)
+	if readErr != nil || string(got) != "keep me" {
+		t.Fatalf("rejected pack changed existing output: %q, %v", got, readErr)
+	}
+}
+
+func TestRunPackRejectsSymlinkCorpusAndOutputPaths(t *testing.T) {
+	realCorpus := tempCorpus(t)
+	writeFixture(t, realCorpus, packFixture("0101", "validated", record.SourceLicenseProjectAuthored, ""))
+	corpusLink := filepath.Join(t.TempDir(), "corpus-link")
+	if err := os.Symlink(realCorpus, corpusLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := runPack([]string{"-corpus", corpusLink, "-out", filepath.Join(t.TempDir(), "pack")}, &bytes.Buffer{}); err == nil {
+		t.Fatal("symlink corpus path must be rejected")
+	}
+	realOut := t.TempDir()
+	outLink := filepath.Join(t.TempDir(), "pack-link")
+	if err := os.Symlink(realOut, outLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := runPack([]string{"-corpus", realCorpus, "-out", outLink}, &bytes.Buffer{}); err == nil {
+		t.Fatal("symlink output path must be rejected")
+	}
+	outside := t.TempDir()
+	linkedParent := filepath.Join(t.TempDir(), "linked-parent")
+	if err := os.Symlink(outside, linkedParent); err != nil {
+		t.Fatal(err)
+	}
+	if err := runPack([]string{"-corpus", realCorpus, "-out", filepath.Join(linkedParent, "pack")}, &bytes.Buffer{}); err == nil {
+		t.Fatal("symlink in an output parent component must be rejected")
+	}
+}
+
 func TestRunPackRequiresOut(t *testing.T) {
 	if err := run(context.Background(), []string{"pack", "-corpus", tempCorpus(t)}, &bytes.Buffer{}, noEnv); err == nil {
 		t.Error("pack without -out must error")
