@@ -26,10 +26,12 @@ type Entitlements struct {
 }
 
 var catalog = map[Plan]Entitlements{
-	Community:  {Plan: Community, Quota: QuotaPolicy{DailyCalls: 1000, RatePerMinute: 60}},
-	Pro:        {Plan: Pro, Quota: QuotaPolicy{DailyCalls: 5000, RatePerMinute: 300}},
-	Team:       {Plan: Team, Quota: QuotaPolicy{DailyCalls: 20000, RatePerMinute: 600}},
-	Enterprise: {Plan: Enterprise, Quota: QuotaPolicy{DailyCalls: 0, RatePerMinute: 0}},
+	Community: {Plan: Community, Quota: QuotaPolicy{DailyCalls: 1000, RatePerMinute: 60}},
+	Pro:       {Plan: Pro, Quota: QuotaPolicy{DailyCalls: 5000, RatePerMinute: 300}},
+	Team:      {Plan: Team, Quota: QuotaPolicy{DailyCalls: 20000, RatePerMinute: 600}},
+	// Zero means "server default 60", not unlimited, at tenantAuth. Keep the
+	// enterprise rate explicit and bounded so it cannot fall below Pro/Team.
+	Enterprise: {Plan: Enterprise, Quota: QuotaPolicy{DailyCalls: 0, RatePerMinute: 6000}},
 }
 
 func ParsePlan(raw string) (Plan, error) {

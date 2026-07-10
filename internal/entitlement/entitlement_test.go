@@ -13,7 +13,7 @@ func TestPlansHaveDerivedQuotaPolicies(t *testing.T) {
 		entitlement.Community:  {DailyCalls: 1000, RatePerMinute: 60},
 		entitlement.Pro:        {DailyCalls: 5000, RatePerMinute: 300},
 		entitlement.Team:       {DailyCalls: 20000, RatePerMinute: 600},
-		entitlement.Enterprise: {DailyCalls: 0, RatePerMinute: 0},
+		entitlement.Enterprise: {DailyCalls: 0, RatePerMinute: 6000},
 	}
 	for plan, policy := range want {
 		got, err := entitlement.ForPlan(plan)

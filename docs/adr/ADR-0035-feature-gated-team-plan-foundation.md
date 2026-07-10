@@ -34,6 +34,10 @@ is metadata until a later isolation ADR defines its authorization boundary.
 - Existing databases migrate additively: new tables are created without
   rewriting or deleting tokens and usage counters.
 - Corpus rebuilds must preserve the new tenant-registry tables.
+- Existing quota sentinel meanings remain intact: daily calls `0` is unlimited,
+  while rate `0` means the legacy server default of 60/minute. Enterprise uses
+  an explicit bounded 6,000/minute rate so it never accidentally falls back
+  below Pro or Team.
 - Plan quota defaults are implementation policy, not published pricing; a later
   commercial decision may revise them before the feature flag is enabled.
 - A later private-corpus implementation must not treat the metadata alone as an

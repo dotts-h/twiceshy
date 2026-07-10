@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,7 +25,7 @@ func TestIssuePlannedTokenAssociatesWorkspaceAndDerivedQuota(t *testing.T) {
 	t.Cleanup(func() { _ = ix.Close() })
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 
-	full, id, err := ix.IssuePlannedToken("platform", "org_acme", "ws_platform", entitlement.Team, now)
+	full, id, err := ix.IssuePlannedToken(context.Background(), "platform", "org_acme", "ws_platform", entitlement.Team, now)
 	if err != nil {
 		t.Fatalf("IssuePlannedToken: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestOpenMigratesLegacyTenantSchemaWithoutRewritingTokens(t *testing.T) {
 	if info.Label != "legacy" || info.DailyQuota != 77 || info.Plan != "" {
 		t.Fatalf("legacy token rewritten: %+v", info)
 	}
-	if err := ix.AssignTokenPlan(info.ID, "org_migrated", "ws_migrated", entitlement.Community, time.Now()); err != nil {
+	if err := ix.AssignTokenPlan(context.Background(), info.ID, "org_migrated", "ws_migrated", entitlement.Community, time.Now()); err != nil {
 		t.Fatalf("new schema unavailable: %v", err)
 	}
 }
@@ -86,7 +87,7 @@ func TestAssignPlanMigratesLegacyTokenAndRebuildPreservesIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ix.AssignTokenPlan(id, "org_acme", "ws_legacy", entitlement.Pro, now); err != nil {
+	if err := ix.AssignTokenPlan(context.Background(), id, "org_acme", "ws_legacy", entitlement.Pro, now); err != nil {
 		t.Fatalf("AssignTokenPlan: %v", err)
 	}
 	if err := ix.Rebuild(context.Background(), nil, "test/repo"); err != nil {
@@ -102,6 +103,33 @@ func TestAssignPlanMigratesLegacyTokenAndRebuildPreservesIt(t *testing.T) {
 	report, err := ix.PlanReport(context.Background())
 	if err != nil || len(report) != 1 || report[0].ID != id {
 		t.Fatalf("PlanReport = %+v, %v", report, err)
+	}
+}
+
+func TestPlannedTokenWritesHonorCancellation(t *testing.T) {
+	ix, err := index.Open(filepath.Join(t.TempDir(), "ix.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ix.Close() })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := ix.IssuePlannedToken(ctx, "cancelled", "org_cancel", "ws_cancel", entitlement.Team, time.Now()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("IssuePlannedToken cancellation = %v, want context.Canceled", err)
+	}
+	if got, err := ix.PlanReport(context.Background()); err != nil || len(got) != 0 {
+		t.Fatalf("cancelled issue persisted state: %+v, %v", got, err)
+	}
+	_, id, err := ix.IssueToken("legacy", 77, 11, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ix.AssignTokenPlan(ctx, id, "org_cancel", "ws_cancel", entitlement.Pro, time.Now()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("AssignTokenPlan cancellation = %v, want context.Canceled", err)
+	}
+	tokens, err := ix.ListTokens(time.Now())
+	if err != nil || len(tokens) != 1 || tokens[0].Plan != "" || tokens[0].DailyQuota != 77 {
+		t.Fatalf("cancelled assignment mutated legacy token: %+v, %v", tokens, err)
 	}
 }
 

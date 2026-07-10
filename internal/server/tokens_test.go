@@ -4,15 +4,18 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/dotts-h/twiceshy/internal/entitlement"
 	"github.com/dotts-h/twiceshy/internal/index"
 )
 
@@ -162,6 +165,29 @@ func TestTenantAuthOverRate429(t *testing.T) {
 	}
 	if ok == 0 || limited == 0 {
 		t.Fatalf("expected mix of 200 and 429, got ok=%d limited=%d", ok, limited)
+	}
+}
+
+func TestEnterprisePlanUsesItsExplicitRatePolicyInTenantAuth(t *testing.T) {
+	ix, err := index.Open(filepath.Join(t.TempDir(), "ix.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ix.Close() })
+	full, _, err := ix.IssuePlannedToken(context.Background(), "enterprise", "org_enterprise", "ws_enterprise", entitlement.Enterprise, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := tenantProbeHandler(t, ix)
+	// The legacy <=0 fallback is 60/minute with a burst of six. Seven immediate
+	// requests therefore prove enterprise is using its explicit plan rate, not
+	// silently falling back below Pro/Team.
+	for i := 0; i < 7; i++ {
+		resp := authGet(t, h, full)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("enterprise call %d: status=%d, want 200 from explicit rate policy", i+1, resp.StatusCode)
+		}
 	}
 }
 

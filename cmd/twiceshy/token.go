@@ -55,7 +55,7 @@ func teamPlansDisabledError() error {
 	return errors.New("team-plan features are disabled; set TWICESHY_TEAM_PLANS=1 to enable")
 }
 
-func runTokenIssue(_ context.Context, args []string, out, note io.Writer, teamPlans bool) error {
+func runTokenIssue(ctx context.Context, args []string, out, note io.Writer, teamPlans bool) error {
 	fs := flag.NewFlagSet("token issue", flag.ContinueOnError)
 	indexPath := fs.String("index", "twiceshy.db", "path of the derived SQLite index")
 	label := fs.String("label", "", "human-readable label for the token")
@@ -90,7 +90,7 @@ func runTokenIssue(_ context.Context, args []string, out, note io.Writer, teamPl
 
 	var full, id string
 	if planned {
-		full, id, err = ix.IssuePlannedToken(*label, *organizationID, *workspaceID, plan, time.Now().UTC())
+		full, id, err = ix.IssuePlannedToken(ctx, *label, *organizationID, *workspaceID, plan, time.Now().UTC())
 	} else {
 		full, id, err = ix.IssueToken(*label, *dailyQuota, *ratePerMin, time.Now().UTC())
 	}
@@ -102,7 +102,7 @@ func runTokenIssue(_ context.Context, args []string, out, note io.Writer, teamPl
 	return nil
 }
 
-func runTokenAssign(_ context.Context, args []string, out io.Writer) error {
+func runTokenAssign(ctx context.Context, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("token assign", flag.ContinueOnError)
 	indexPath := fs.String("index", "twiceshy.db", "path of the durable tenant registry")
 	id := fs.String("id", "", "token id")
@@ -124,7 +124,7 @@ func runTokenAssign(_ context.Context, args []string, out io.Writer) error {
 		return err
 	}
 	defer func() { _ = ix.Close() }()
-	if err := ix.AssignTokenPlan(*id, *organizationID, *workspaceID, plan, time.Now().UTC()); err != nil {
+	if err := ix.AssignTokenPlan(ctx, *id, *organizationID, *workspaceID, plan, time.Now().UTC()); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(out, "assigned %s organization=%s workspace=%s plan=%s\n", *id, *organizationID, *workspaceID, plan)

@@ -39,7 +39,7 @@ type TokenInfo struct {
 
 // IssueToken creates a new tenant token. The full bearer value is returned once.
 func (ix *Index) IssueToken(label string, dailyQuota, ratePerMin int, now time.Time) (full string, id string, err error) {
-	return ix.issueToken(label, dailyQuota, ratePerMin, now, nil)
+	return ix.issueToken(context.Background(), label, dailyQuota, ratePerMin, now, nil)
 }
 
 type tokenAssignment struct {
@@ -48,7 +48,7 @@ type tokenAssignment struct {
 	plan           entitlement.Plan
 }
 
-func (ix *Index) issueToken(label string, dailyQuota, ratePerMin int, now time.Time, assignment *tokenAssignment) (full string, id string, err error) {
+func (ix *Index) issueToken(ctx context.Context, label string, dailyQuota, ratePerMin int, now time.Time, assignment *tokenAssignment) (full string, id string, err error) {
 	var idBytes [4]byte
 	var secretBytes [16]byte
 	if _, err := rand.Read(idBytes[:]); err != nil {
@@ -62,12 +62,12 @@ func (ix *Index) issueToken(label string, dailyQuota, ratePerMin int, now time.T
 	full = id + "_" + secret
 	hash := sha256.Sum256([]byte(secret))
 	created := now.UTC().Format(time.RFC3339)
-	tx, err := ix.db.Begin()
+	tx, err := ix.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", "", fmt.Errorf("issue token: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO tokens (id, secret_hash, label, created_at, daily_quota, rate_per_min)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 		id, hash[:], label, created, dailyQuota, ratePerMin,
@@ -75,7 +75,7 @@ func (ix *Index) issueToken(label string, dailyQuota, ratePerMin int, now time.T
 		return "", "", fmt.Errorf("issue token: %w", err)
 	}
 	if assignment != nil {
-		if err := storeAssignment(tx, id, *assignment, created); err != nil {
+		if err := storeAssignment(ctx, tx, id, *assignment, created); err != nil {
 			return "", "", err
 		}
 	}
@@ -87,7 +87,7 @@ func (ix *Index) issueToken(label string, dailyQuota, ratePerMin int, now time.T
 
 // IssuePlannedToken issues a token whose quotas are derived from plan
 // entitlements and associates it with organization/workspace identity.
-func (ix *Index) IssuePlannedToken(label, organizationID, workspaceID string, plan entitlement.Plan, now time.Time) (string, string, error) {
+func (ix *Index) IssuePlannedToken(ctx context.Context, label, organizationID, workspaceID string, plan entitlement.Plan, now time.Time) (string, string, error) {
 	if err := validateAssignment(organizationID, workspaceID); err != nil {
 		return "", "", err
 	}
@@ -95,30 +95,30 @@ func (ix *Index) IssuePlannedToken(label, organizationID, workspaceID string, pl
 	if err != nil {
 		return "", "", err
 	}
-	return ix.issueToken(label, entitlements.Quota.DailyCalls, entitlements.Quota.RatePerMinute, now,
+	return ix.issueToken(ctx, label, entitlements.Quota.DailyCalls, entitlements.Quota.RatePerMinute, now,
 		&tokenAssignment{organizationID: organizationID, workspaceID: workspaceID, plan: plan})
 }
 
 type sqlExecutor interface {
-	Exec(query string, args ...any) (sql.Result, error)
-	QueryRow(query string, args ...any) *sql.Row
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-func storeAssignment(exec sqlExecutor, tokenID string, assignment tokenAssignment, created string) error {
-	if _, err := exec.Exec(`INSERT OR IGNORE INTO organizations (id, label, created_at) VALUES (?, ?, ?)`, assignment.organizationID, assignment.organizationID, created); err != nil {
+func storeAssignment(ctx context.Context, exec sqlExecutor, tokenID string, assignment tokenAssignment, created string) error {
+	if _, err := exec.ExecContext(ctx, `INSERT OR IGNORE INTO organizations (id, label, created_at) VALUES (?, ?, ?)`, assignment.organizationID, assignment.organizationID, created); err != nil {
 		return fmt.Errorf("assign token plan: organization: %w", err)
 	}
-	if _, err := exec.Exec(`INSERT OR IGNORE INTO workspaces (id, organization_id, label, created_at) VALUES (?, ?, ?, ?)`, assignment.workspaceID, assignment.organizationID, assignment.workspaceID, created); err != nil {
+	if _, err := exec.ExecContext(ctx, `INSERT OR IGNORE INTO workspaces (id, organization_id, label, created_at) VALUES (?, ?, ?, ?)`, assignment.workspaceID, assignment.organizationID, assignment.workspaceID, created); err != nil {
 		return fmt.Errorf("assign token plan: workspace: %w", err)
 	}
 	var owner string
-	if err := exec.QueryRow(`SELECT organization_id FROM workspaces WHERE id = ?`, assignment.workspaceID).Scan(&owner); err != nil {
+	if err := exec.QueryRowContext(ctx, `SELECT organization_id FROM workspaces WHERE id = ?`, assignment.workspaceID).Scan(&owner); err != nil {
 		return fmt.Errorf("assign token plan: workspace owner: %w", err)
 	}
 	if owner != assignment.organizationID {
 		return fmt.Errorf("assign token plan: workspace %q belongs to another organization", assignment.workspaceID)
 	}
-	if _, err := exec.Exec(`INSERT INTO token_entitlements (token_id, organization_id, workspace_id, plan) VALUES (?, ?, ?, ?)
+	if _, err := exec.ExecContext(ctx, `INSERT INTO token_entitlements (token_id, organization_id, workspace_id, plan) VALUES (?, ?, ?, ?)
 		ON CONFLICT(token_id) DO UPDATE SET organization_id=excluded.organization_id, workspace_id=excluded.workspace_id, plan=excluded.plan`, tokenID, assignment.organizationID, assignment.workspaceID, assignment.plan); err != nil {
 		return fmt.Errorf("assign token plan: entitlement: %w", err)
 	}
@@ -140,7 +140,7 @@ func validateAssignment(organizationID, workspaceID string) error {
 }
 
 // AssignTokenPlan additively migrates an existing token onto a plan.
-func (ix *Index) AssignTokenPlan(id, organizationID, workspaceID string, plan entitlement.Plan, now time.Time) error {
+func (ix *Index) AssignTokenPlan(ctx context.Context, id, organizationID, workspaceID string, plan entitlement.Plan, now time.Time) error {
 	if err := validateAssignment(organizationID, workspaceID); err != nil {
 		return err
 	}
@@ -148,19 +148,19 @@ func (ix *Index) AssignTokenPlan(id, organizationID, workspaceID string, plan en
 	if err != nil {
 		return err
 	}
-	tx, err := ix.db.Begin()
+	tx, err := ix.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("assign token plan: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	res, err := tx.Exec(`UPDATE tokens SET daily_quota = ?, rate_per_min = ? WHERE id = ?`, entitlements.Quota.DailyCalls, entitlements.Quota.RatePerMinute, id)
+	res, err := tx.ExecContext(ctx, `UPDATE tokens SET daily_quota = ?, rate_per_min = ? WHERE id = ?`, entitlements.Quota.DailyCalls, entitlements.Quota.RatePerMinute, id)
 	if err != nil {
 		return fmt.Errorf("assign token plan: token: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrTokenUnknown
 	}
-	if err := storeAssignment(tx, id, tokenAssignment{organizationID, workspaceID, plan}, now.UTC().Format(time.RFC3339)); err != nil {
+	if err := storeAssignment(ctx, tx, id, tokenAssignment{organizationID, workspaceID, plan}, now.UTC().Format(time.RFC3339)); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

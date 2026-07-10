@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,5 +70,21 @@ func TestTeamPlanCLIReportAndAssignment(t *testing.T) {
 		if !strings.Contains(report.String(), want) {
 			t.Errorf("report %q missing %q", report.String(), want)
 		}
+	}
+}
+
+func TestTeamPlanCLIPreservesCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	enabled := func(key string) string {
+		if key == "TWICESHY_TEAM_PLANS" {
+			return "1"
+		}
+		return ""
+	}
+	var out bytes.Buffer
+	err := runToken(ctx, []string{"issue", "-index", filepath.Join(t.TempDir(), "ix.db"), "-plan", "team", "-organization", "org", "-workspace", "ws"}, &out, enabled)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled planned issue = %v, want context.Canceled", err)
 	}
 }
