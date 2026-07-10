@@ -143,9 +143,15 @@ type Provenance struct {
 	// SourceLicenseAuthoredInternal sentinel (ADR-0011 §5, internal-only); all
 	// are omitted when empty. An empty value is valid for legacy records but is
 	// not rights evidence and is excluded from commercial packs.
-	SourceLicense string  `yaml:"source_license,omitempty"`
-	SourceURL     string  `yaml:"source_url,omitempty"`
-	SupersededBy  *string `yaml:"superseded_by"`
+	SourceLicense string `yaml:"source_license,omitempty"`
+	SourceURL     string `yaml:"source_url,omitempty"`
+	// SourceAttribution is explicit third-party notice evidence. Partial values
+	// remain valid while a record is under remediation; the commercial pack
+	// classifier fails closed unless the fields required by SourceLicense are
+	// complete. No field is synthesized by the engine.
+	SourceAttribution *SourceAttribution `yaml:"source_attribution,omitempty"`
+	RightsReview      *RightsReview      `yaml:"rights_review,omitempty"`
+	SupersededBy      *string            `yaml:"superseded_by"`
 	// Disputes is the additive, optional link an outcome-report counter-record
 	// (#0031) carries to the existing record it contests — an exp-id, like
 	// SupersededBy. #0032 follows it to re-run the original repro plus the
@@ -172,6 +178,28 @@ type Provenance struct {
 	// on a quarantined record that MUST NOT reach validated — a rule-based gate so
 	// the LLM judge is never the sole one (see validateProvenance).
 	ConsistencyFlags []string `yaml:"consistency_flags,omitempty"`
+}
+
+// SourceAttribution carries the exact evidence and license material a
+// commercial pack must preserve for copied/adapted third-party material.
+type SourceAttribution struct {
+	Creator         string `yaml:"creator,omitempty"`
+	Title           string `yaml:"title,omitempty"`
+	LicenseURL      string `yaml:"license_url,omitempty"`
+	Changes         string `yaml:"changes,omitempty"`
+	CopyrightNotice string `yaml:"copyright_notice,omitempty"`
+	Notice          string `yaml:"notice,omitempty"`
+	LicenseText     string `yaml:"license_text,omitempty"`
+}
+
+// RightsReview is an immutable human attestation over the source and rights
+// evidence. The pack policy verifies EvidenceSHA256; no field is auto-filled.
+type RightsReview struct {
+	Reviewer       string `yaml:"reviewer"`
+	ReviewedAt     string `yaml:"reviewed_at"`
+	SourceSHA256   string `yaml:"source_sha256"`
+	EvidenceSHA256 string `yaml:"evidence_sha256"`
+	Policy         string `yaml:"policy"`
 }
 
 // SourceLicenseFactsOnly is the source_license sentinel for a record that
@@ -817,6 +845,22 @@ func (r *Record) validateProvenance(fail func(string, ...any), now time.Time) {
 	}
 	if u := p.SourceURL; u != "" && !reHTTPURL.MatchString(u) {
 		fail("provenance.source_url %q is not an http(s) URL", u)
+	}
+	if a := p.SourceAttribution; a != nil && a.LicenseURL != "" && !reHTTPURL.MatchString(a.LicenseURL) {
+		fail("provenance.source_attribution.license_url %q is not an http(s) URL", a.LicenseURL)
+	}
+	if review := p.RightsReview; review != nil {
+		if review.SourceSHA256 != "" && !reFingerprint.MatchString(review.SourceSHA256) {
+			fail("provenance.rights_review.source_sha256 %q is not sha256:<64 lowercase hex>", review.SourceSHA256)
+		}
+		if review.EvidenceSHA256 != "" && !reFingerprint.MatchString(review.EvidenceSHA256) {
+			fail("provenance.rights_review.evidence_sha256 %q is not sha256:<64 lowercase hex>", review.EvidenceSHA256)
+		}
+		if review.ReviewedAt != "" {
+			if _, err := time.Parse(time.RFC3339, review.ReviewedAt); err != nil {
+				fail("provenance.rights_review.reviewed_at %q is not RFC3339", review.ReviewedAt)
+			}
+		}
 	}
 	// ADR-0011 §5: an authored-internal fact is re-derived, not distilled from a
 	// URL, so it must carry no source_url — enforce the discipline mechanically.

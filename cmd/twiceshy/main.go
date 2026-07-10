@@ -29,6 +29,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -199,7 +200,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|learned|draft|promote|repromote|adapt|intake-reports|intake-records|intake-issues|retro-intake|screen|report|pack|doctor|eval|corpus-quality|pilot-report|usage-flush|gold-add|judge-eval|prospect|corpus-merge-check|corpus-pr-paths|nextid|token> [flags]")
+		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|learned|draft|promote|repromote|adapt|intake-reports|intake-records|intake-issues|retro-intake|screen|report|pack|doctor|eval|corpus-quality|pilot-report|rights-audit|usage-flush|gold-add|judge-eval|prospect|corpus-merge-check|corpus-pr-paths|nextid|token> [flags]")
 	}
 	switch args[0] {
 	case "index":
@@ -242,6 +243,8 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runCorpusQuality(args[1:], out)
 	case "pilot-report":
 		return runPilotReport(args[1:], out)
+	case "rights-audit":
+		return runRightsAudit(args[1:], out)
 	case "usage-flush":
 		return runUsageFlush(ctx, args[1:], out)
 	case "gold-add":
@@ -267,7 +270,7 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	case "token":
 		return runToken(ctx, args[1:], out, getenv)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, learned, draft, promote, repromote, adapt, intake-reports, intake-records, intake-issues, retro-intake, screen, report, pack, doctor, eval, corpus-quality, pilot-report, usage-flush, gold-add, judge-eval, prospect, self-audit, similarity, author, corpus-merge-check, corpus-pr-paths, nextid, token, or idf-build)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, learned, draft, promote, repromote, adapt, intake-reports, intake-records, intake-issues, retro-intake, screen, report, pack, doctor, eval, corpus-quality, pilot-report, rights-audit, usage-flush, gold-add, judge-eval, prospect, self-audit, similarity, author, corpus-merge-check, corpus-pr-paths, nextid, token, or idf-build)", args[0])
 	}
 }
 
@@ -1516,6 +1519,7 @@ func runPack(args []string, out io.Writer) error {
 	corpus := fs.String("corpus", ".", "corpus root (the directory containing experience/)")
 	outDir := fs.String("out", "", "output directory for the built pack")
 	commercial := fs.Bool("commercial", false, "build a commercial pack: exclude copyleft/contract-encumbered records")
+	licensePath := fs.String("license", "", "pack-level LICENSE terms to bundle (required for -commercial)")
 	includeQ := fs.Bool("include-quarantined", false, "include not-yet-validated records (inspection only)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
@@ -1523,12 +1527,38 @@ func runPack(args []string, out io.Writer) error {
 	if *outDir == "" {
 		return errors.New("pack requires -out <dir>")
 	}
+	if err := rejectSymlinkComponents(*corpus, false); err != nil {
+		return fmt.Errorf("pack corpus path: %w", err)
+	}
+	if err := requireEmptyOutput(*outDir); err != nil {
+		return fmt.Errorf("pack output path: %w", err)
+	}
+	var packLicense []byte
+	if *commercial {
+		if *licensePath == "" {
+			return errors.New("commercial pack requires -license <file> with pack-level terms")
+		}
+		if err := rejectSymlinkComponents(*licensePath, false); err != nil {
+			return fmt.Errorf("pack license path: %w", err)
+		}
+		data, err := os.ReadFile(*licensePath)
+		if err != nil {
+			return fmt.Errorf("reading pack-level LICENSE: %w", err)
+		}
+		packLicense = data
+		if len(bytes.TrimSpace(packLicense)) == 0 {
+			return errors.New("commercial pack LICENSE terms must not be empty")
+		}
+	}
 
 	recs, err := record.LoadCorpus(*corpus)
 	if err != nil {
 		return fmt.Errorf("loading corpus: %w", err)
 	}
 	m := pack.BuildManifest(recs, *commercial, *includeQ)
+	if *commercial {
+		m.PackLicenseSHA256 = pack.LicenseDigest(packLicense)
+	}
 
 	byID := make(map[string]*record.Record, len(recs))
 	for _, r := range recs {
@@ -1537,20 +1567,21 @@ func runPack(args []string, out io.Writer) error {
 	if err := os.MkdirAll(*outDir, 0o755); err != nil {
 		return err
 	}
+	if err := rejectSymlinkComponents(*outDir, false); err != nil {
+		return fmt.Errorf("pack output path: %w", err)
+	}
 	for _, id := range m.Included {
 		r := byID[id]
 		md, err := record.Marshal(r)
 		if err != nil {
 			return err
 		}
-		dst, err := safeJoin(*outDir, r.Path)
-		if err != nil {
+		if err := writePackFile(*outDir, r.Path, md); err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(dst, md, 0o644); err != nil {
+	}
+	for rel, body := range pack.MaterialFiles(recs, m) {
+		if err := writePackFile(*outDir, rel, body); err != nil {
 			return err
 		}
 	}
@@ -1559,11 +1590,16 @@ func runPack(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(*outDir, "MANIFEST.json"), append(mj, '\n'), 0o644); err != nil {
+	if err := writePackFile(*outDir, "MANIFEST.json", append(mj, '\n')); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(*outDir, "ATTRIBUTION.md"), attributionDoc(m), 0o644); err != nil {
+	if err := writePackFile(*outDir, "ATTRIBUTION.md", pack.NoticeDocument(m)); err != nil {
 		return err
+	}
+	if *commercial {
+		if err := writePackFile(*outDir, "LICENSE", packLicense); err != nil {
+			return err
+		}
 	}
 
 	kind := "open"
@@ -1573,21 +1609,6 @@ func runPack(args []string, out io.Writer) error {
 	_, _ = fmt.Fprintf(out, "pack (%s): included %d, excluded %d, source/license notices %d -> %s\n",
 		kind, len(m.Included), len(m.Excluded), len(m.Attribution), *outDir)
 	return nil
-}
-
-// attributionDoc renders the pack's ATTRIBUTION.md from its manifest.
-func attributionDoc(m pack.Manifest) []byte {
-	var b strings.Builder
-	b.WriteString("# Source and License Notices\n\n")
-	if len(m.Attribution) == 0 {
-		b.WriteString("No records in this pack require a source/license notice entry.\n")
-		return []byte(b.String())
-	}
-	b.WriteString("This pack includes records from the following licensed sources. Preserve the applicable attribution, copyright, license, and NOTICE terms identified by each source and license:\n\n")
-	for _, a := range m.Attribution {
-		_, _ = fmt.Fprintf(&b, "- `%s` — %s — %s\n", a.ID, a.SourceLicense, a.SourceURL)
-	}
-	return []byte(b.String())
 }
 
 // runDoctor runs a store-hygiene doctor over the corpus and prints its proposed

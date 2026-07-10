@@ -12,9 +12,16 @@
 package pack
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"html"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/dotts-h/twiceshy/internal/record"
 )
@@ -29,8 +36,52 @@ var reCCBYAttribution = regexp.MustCompile(`^cc-by(-[0-9][0-9.]*)?$`)
 type Eligibility struct {
 	Commercial       bool   // may ship in a commercial pack
 	NeedsAttribution bool   // if included, the pack must carry attribution
+	Code             string // stable machine-readable reason bucket
 	Reason           string // why — especially why a record is excluded
 }
+
+// Stable eligibility reason codes. Audit/report consumers key on these rather
+// than parsing human prose.
+const (
+	ReasonMissingEvidence       = "missing_evidence"
+	ReasonFactsOnly             = "facts_only"
+	ReasonProjectAuthored       = "project_authored"
+	ReasonAuthoredInternal      = "authored_internal"
+	ReasonLicensedNotice        = "licensed_notice"
+	ReasonCCBYNotice            = "cc_by_notice"
+	ReasonRestrictedCC          = "restricted_cc"
+	ReasonCopyleft              = "copyleft"
+	ReasonUnrecognizedLicense   = "unrecognized_license"
+	ReasonMissingSourceURL      = "missing_source_url"
+	ReasonMissingNoticeEvidence = "missing_notice_evidence"
+	ReasonMissingRightsReview   = "missing_rights_review"
+	ReasonRightsDigestMismatch  = "rights_digest_mismatch"
+	ReasonUnapprovedLicenseText = "unapproved_license_text"
+)
+
+// RightsPolicyV1 is the only currently approved mechanical review policy.
+// It is not counsel approval; it versions the evidence checklist and digest.
+const RightsPolicyV1 = "twiceshy-rights-v1"
+
+// ApprovedMITLicenseText is the exact standard MIT grant/disclaimer text. The
+// work-specific copyright notice is stored and bundled separately.
+const ApprovedMITLicenseText = `Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.`
 
 // permissiveLicenses impose no copyleft. A record carrying one of these IDs is
 // treated as copied licensed material, so the pack still emits a source/license
@@ -59,48 +110,193 @@ func Classify(sourceLicense string) Eligibility {
 	s := strings.TrimSpace(sourceLicense)
 	switch s {
 	case "":
-		return Eligibility{Reason: "missing explicit rights evidence — excluded fail-closed"}
+		return Eligibility{Code: ReasonMissingEvidence, Reason: "missing explicit rights evidence — excluded fail-closed"}
 	case record.SourceLicenseFactsOnly:
-		return Eligibility{Commercial: true, Reason: "distilled facts only — no license obligation"}
+		return Eligibility{Commercial: true, Code: ReasonFactsOnly, Reason: "distilled facts only — no license obligation"}
 	case record.SourceLicenseProjectAuthored:
-		return Eligibility{Commercial: true, Reason: "explicitly project-authored"}
+		return Eligibility{Commercial: true, Code: ReasonProjectAuthored, Reason: "explicitly project-authored"}
 	case record.SourceLicenseAuthoredInternal:
 		// ADR-0011 §5: the fact was re-derived from a public-awareness topic for the
 		// INTERNAL corpus only; the commercial pack stays gated on a real legal
 		// review. Fail-closed — these never ship in a commercial pack until then.
-		return Eligibility{Reason: "§5-authored, internal-only — pending commercial legal review (ADR-0011 §5)"}
+		return Eligibility{Code: ReasonAuthoredInternal, Reason: "§5-authored, internal-only — pending commercial legal review (ADR-0011 §5)"}
 	}
 
 	low := strings.ToLower(s)
 	if permissiveLicenses[low] {
-		return Eligibility{Commercial: true, NeedsAttribution: true, Reason: "permissive license (" + s + ") — source/license notice required"}
+		return Eligibility{Commercial: true, NeedsAttribution: true, Code: ReasonLicensedNotice, Reason: "permissive license (" + s + ") — source/license notice required"}
 	}
 	// Attribution-only CC-BY (no -SA/-NC/-ND modifier) is the one commercial-safe
 	// CC variant; matched precisely so a modifier can never slip through.
 	if reCCBYAttribution.MatchString(low) {
-		return Eligibility{Commercial: true, NeedsAttribution: true, Reason: "CC-BY (" + s + ") — attribution required"}
+		return Eligibility{Commercial: true, NeedsAttribution: true, Code: ReasonCCBYNotice, Reason: "CC-BY (" + s + ") — attribution required"}
 	}
 	// Every other Creative Commons variant bars a commercial pack: -SA
 	// (share-alike), -NC (noncommercial), -ND (no-derivatives), or an unknown CC
 	// modifier. Fail-closed.
 	if strings.HasPrefix(low, "cc-") {
-		return Eligibility{Reason: "restricted Creative Commons variant (" + s + ") — not commercial-safe"}
+		return Eligibility{Code: ReasonRestrictedCC, Reason: "restricted Creative Commons variant (" + s + ") — not commercial-safe"}
 	}
 	for _, p := range copyleftPrefixes {
 		if strings.HasPrefix(low, p) {
-			return Eligibility{Reason: "copyleft (" + s + ")"}
+			return Eligibility{Code: ReasonCopyleft, Reason: "copyleft (" + s + ")"}
 		}
 	}
-	return Eligibility{Reason: "unrecognized license (" + s + ") — excluded fail-closed"}
+	return Eligibility{Code: ReasonUnrecognizedLicense, Reason: "unrecognized license (" + s + ") — excluded fail-closed"}
+}
+
+// ClassifyRecord applies the complete commercial-pack rule to one record. A
+// source license that carries a notice/attribution requirement is not enough by
+// itself: the immutable source location needed to render that notice must also
+// be present.
+func ClassifyRecord(rec *record.Record) Eligibility {
+	if rec == nil {
+		return Eligibility{Code: ReasonMissingEvidence, Reason: "nil record — excluded fail-closed"}
+	}
+	e := Classify(rec.Provenance.SourceLicense)
+	if e.Commercial && e.NeedsAttribution && strings.TrimSpace(rec.Provenance.SourceURL) == "" {
+		e.Commercial = false
+		e.Code = ReasonMissingSourceURL
+		e.Reason = "source URL required for license/attribution notice"
+		return e
+	}
+	if e.Commercial && e.NeedsAttribution && !completeSourceAttribution(rec) {
+		e.Commercial = false
+		e.Code = ReasonMissingNoticeEvidence
+		e.Reason = "complete source attribution, notice, and license text evidence required"
+		return e
+	}
+	if e.Commercial && e.NeedsAttribution && !approvedLicenseMaterial(rec.Provenance.SourceLicense, rec.Provenance.SourceAttribution.LicenseText) {
+		e.Commercial = false
+		e.Code = ReasonUnapprovedLicenseText
+		e.Reason = "license text does not match a versioned approved template/digest"
+		return e
+	}
+	if e.Commercial {
+		ok, mismatch := validRightsReview(rec)
+		if !ok {
+			e.Commercial = false
+			if mismatch {
+				e.Code, e.Reason = ReasonRightsDigestMismatch, "rights-review evidence digest does not match the record evidence"
+			} else {
+				e.Code, e.Reason = ReasonMissingRightsReview, "complete immutable human rights-review attestation required"
+			}
+		}
+	}
+	return e
+}
+
+func approvedLicenseMaterial(license, text string) bool {
+	switch strings.ToLower(strings.TrimSpace(license)) {
+	case "mit":
+		return strings.TrimSpace(text) == strings.TrimSpace(ApprovedMITLicenseText)
+	case "apache-2.0":
+		return LicenseDigest([]byte(text)) == "sha256:cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+	default:
+		// CC-BY and other license texts remain fail-closed until an exact,
+		// versioned canonical digest/template is approved and added here.
+		return false
+	}
+}
+
+func validRightsReview(rec *record.Record) (ok, mismatch bool) {
+	r := rec.Provenance.RightsReview
+	if r == nil || !allPresent(r.Reviewer, r.ReviewedAt, r.SourceSHA256, r.EvidenceSHA256, r.Policy) ||
+		placeholder(r.Reviewer) || placeholder(r.Policy) || r.Policy != RightsPolicyV1 ||
+		!regexp.MustCompile(`^sha256:[0-9a-f]{64}$`).MatchString(r.SourceSHA256) {
+		return false, false
+	}
+	if _, err := time.Parse(time.RFC3339, r.ReviewedAt); err != nil {
+		return false, false
+	}
+	if r.EvidenceSHA256 != EvidenceDigest(rec) {
+		return false, true
+	}
+	return true, false
+}
+
+func placeholder(value string) bool {
+	v := strings.ToLower(strings.TrimSpace(value))
+	switch v {
+	case "todo", "tbd", "unknown", "n/a", "na", "placeholder", "example":
+		return true
+	default:
+		return v == "" || strings.Contains(v, "<reviewer>") || strings.Contains(v, "replace me")
+	}
+}
+
+// EvidenceDigest binds the human attestation to the canonical serialization of
+// every field and prose byte distributed for the record, plus its pack-relative
+// path. The digest field itself is the sole exclusion because including it would
+// make the digest self-referential. Raw is an input encoding cache; Marshal is
+// the canonical distributed representation.
+func EvidenceDigest(rec *record.Record) string {
+	if rec == nil {
+		return ""
+	}
+	clone := *rec
+	clone.Raw = nil
+	clone.Provenance = rec.Provenance
+	if rec.Provenance.RightsReview != nil {
+		review := *rec.Provenance.RightsReview
+		review.EvidenceSHA256 = ""
+		clone.Provenance.RightsReview = &review
+	}
+	canonical, err := record.Marshal(&clone)
+	if err != nil {
+		return ""
+	}
+	bound := append([]byte(filepath.ToSlash(clone.Path)+"\n"), canonical...)
+	return LicenseDigest(bound)
+}
+
+func completeSourceAttribution(rec *record.Record) bool {
+	a := rec.Provenance.SourceAttribution
+	if a == nil || strings.TrimSpace(a.LicenseText) == "" {
+		return false
+	}
+	license := strings.ToLower(strings.TrimSpace(rec.Provenance.SourceLicense))
+	if reCCBYAttribution.MatchString(license) {
+		return allPresent(a.Creator, a.Title, a.LicenseURL, a.Changes)
+	}
+	switch license {
+	case "mit":
+		return allPresent(a.CopyrightNotice)
+	case "apache-2.0":
+		return allPresent(a.CopyrightNotice, a.Notice)
+	default:
+		// Other permissive licenses stay supported only with the conservative
+		// superset: exact copyright, notice, and license material.
+		return allPresent(a.CopyrightNotice, a.Notice)
+	}
+}
+
+func allPresent(values ...string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // AttributionEntry records a source/license notice a pack must carry. For some
 // licenses this is attribution; for permissive code licenses it ensures the
 // source and applicable license/notice obligations are not silently dropped.
 type AttributionEntry struct {
-	ID            string `json:"id"`
-	SourceLicense string `json:"source_license"`
-	SourceURL     string `json:"source_url"`
+	ID              string `json:"id"`
+	SourceLicense   string `json:"source_license"`
+	SourceURL       string `json:"source_url"`
+	Creator         string `json:"creator,omitempty"`
+	Title           string `json:"title,omitempty"`
+	LicenseURL      string `json:"license_url,omitempty"`
+	Changes         string `json:"changes,omitempty"`
+	CopyrightFile   string `json:"copyright_file,omitempty"`
+	CopyrightSHA256 string `json:"copyright_sha256,omitempty"`
+	NoticeFile      string `json:"notice_file,omitempty"`
+	NoticeSHA256    string `json:"notice_sha256,omitempty"`
+	LicenseFile     string `json:"license_file"`
+	LicenseSHA256   string `json:"license_sha256"`
 }
 
 // Excluded records why a record was dropped from a pack.
@@ -109,13 +305,18 @@ type Excluded struct {
 	Reason string `json:"reason"`
 }
 
-// Manifest is the plan for a pack: which record ids are in, which are out (with
-// reasons), and the attribution the pack must carry.
+// Manifest is the plan for a pack: which record ids are in, the SHA-256 of each
+// exact bundled record payload, which records are out (with reasons), and the
+// attribution the pack must carry. RecordSHA256 is required even when empty;
+// manifests created before this ledger was introduced fail closed and must be
+// rebuilt before artifact validation.
 type Manifest struct {
-	Commercial  bool               `json:"commercial"`
-	Included    []string           `json:"included"`
-	Excluded    []Excluded         `json:"excluded"`
-	Attribution []AttributionEntry `json:"attribution"`
+	Commercial        bool               `json:"commercial"`
+	PackLicenseSHA256 string             `json:"pack_license_sha256,omitempty"`
+	Included          []string           `json:"included"`
+	RecordSHA256      map[string]string  `json:"record_sha256"`
+	Excluded          []Excluded         `json:"excluded"`
+	Attribution       []AttributionEntry `json:"attribution"`
 }
 
 // BuildManifest selects records for a pack. Packs ship `validated` records only
@@ -124,32 +325,173 @@ type Manifest struct {
 // commercial-eligible (Classify) are additionally excluded, and every included
 // record needing attribution is recorded. Pure and deterministic (sorted).
 func BuildManifest(recs []*record.Record, commercial, includeQuarantined bool) Manifest {
-	m := Manifest{Commercial: commercial}
+	m := Manifest{Commercial: commercial, RecordSHA256: make(map[string]string)}
 	for _, r := range recs {
 		if r.Status != "validated" && !includeQuarantined {
 			m.Excluded = append(m.Excluded, Excluded{ID: r.ID, Reason: "not validated (status " + r.Status + ")"})
 			continue
 		}
-		e := Classify(r.Provenance.SourceLicense)
+		e := ClassifyRecord(r)
 		if commercial && !e.Commercial {
 			m.Excluded = append(m.Excluded, Excluded{ID: r.ID, Reason: e.Reason})
 			continue
 		}
-		if commercial && e.NeedsAttribution && strings.TrimSpace(r.Provenance.SourceURL) == "" {
-			m.Excluded = append(m.Excluded, Excluded{ID: r.ID, Reason: "source URL required for license/attribution notice"})
-			continue
-		}
 		m.Included = append(m.Included, r.ID)
+		digest := ""
+		if payload, err := record.Marshal(r); err == nil {
+			digest = LicenseDigest(payload)
+		}
+		m.RecordSHA256[filepath.ToSlash(r.Path)] = digest
 		if e.NeedsAttribution {
-			m.Attribution = append(m.Attribution, AttributionEntry{
-				ID:            r.ID,
-				SourceLicense: r.Provenance.SourceLicense,
-				SourceURL:     r.Provenance.SourceURL,
-			})
+			a := r.Provenance.SourceAttribution
+			entry := AttributionEntry{ID: r.ID, SourceLicense: r.Provenance.SourceLicense, SourceURL: r.Provenance.SourceURL}
+			if a != nil {
+				entry.Creator, entry.Title, entry.LicenseURL, entry.Changes = a.Creator, a.Title, a.LicenseURL, a.Changes
+				entry.LicenseFile = "THIRD_PARTY/" + r.ID + "-LICENSE.txt"
+				entry.LicenseSHA256 = LicenseDigest([]byte(a.LicenseText))
+				if a.CopyrightNotice != "" {
+					entry.CopyrightFile = "THIRD_PARTY/" + r.ID + "-COPYRIGHT.txt"
+					entry.CopyrightSHA256 = LicenseDigest([]byte(a.CopyrightNotice))
+				}
+				if a.Notice != "" {
+					entry.NoticeFile = "THIRD_PARTY/" + r.ID + "-NOTICE.txt"
+					entry.NoticeSHA256 = LicenseDigest([]byte(a.Notice))
+				}
+			}
+			m.Attribution = append(m.Attribution, entry)
 		}
 	}
 	sort.Strings(m.Included)
 	sort.Slice(m.Excluded, func(i, j int) bool { return m.Excluded[i].ID < m.Excluded[j].ID })
 	sort.Slice(m.Attribution, func(i, j int) bool { return m.Attribution[i].ID < m.Attribution[j].ID })
 	return m
+}
+
+// NoticeDocument renders the canonical source/license notice artifact for a
+// manifest. Keeping this beside BuildManifest lets pre-ship validation compare
+// the exact artifact without duplicating rendering policy at the CLI edge.
+func NoticeDocument(m Manifest) []byte {
+	var b strings.Builder
+	b.WriteString("# Source and License Notices\n\n")
+	if len(m.Attribution) == 0 {
+		b.WriteString("No records in this pack require a source/license notice entry.\n")
+		return []byte(b.String())
+	}
+	b.WriteString("This pack includes records from the following licensed sources. Preserve the applicable attribution, copyright, license, and NOTICE terms identified by each source and license:\n\n")
+	for _, a := range m.Attribution {
+		_, _ = fmt.Fprintf(&b, "## %s\n\n- Source: %s\n- License: %s\n", markdownText(a.ID), markdownText(a.SourceURL), markdownText(a.SourceLicense))
+		if a.Creator != "" {
+			_, _ = fmt.Fprintf(&b, "- Creator: %s\n- Work title: %s\n- License link: %s\n- Changes: %s\n", markdownText(a.Creator), markdownText(a.Title), markdownText(a.LicenseURL), markdownText(a.Changes))
+		}
+		if a.CopyrightFile != "" {
+			_, _ = fmt.Fprintf(&b, "- Copyright material: %s (%s)\n", markdownText(a.CopyrightFile), a.CopyrightSHA256)
+		}
+		if a.NoticeFile != "" {
+			_, _ = fmt.Fprintf(&b, "- Upstream NOTICE material: %s (%s)\n", markdownText(a.NoticeFile), a.NoticeSHA256)
+		}
+		_, _ = fmt.Fprintf(&b, "- License material: %s (%s)\n\n", markdownText(a.LicenseFile), a.LicenseSHA256)
+	}
+	return []byte(b.String())
+}
+
+func markdownText(value string) string {
+	v := html.EscapeString(strings.Join(strings.Fields(value), " "))
+	r := strings.NewReplacer("`", "&#96;", "[", "&#91;", "]", "&#93;", "(", "&#40;", ")", "&#41;", ":", "&#58;")
+	return r.Replace(v)
+}
+
+// MaterialFiles returns verbatim third-party material as separate plain-text
+// artifacts. Raw content never enters ATTRIBUTION.md.
+func MaterialFiles(recs []*record.Record, m Manifest) map[string][]byte {
+	byID := make(map[string]*record.Record, len(recs))
+	for _, rec := range recs {
+		byID[rec.ID] = rec
+	}
+	out := make(map[string][]byte)
+	for _, entry := range m.Attribution {
+		rec := byID[entry.ID]
+		if rec == nil || rec.Provenance.SourceAttribution == nil {
+			continue
+		}
+		a := rec.Provenance.SourceAttribution
+		out[entry.LicenseFile] = []byte(a.LicenseText)
+		if entry.CopyrightFile != "" {
+			out[entry.CopyrightFile] = []byte(a.CopyrightNotice)
+		}
+		if entry.NoticeFile != "" {
+			out[entry.NoticeFile] = []byte(a.Notice)
+		}
+	}
+	return out
+}
+
+// RecordFiles returns the exact canonical Markdown payload for every record
+// selected into the manifest, keyed by its pack-relative path.
+func RecordFiles(recs []*record.Record, m Manifest) map[string][]byte {
+	byID := make(map[string]*record.Record, len(recs))
+	for _, rec := range recs {
+		byID[rec.ID] = rec
+	}
+	out := make(map[string][]byte, len(m.Included))
+	for _, id := range m.Included {
+		rec := byID[id]
+		if rec == nil {
+			continue
+		}
+		payload, err := record.Marshal(rec)
+		if err != nil {
+			continue
+		}
+		out[filepath.ToSlash(rec.Path)] = payload
+	}
+	return out
+}
+
+// ValidateCommercialArtifacts verifies that a built commercial MANIFEST.json
+// and notice document exactly match the current corpus and pack policy. It is
+// deterministic and returns every drift finding in a stable order.
+func ValidateCommercialArtifacts(recs []*record.Record, got Manifest, notices, packLicense []byte, materials, records map[string][]byte) []string {
+	want := BuildManifest(recs, true, false)
+	var errs []string
+	if len(bytes.TrimSpace(packLicense)) == 0 {
+		errs = append(errs, "pack-level LICENSE terms are missing or empty")
+	} else {
+		want.PackLicenseSHA256 = LicenseDigest(packLicense)
+	}
+	gotJSON, gotErr := json.Marshal(got)
+	wantJSON, wantErr := json.Marshal(want)
+	if gotErr != nil || wantErr != nil || !bytes.Equal(gotJSON, wantJSON) {
+		errs = append(errs, "MANIFEST.json does not match the current commercial pack selection and notice ledger")
+	}
+	if !bytes.Equal(notices, NoticeDocument(want)) {
+		errs = append(errs, "source/license notice document does not match the current commercial manifest")
+	}
+	ledgerMatches := got.RecordSHA256 != nil && len(got.RecordSHA256) == len(records)
+	for path, payload := range records {
+		if got.RecordSHA256[path] != LicenseDigest(payload) {
+			ledgerMatches = false
+		}
+	}
+	if !ledgerMatches {
+		errs = append(errs, "manifest record_sha256 ledger does not bind every bundled experience record payload")
+	}
+	wantRecords := RecordFiles(recs, want)
+	wantRecordJSON, _ := json.Marshal(wantRecords)
+	gotRecordJSON, _ := json.Marshal(records)
+	if !bytes.Equal(wantRecordJSON, gotRecordJSON) {
+		errs = append(errs, "bundled experience record payloads do not match the manifest digests and reviewed corpus")
+	}
+	wantMaterials := MaterialFiles(recs, want)
+	wantMaterialJSON, _ := json.Marshal(wantMaterials)
+	gotMaterialJSON, _ := json.Marshal(materials)
+	if !bytes.Equal(wantMaterialJSON, gotMaterialJSON) {
+		errs = append(errs, "bundled third-party license/NOTICE material does not match the reviewed evidence")
+	}
+	return errs
+}
+
+// LicenseDigest binds MANIFEST.json to the exact pack-level LICENSE terms.
+func LicenseDigest(terms []byte) string {
+	sum := sha256.Sum256(terms)
+	return fmt.Sprintf("sha256:%x", sum)
 }

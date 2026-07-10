@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dotts-h/twiceshy/internal/pack"
 	"github.com/dotts-h/twiceshy/internal/record"
 	"github.com/dotts-h/twiceshy/internal/testcorpus"
 )
@@ -72,11 +73,17 @@ func packFixture(id, status, license, url string) *record.Record {
 		SourceLicense: license,
 		SourceURL:     url,
 	}
+	switch strings.ToLower(license) {
+	case "mit":
+		prov.SourceAttribution = &record.SourceAttribution{Title: "Fixture Work", CopyrightNotice: "Copyright 2026 Fixture Authors", LicenseText: pack.ApprovedMITLicenseText}
+	case "cc-by-4.0":
+		prov.SourceAttribution = &record.SourceAttribution{Creator: "Fixture Creator", Title: "Fixture Work", LicenseURL: "https://creativecommons.org/licenses/by/4.0/", Changes: "Condensed into a test record.", LicenseText: "Creative Commons Attribution 4.0 legal code"}
+	}
 	if status == "validated" {
 		v := "2026-06-18"
 		prov.ValidatedAt = &v // a validated record must record validated_at
 	}
-	return &record.Record{
+	r := &record.Record{
 		SchemaVersion: 1,
 		ID:            "exp-" + id,
 		Kind:          "convention",
@@ -87,6 +94,9 @@ func packFixture(id, status, license, url string) *record.Record {
 		Body:          "Distilled fact for the pack-builder test.",
 		Path:          "experience/2026/" + id + "-pack-fixture.md",
 	}
+	r.Provenance.RightsReview = &record.RightsReview{Reviewer: "Jane Rights Reviewer", ReviewedAt: "2026-07-10T12:00:00Z", SourceSHA256: "sha256:" + strings.Repeat("a", 64), Policy: pack.RightsPolicyV1}
+	r.Provenance.RightsReview.EvidenceSHA256 = pack.EvidenceDigest(r)
+	return r
 }
 
 func corpusWithLocal2758AndBase2768(t *testing.T) (string, string) {
@@ -138,9 +148,16 @@ func TestRunPackCommercialExcludesAndAttributes(t *testing.T) {
 	writeFixture(t, dir, packFixture("0105", "validated", record.SourceLicenseProjectAuthored, ""))
 
 	outDir := filepath.Join(t.TempDir(), "pack")
+	packLicense := filepath.Join(t.TempDir(), "PACK-LICENSE.txt")
+	if err := os.WriteFile(packLicense, []byte("Fixture commercial pack terms\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	var out bytes.Buffer
-	if err := run(context.Background(), []string{"pack", "-corpus", dir, "-out", outDir, "-commercial"}, &out, noEnv); err != nil {
+	if err := run(context.Background(), []string{"pack", "-corpus", dir, "-out", outDir, "-commercial", "-license", packLicense}, &out, noEnv); err != nil {
 		t.Fatalf("pack: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(outDir, "LICENSE")); err != nil || string(got) != "Fixture commercial pack terms\n" {
+		t.Fatalf("commercial pack LICENSE = %q, %v", got, err)
 	}
 
 	manifest, err := os.ReadFile(filepath.Join(outDir, "MANIFEST.json"))
@@ -148,7 +165,7 @@ func TestRunPackCommercialExcludesAndAttributes(t *testing.T) {
 		t.Fatalf("read manifest: %v", err)
 	}
 	ms := string(manifest)
-	if !strings.Contains(ms, "exp-0101") || !strings.Contains(ms, "exp-0102") || !strings.Contains(ms, "exp-0105") {
+	if !strings.Contains(ms, "exp-0101") || !strings.Contains(ms, "exp-0105") {
 		t.Errorf("manifest should include licensed and explicitly project-authored records:\n%s", ms)
 	}
 	for _, reason := range []string{"copyleft", "not validated"} {
@@ -166,10 +183,72 @@ func TestRunPackCommercialExcludesAndAttributes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read attribution: %v", err)
 	}
-	for _, want := range []string{"Source and License Notices", "exp-0101", "MIT", "0123456789abcdef", "exp-0102", "GHSA-x"} {
+	for _, want := range []string{"Source and License Notices", "exp-0101", "MIT", "0123456789abcdef", "THIRD_PARTY/exp-0101-LICENSE.txt"} {
 		if !strings.Contains(string(attr), want) {
 			t.Errorf("ATTRIBUTION.md must describe copied-source license/notice entries (missing %q):\n%s", want, attr)
 		}
+	}
+	if got, err := os.ReadFile(filepath.Join(outDir, "THIRD_PARTY", "exp-0101-LICENSE.txt")); err != nil || string(got) != pack.ApprovedMITLicenseText {
+		t.Fatalf("bundled MIT license = %q, %v", got, err)
+	}
+}
+
+func TestRunPackCommercialRequiresPackLicenseTerms(t *testing.T) {
+	dir := tempCorpus(t)
+	writeFixture(t, dir, packFixture("0101", "validated", record.SourceLicenseProjectAuthored, ""))
+	err := run(context.Background(), []string{"pack", "-corpus", dir, "-out", filepath.Join(t.TempDir(), "pack"), "-commercial"}, &bytes.Buffer{}, noEnv)
+	if err == nil {
+		t.Fatal("commercial pack without pack-level LICENSE terms must fail closed")
+	}
+}
+
+func TestRunPackRejectsNonEmptyOutputWithoutChangingIt(t *testing.T) {
+	dir := tempCorpus(t)
+	writeFixture(t, dir, packFixture("0101", "validated", record.SourceLicenseProjectAuthored, ""))
+	outDir := t.TempDir()
+	marker := filepath.Join(outDir, "keep.txt")
+	if err := os.WriteFile(marker, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	license := filepath.Join(t.TempDir(), "LICENSE")
+	if err := os.WriteFile(license, []byte("pack terms"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := runPack([]string{"-corpus", dir, "-out", outDir, "-commercial", "-license", license}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("non-empty output directory must be rejected")
+	}
+	got, readErr := os.ReadFile(marker)
+	if readErr != nil || string(got) != "keep me" {
+		t.Fatalf("rejected pack changed existing output: %q, %v", got, readErr)
+	}
+}
+
+func TestRunPackRejectsSymlinkCorpusAndOutputPaths(t *testing.T) {
+	realCorpus := tempCorpus(t)
+	writeFixture(t, realCorpus, packFixture("0101", "validated", record.SourceLicenseProjectAuthored, ""))
+	corpusLink := filepath.Join(t.TempDir(), "corpus-link")
+	if err := os.Symlink(realCorpus, corpusLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := runPack([]string{"-corpus", corpusLink, "-out", filepath.Join(t.TempDir(), "pack")}, &bytes.Buffer{}); err == nil {
+		t.Fatal("symlink corpus path must be rejected")
+	}
+	realOut := t.TempDir()
+	outLink := filepath.Join(t.TempDir(), "pack-link")
+	if err := os.Symlink(realOut, outLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := runPack([]string{"-corpus", realCorpus, "-out", outLink}, &bytes.Buffer{}); err == nil {
+		t.Fatal("symlink output path must be rejected")
+	}
+	outside := t.TempDir()
+	linkedParent := filepath.Join(t.TempDir(), "linked-parent")
+	if err := os.Symlink(outside, linkedParent); err != nil {
+		t.Fatal(err)
+	}
+	if err := runPack([]string{"-corpus", realCorpus, "-out", filepath.Join(linkedParent, "pack")}, &bytes.Buffer{}); err == nil {
+		t.Fatal("symlink in an output parent component must be rejected")
 	}
 }
 
