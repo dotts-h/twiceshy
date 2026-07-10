@@ -36,6 +36,17 @@ The architecture behind these terms is locked in
 
 ## Identity & matching
 
+- **Organization** — an administrative identity that owns one or more private
+  workspaces. It is metadata, not an authorization boundary by itself.
+- **Workspace** — an organization-scoped identity associated with tenant
+  tokens. Private corpus isolation is deliberately downstream; this foundation
+  records identity without claiming isolation that does not yet exist.
+- **Plan** — one of `community`, `pro`, `team`, or `enterprise`; a named bundle
+  of entitlements, never payment state.
+- **Entitlements** — the capabilities and quota policy attached to a plan.
+  Entitlements are internal authorization inputs; billing providers and prices
+  are outside this vocabulary.
+
 - **Fingerprint** — a deterministic `sha256:` hash over a *normalized* error
   signature (Sentry-style). Every record carries up to two:
   - **app fingerprint** — repo-specific (in-app frames / project identifiers
