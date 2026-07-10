@@ -12,6 +12,9 @@
 package pack
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -29,8 +32,24 @@ var reCCBYAttribution = regexp.MustCompile(`^cc-by(-[0-9][0-9.]*)?$`)
 type Eligibility struct {
 	Commercial       bool   // may ship in a commercial pack
 	NeedsAttribution bool   // if included, the pack must carry attribution
+	Code             string // stable machine-readable reason bucket
 	Reason           string // why — especially why a record is excluded
 }
+
+// Stable eligibility reason codes. Audit/report consumers key on these rather
+// than parsing human prose.
+const (
+	ReasonMissingEvidence     = "missing_evidence"
+	ReasonFactsOnly           = "facts_only"
+	ReasonProjectAuthored     = "project_authored"
+	ReasonAuthoredInternal    = "authored_internal"
+	ReasonLicensedNotice      = "licensed_notice"
+	ReasonCCBYNotice          = "cc_by_notice"
+	ReasonRestrictedCC        = "restricted_cc"
+	ReasonCopyleft            = "copyleft"
+	ReasonUnrecognizedLicense = "unrecognized_license"
+	ReasonMissingSourceURL    = "missing_source_url"
+)
 
 // permissiveLicenses impose no copyleft. A record carrying one of these IDs is
 // treated as copied licensed material, so the pack still emits a source/license
@@ -59,39 +78,56 @@ func Classify(sourceLicense string) Eligibility {
 	s := strings.TrimSpace(sourceLicense)
 	switch s {
 	case "":
-		return Eligibility{Reason: "missing explicit rights evidence — excluded fail-closed"}
+		return Eligibility{Code: ReasonMissingEvidence, Reason: "missing explicit rights evidence — excluded fail-closed"}
 	case record.SourceLicenseFactsOnly:
-		return Eligibility{Commercial: true, Reason: "distilled facts only — no license obligation"}
+		return Eligibility{Commercial: true, Code: ReasonFactsOnly, Reason: "distilled facts only — no license obligation"}
 	case record.SourceLicenseProjectAuthored:
-		return Eligibility{Commercial: true, Reason: "explicitly project-authored"}
+		return Eligibility{Commercial: true, Code: ReasonProjectAuthored, Reason: "explicitly project-authored"}
 	case record.SourceLicenseAuthoredInternal:
 		// ADR-0011 §5: the fact was re-derived from a public-awareness topic for the
 		// INTERNAL corpus only; the commercial pack stays gated on a real legal
 		// review. Fail-closed — these never ship in a commercial pack until then.
-		return Eligibility{Reason: "§5-authored, internal-only — pending commercial legal review (ADR-0011 §5)"}
+		return Eligibility{Code: ReasonAuthoredInternal, Reason: "§5-authored, internal-only — pending commercial legal review (ADR-0011 §5)"}
 	}
 
 	low := strings.ToLower(s)
 	if permissiveLicenses[low] {
-		return Eligibility{Commercial: true, NeedsAttribution: true, Reason: "permissive license (" + s + ") — source/license notice required"}
+		return Eligibility{Commercial: true, NeedsAttribution: true, Code: ReasonLicensedNotice, Reason: "permissive license (" + s + ") — source/license notice required"}
 	}
 	// Attribution-only CC-BY (no -SA/-NC/-ND modifier) is the one commercial-safe
 	// CC variant; matched precisely so a modifier can never slip through.
 	if reCCBYAttribution.MatchString(low) {
-		return Eligibility{Commercial: true, NeedsAttribution: true, Reason: "CC-BY (" + s + ") — attribution required"}
+		return Eligibility{Commercial: true, NeedsAttribution: true, Code: ReasonCCBYNotice, Reason: "CC-BY (" + s + ") — attribution required"}
 	}
 	// Every other Creative Commons variant bars a commercial pack: -SA
 	// (share-alike), -NC (noncommercial), -ND (no-derivatives), or an unknown CC
 	// modifier. Fail-closed.
 	if strings.HasPrefix(low, "cc-") {
-		return Eligibility{Reason: "restricted Creative Commons variant (" + s + ") — not commercial-safe"}
+		return Eligibility{Code: ReasonRestrictedCC, Reason: "restricted Creative Commons variant (" + s + ") — not commercial-safe"}
 	}
 	for _, p := range copyleftPrefixes {
 		if strings.HasPrefix(low, p) {
-			return Eligibility{Reason: "copyleft (" + s + ")"}
+			return Eligibility{Code: ReasonCopyleft, Reason: "copyleft (" + s + ")"}
 		}
 	}
-	return Eligibility{Reason: "unrecognized license (" + s + ") — excluded fail-closed"}
+	return Eligibility{Code: ReasonUnrecognizedLicense, Reason: "unrecognized license (" + s + ") — excluded fail-closed"}
+}
+
+// ClassifyRecord applies the complete commercial-pack rule to one record. A
+// source license that carries a notice/attribution requirement is not enough by
+// itself: the immutable source location needed to render that notice must also
+// be present.
+func ClassifyRecord(rec *record.Record) Eligibility {
+	if rec == nil {
+		return Eligibility{Code: ReasonMissingEvidence, Reason: "nil record — excluded fail-closed"}
+	}
+	e := Classify(rec.Provenance.SourceLicense)
+	if e.Commercial && e.NeedsAttribution && strings.TrimSpace(rec.Provenance.SourceURL) == "" {
+		e.Commercial = false
+		e.Code = ReasonMissingSourceURL
+		e.Reason = "source URL required for license/attribution notice"
+	}
+	return e
 }
 
 // AttributionEntry records a source/license notice a pack must carry. For some
@@ -130,13 +166,9 @@ func BuildManifest(recs []*record.Record, commercial, includeQuarantined bool) M
 			m.Excluded = append(m.Excluded, Excluded{ID: r.ID, Reason: "not validated (status " + r.Status + ")"})
 			continue
 		}
-		e := Classify(r.Provenance.SourceLicense)
+		e := ClassifyRecord(r)
 		if commercial && !e.Commercial {
 			m.Excluded = append(m.Excluded, Excluded{ID: r.ID, Reason: e.Reason})
-			continue
-		}
-		if commercial && e.NeedsAttribution && strings.TrimSpace(r.Provenance.SourceURL) == "" {
-			m.Excluded = append(m.Excluded, Excluded{ID: r.ID, Reason: "source URL required for license/attribution notice"})
 			continue
 		}
 		m.Included = append(m.Included, r.ID)
@@ -152,4 +184,38 @@ func BuildManifest(recs []*record.Record, commercial, includeQuarantined bool) M
 	sort.Slice(m.Excluded, func(i, j int) bool { return m.Excluded[i].ID < m.Excluded[j].ID })
 	sort.Slice(m.Attribution, func(i, j int) bool { return m.Attribution[i].ID < m.Attribution[j].ID })
 	return m
+}
+
+// NoticeDocument renders the canonical source/license notice artifact for a
+// manifest. Keeping this beside BuildManifest lets pre-ship validation compare
+// the exact artifact without duplicating rendering policy at the CLI edge.
+func NoticeDocument(m Manifest) []byte {
+	var b strings.Builder
+	b.WriteString("# Source and License Notices\n\n")
+	if len(m.Attribution) == 0 {
+		b.WriteString("No records in this pack require a source/license notice entry.\n")
+		return []byte(b.String())
+	}
+	b.WriteString("This pack includes records from the following licensed sources. Preserve the applicable attribution, copyright, license, and NOTICE terms identified by each source and license:\n\n")
+	for _, a := range m.Attribution {
+		_, _ = fmt.Fprintf(&b, "- `%s` — %s — %s\n", a.ID, a.SourceLicense, a.SourceURL)
+	}
+	return []byte(b.String())
+}
+
+// ValidateCommercialArtifacts verifies that a built commercial MANIFEST.json
+// and notice document exactly match the current corpus and pack policy. It is
+// deterministic and returns every drift finding in a stable order.
+func ValidateCommercialArtifacts(recs []*record.Record, got Manifest, notices []byte) []string {
+	want := BuildManifest(recs, true, false)
+	var errs []string
+	gotJSON, gotErr := json.Marshal(got)
+	wantJSON, wantErr := json.Marshal(want)
+	if gotErr != nil || wantErr != nil || !bytes.Equal(gotJSON, wantJSON) {
+		errs = append(errs, "MANIFEST.json does not match the current commercial pack selection and notice ledger")
+	}
+	if !bytes.Equal(notices, NoticeDocument(want)) {
+		errs = append(errs, "source/license notice document does not match the current commercial manifest")
+	}
+	return errs
 }

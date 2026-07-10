@@ -199,7 +199,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|learned|draft|promote|repromote|adapt|intake-reports|intake-records|intake-issues|retro-intake|screen|report|pack|doctor|eval|corpus-quality|pilot-report|usage-flush|gold-add|judge-eval|prospect|corpus-merge-check|corpus-pr-paths|nextid|token> [flags]")
+		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|learned|draft|promote|repromote|adapt|intake-reports|intake-records|intake-issues|retro-intake|screen|report|pack|doctor|eval|corpus-quality|pilot-report|rights-audit|usage-flush|gold-add|judge-eval|prospect|corpus-merge-check|corpus-pr-paths|nextid|token> [flags]")
 	}
 	switch args[0] {
 	case "index":
@@ -242,6 +242,8 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runCorpusQuality(args[1:], out)
 	case "pilot-report":
 		return runPilotReport(args[1:], out)
+	case "rights-audit":
+		return runRightsAudit(args[1:], out)
 	case "usage-flush":
 		return runUsageFlush(ctx, args[1:], out)
 	case "gold-add":
@@ -267,7 +269,7 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	case "token":
 		return runToken(ctx, args[1:], out, getenv)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, learned, draft, promote, repromote, adapt, intake-reports, intake-records, intake-issues, retro-intake, screen, report, pack, doctor, eval, corpus-quality, pilot-report, usage-flush, gold-add, judge-eval, prospect, self-audit, similarity, author, corpus-merge-check, corpus-pr-paths, nextid, token, or idf-build)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, learned, draft, promote, repromote, adapt, intake-reports, intake-records, intake-issues, retro-intake, screen, report, pack, doctor, eval, corpus-quality, pilot-report, rights-audit, usage-flush, gold-add, judge-eval, prospect, self-audit, similarity, author, corpus-merge-check, corpus-pr-paths, nextid, token, or idf-build)", args[0])
 	}
 }
 
@@ -1562,7 +1564,7 @@ func runPack(args []string, out io.Writer) error {
 	if err := os.WriteFile(filepath.Join(*outDir, "MANIFEST.json"), append(mj, '\n'), 0o644); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(*outDir, "ATTRIBUTION.md"), attributionDoc(m), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(*outDir, "ATTRIBUTION.md"), pack.NoticeDocument(m), 0o644); err != nil {
 		return err
 	}
 
@@ -1573,21 +1575,6 @@ func runPack(args []string, out io.Writer) error {
 	_, _ = fmt.Fprintf(out, "pack (%s): included %d, excluded %d, source/license notices %d -> %s\n",
 		kind, len(m.Included), len(m.Excluded), len(m.Attribution), *outDir)
 	return nil
-}
-
-// attributionDoc renders the pack's ATTRIBUTION.md from its manifest.
-func attributionDoc(m pack.Manifest) []byte {
-	var b strings.Builder
-	b.WriteString("# Source and License Notices\n\n")
-	if len(m.Attribution) == 0 {
-		b.WriteString("No records in this pack require a source/license notice entry.\n")
-		return []byte(b.String())
-	}
-	b.WriteString("This pack includes records from the following licensed sources. Preserve the applicable attribution, copyright, license, and NOTICE terms identified by each source and license:\n\n")
-	for _, a := range m.Attribution {
-		_, _ = fmt.Fprintf(&b, "- `%s` — %s — %s\n", a.ID, a.SourceLicense, a.SourceURL)
-	}
-	return []byte(b.String())
 }
 
 // runDoctor runs a store-hygiene doctor over the corpus and prints its proposed

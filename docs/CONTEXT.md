@@ -33,6 +33,11 @@ The architecture behind these terms is locked in
   separately from the AGPL code (see
   [ADR-0002](adr/ADR-0002-licensing-strategy.md)). The corpus is the moat,
   not the server.
+- **Rights audit** — a deterministic, read-only classification of every
+  record's explicit commercial-pack evidence through the same rules as the
+  pack builder. It produces reason buckets and a human-review remediation
+  queue; it never guesses ownership or edits records. Workflow:
+  [RIGHTS_AUDIT.md](RIGHTS_AUDIT.md).
 
 ## Identity & matching
 

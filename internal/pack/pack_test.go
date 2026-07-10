@@ -58,7 +58,47 @@ func TestClassify(t *testing.T) {
 			if e.Reason == "" {
 				t.Errorf("Classify(%q): empty reason", tt.license)
 			}
+			if e.Code == "" {
+				t.Errorf("Classify(%q): empty reason code", tt.license)
+			}
 		})
+	}
+}
+
+func TestClassifyReasonCodesAreStableAndRecordAware(t *testing.T) {
+	if got := pack.Classify("").Code; got != pack.ReasonMissingEvidence {
+		t.Fatalf("empty license code = %q, want %q", got, pack.ReasonMissingEvidence)
+	}
+	licensed := rec("exp-0001", "validated", "MIT", "")
+	got := pack.ClassifyRecord(licensed)
+	if got.Commercial || got.Code != pack.ReasonMissingSourceURL {
+		t.Fatalf("licensed record without source URL = %+v", got)
+	}
+	licensed.Provenance.SourceURL = "https://example.test/upstream/commit/abc"
+	got = pack.ClassifyRecord(licensed)
+	if !got.Commercial || got.Code != pack.ReasonLicensedNotice {
+		t.Fatalf("licensed record with notice evidence = %+v", got)
+	}
+}
+
+func TestValidateCommercialArtifactsDetectsManifestAndNoticeDrift(t *testing.T) {
+	recs := []*record.Record{
+		rec("exp-0001", "validated", "MIT", "https://example.test/upstream/commit/abc"),
+		rec("exp-0002", "validated", record.SourceLicenseProjectAuthored, ""),
+	}
+	want := pack.BuildManifest(recs, true, false)
+	notices := pack.NoticeDocument(want)
+	if errs := pack.ValidateCommercialArtifacts(recs, want, notices); len(errs) != 0 {
+		t.Fatalf("canonical artifacts rejected: %v", errs)
+	}
+
+	badManifest := want
+	badManifest.Attribution = nil
+	if errs := pack.ValidateCommercialArtifacts(recs, badManifest, notices); len(errs) == 0 {
+		t.Fatal("missing manifest notice entry must be rejected")
+	}
+	if errs := pack.ValidateCommercialArtifacts(recs, want, []byte("# incomplete\n")); len(errs) == 0 {
+		t.Fatal("incomplete notice document must be rejected")
 	}
 }
 
