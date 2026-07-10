@@ -29,11 +29,13 @@ func NextID(ctx context.Context, ix *index.Index, corpusRoot string) (string, er
 	return NextIDWithBase(ctx, ix, corpusRoot, "")
 }
 
-// NextIDWithBase is NextID plus a merge-safe base-ref high-water mark. It
-// returns one past the maximum id visible in the index, the local corpus tree,
-// and baseRef (when non-empty), so a branch with stale local files cannot
-// allocate an id already present on the target branch.
-func NextIDWithBase(ctx context.Context, ix *index.Index, corpusRoot, baseRef string) (string, error) {
+// NextIDWithBase is NextID plus a merge-safe base-ref high-water mark and
+// external floors. It returns one past the maximum id visible in the index,
+// the local corpus tree, baseRef (when non-empty), and is strictly above
+// every floor (intended floor source is the open-PR scan, #0121).
+// So a branch with stale local files or parallel drafts cannot allocate an id
+// already present elsewhere.
+func NextIDWithBase(ctx context.Context, ix *index.Index, corpusRoot, baseRef string, floors ...int) (string, error) {
 	idxNext, err := ix.NextID(ctx)
 	if err != nil {
 		return "", err
@@ -58,6 +60,11 @@ func NextIDWithBase(ctx context.Context, ix *index.Index, corpusRoot, baseRef st
 			if baseMax+1 > n {
 				n = baseMax + 1
 			}
+		}
+	}
+	for _, floor := range floors {
+		if floor+1 > n {
+			n = floor + 1
 		}
 	}
 	return record.FormatID(n), nil

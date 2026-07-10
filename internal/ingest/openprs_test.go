@@ -62,6 +62,20 @@ func TestOpenPRMaxID(t *testing.T) {
 		}
 	})
 
+	t.Run("pagination that never terminates fails loud instead of spinning", func(t *testing.T) {
+		// A server that ignores the page param serves the same nonempty page
+		// forever; an unbounded loop here wedges a scheduled drain until the
+		// systemd kill (the judge-hang freeze class).
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, []map[string]any{{"number": 7}})
+		}))
+		defer srv.Close()
+
+		if _, err := ingest.OpenPRMaxID(ctx, srv.Client(), srv.URL+apiRepoPath, ""); err == nil {
+			t.Fatal("want an error when pagination never terminates, got nil")
+		}
+	})
+
 	t.Run("API failure is an error, not a silent zero", func(t *testing.T) {
 		// Degrading silently would recreate the invisible collision the
 		// caller asked to be protected from — fail loud instead.

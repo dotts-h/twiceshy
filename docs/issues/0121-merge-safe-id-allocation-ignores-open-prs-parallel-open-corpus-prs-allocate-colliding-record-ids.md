@@ -49,3 +49,22 @@ sharing identical ranges (#69/#71 both 3197–3221; four PRs each at 3404+, 3481
 
 The 0105 drain worked around it once (consolidated PR #132 re-numbered 549 records above
 main max); the workaround does not scale to routine operation.
+
+## Fix (2026-07-10, direction (a))
+
+The allocator now takes one more high-water mark: `ingest.OpenPRMaxID` scans every
+OPEN PR's changed files via the Forgejo API (empty-page pagination — a short page
+is not the last page when the server caps `limit`) and `NextIDWithBase` accepts
+variadic floors, allocating strictly above `max(index, tree, base, open PRs)`.
+`ForgejoAPIFromOrigin` derives the API root + token from the corpus clone's
+token-embedded origin via `net/url` (the #0149 sed-parse class, done right), with
+`TWICESHY_FORGEJO_API`/`TWICESHY_FORGEJO_TOKEN` overrides. Wired as `-open-prs`
+on `ingest`/`retro-intake`/`intake-records`/`intake-reports` and enabled in the
+three scheduled scripts' `BASE_ARGS`. The scan FAILS LOUD on API errors — silent
+degradation would recreate the invisible collision.
+
+Residual (accepted): two allocators racing in the same seconds-window can still
+collide (neither sees the other's not-yet-opened PR) — that is TECH_DEBT M3 /
+direction (b) central reservation, deliberately not built here (smallest first).
+Guards: `internal/ingest` `TestOpenPRMaxID`, `TestForgejoAPIFromOrigin`,
+`TestNextIDWithBase_FloorWins`.

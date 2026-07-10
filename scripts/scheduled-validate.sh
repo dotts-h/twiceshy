@@ -103,7 +103,7 @@ git reset --hard origin/main -q
 git fetch origin main -q || true
 BASE_ARGS=()
 if git rev-parse --verify -q origin/main >/dev/null; then
-	BASE_ARGS=(-base origin/main)
+	BASE_ARGS=(-base origin/main -open-prs)
 fi
 # Sweep untracked stragglers from a prior crashed run (a missing pathspec is a
 # no-op, not an error) so the next batch never commits a stale manifest/record.

@@ -29,6 +29,7 @@ func runIntakeRecords(args []string, out io.Writer) error {
 	corpus := fs.String("corpus", ".", "corpus root (the directory containing experience/)")
 	queue := fs.String("queue", "", "record queue directory written by `serve -record-queue` (required)")
 	base := fs.String("base", "", "base git ref for merge-safe id allocation")
+	openPRs := fs.Bool("open-prs", false, "also allocate ids above records on open corpus PRs (Forgejo API, #0121)")
 	repo := fs.String("repo", "", "corpus repository identifier for app-scoped fingerprints")
 	if err := parseFlags(fs, args); err != nil {
 		return err
@@ -68,7 +69,11 @@ func runIntakeRecords(args []string, out io.Writer) error {
 		return fmt.Errorf("building index: %w", err)
 	}
 
-	id, err := ingest.NextIDWithBase(context.Background(), ix, *corpus, *base)
+	floors, err := openPRFloors(context.Background(), *corpus, *openPRs)
+	if err != nil {
+		return fmt.Errorf("getting open PR floors: %w", err)
+	}
+	id, err := ingest.NextIDWithBase(context.Background(), ix, *corpus, *base, floors...)
 	if err != nil {
 		return fmt.Errorf("allocating next id: %w", err)
 	}

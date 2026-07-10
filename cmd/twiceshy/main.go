@@ -603,6 +603,7 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 	author := fs.String("author", "twiceshy-importer", "provenance author recorded on imported records")
 	ecosystem := fs.String("ecosystem", "", "OSV ecosystem for osv-live (e.g. npm, PyPI, Go); empty = Go")
 	base := fs.String("base", "", "base git ref for merge-safe id allocation")
+	openPRs := fs.Bool("open-prs", false, "also allocate ids above records on open corpus PRs (Forgejo API, #0121)")
 	if err := parseFlags(fs, args[1:]); err != nil {
 		return err
 	}
@@ -622,7 +623,11 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 
-	id, err := ingest.NextIDWithBase(ctx, ix, c.corpus, *base)
+	floors, err := openPRFloors(ctx, c.corpus, *openPRs)
+	if err != nil {
+		return err
+	}
+	id, err := ingest.NextIDWithBase(ctx, ix, c.corpus, *base, floors...)
 	if err != nil {
 		return err
 	}
@@ -1321,7 +1326,7 @@ func reportEvidence(report *record.Record) string {
 	return report.Body
 }
 
-func nextIDForCorpus(ctx context.Context, corpus, base string) (string, error) {
+func nextIDForCorpus(ctx context.Context, corpus, base string, floors ...int) (string, error) {
 	tmp, err := os.CreateTemp("", "twiceshy-nextid-*.db")
 	if err != nil {
 		return "", err
@@ -1334,7 +1339,23 @@ func nextIDForCorpus(ctx context.Context, corpus, base string) (string, error) {
 		return "", err
 	}
 	defer func() { _ = ix.Close() }()
-	return ingest.NextIDWithBase(ctx, ix, corpus, base)
+	return ingest.NextIDWithBase(ctx, ix, corpus, base, floors...)
+}
+
+func openPRFloors(ctx context.Context, corpusRoot string, openPRs bool) ([]int, error) {
+	if !openPRs {
+		return nil, nil
+	}
+	api, token, err := ingest.ForgejoAPIFromOrigin(ctx, corpusRoot)
+	if err != nil {
+		return nil, err
+	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	maxID, err := ingest.OpenPRMaxID(ctx, client, api, token)
+	if err != nil {
+		return nil, err
+	}
+	return []int{maxID}, nil
 }
 
 // runIntakeReports drains the report queue (ADR-0013 §E1, #0042): each queued
@@ -1349,6 +1370,7 @@ func runIntakeReports(args []string, out io.Writer) error {
 	corpus := fs.String("corpus", ".", "corpus root (the directory containing experience/)")
 	queue := fs.String("queue", "", "report queue directory written by `serve -report-queue` (required)")
 	base := fs.String("base", "", "base git ref for merge-safe id allocation")
+	openPRs := fs.Bool("open-prs", false, "also allocate ids above records on open corpus PRs (Forgejo API, #0121)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -1364,7 +1386,11 @@ func runIntakeReports(args []string, out io.Writer) error {
 		return fmt.Errorf("listing report queue: %w", err)
 	}
 
-	id, err := nextIDForCorpus(context.Background(), *corpus, *base)
+	floors, err := openPRFloors(context.Background(), *corpus, *openPRs)
+	if err != nil {
+		return fmt.Errorf("getting open PR floors: %w", err)
+	}
+	id, err := nextIDForCorpus(context.Background(), *corpus, *base, floors...)
 	if err != nil {
 		return fmt.Errorf("allocating next id: %w", err)
 	}
