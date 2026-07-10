@@ -310,6 +310,54 @@ func TestRunIngestBaseAllocatesPastBaseMax(t *testing.T) {
 	}
 }
 
+// -open-prs must thread the Forgejo open-PR scan into allocation end-to-end:
+// the stub's one open PR carries exp-3197, well above the local (2758) and
+// base (2768) high-water marks, so the batch must start at exp-3198.
+func TestRunIngestOpenPRsAllocatesPastOpenPRMax(t *testing.T) {
+	dir, base := corpusWithLocal2758AndBase2768(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "token stubtok" {
+			t.Errorf("request %s lacks the origin-derived token: Authorization = %q", r.URL, got)
+		}
+		page := r.URL.Query().Get("page")
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/pulls") && page == "1":
+			_, _ = w.Write([]byte(`[{"number":5}]`))
+		case strings.HasSuffix(r.URL.Path, "/pulls/5/files") && page == "1":
+			_, _ = w.Write([]byte(`[{"filename":"experience/2026/3197-open-pr-draft.md"}]`))
+		default:
+			_, _ = w.Write([]byte(`[]`))
+		}
+	}))
+	defer srv.Close()
+
+	origin := strings.Replace(srv.URL, "http://", "http://claude:stubtok@", 1) + "/claude/twiceshy-corpus.git"
+	gitCmd(t, dir, "remote", "add", "origin", origin)
+
+	var out bytes.Buffer
+	err := run(context.Background(), []string{"ingest", "go", "-corpus", dir,
+		"-db", filepath.Join(t.TempDir(), "ix.db"), "-base", base, "-open-prs", "-limit", "1"}, &out, noEnv)
+	if err != nil {
+		t.Fatalf("ingest go -open-prs: %v", err)
+	}
+	if !strings.Contains(out.String(), "created exp-3198") {
+		t.Fatalf("ingest with -open-prs must allocate past the open-PR max; output:\n%s", out.String())
+	}
+}
+
+// A dry run writes nothing, so -open-prs must not touch the network: the
+// corpus here has no git origin at all, and an attempted scan would error.
+func TestRunIngestDryRunSkipsOpenPRScan(t *testing.T) {
+	dir := tempCorpus(t)
+	var out bytes.Buffer
+	err := run(context.Background(), []string{"ingest", "go", "-corpus", dir,
+		"-db", filepath.Join(t.TempDir(), "ix.db"), "-open-prs", "-dry-run"}, &out, noEnv)
+	if err != nil {
+		t.Fatalf("dry-run with -open-prs must skip the scan, got: %v", err)
+	}
+}
+
 func TestRunIngestDryRunWritesNothing(t *testing.T) {
 	dir := tempCorpus(t)
 	var out bytes.Buffer

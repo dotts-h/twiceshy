@@ -93,6 +93,7 @@ func runRetroIntake(ctx context.Context, args []string, out io.Writer, getenv fu
 		now:     time.Now().UTC().Format("2006-01-02"),
 		base:    *base,
 		openPRs: *openPRs,
+		getenv:  getenv,
 	}, join, alerter, out)
 }
 
@@ -132,6 +133,7 @@ type retroOpts struct {
 	now     string // YYYY-MM-DD stamped on created records
 	base    string // optional base ref for merge-safe id allocation
 	openPRs bool   // also allocate ids above records on open corpus PRs
+	getenv  func(string) string
 }
 
 const (
@@ -157,7 +159,9 @@ func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, r
 		return fmt.Errorf("listing retro queue: %w", err)
 	}
 
-	floors, err := openPRFloors(ctx, corpus, opts.openPRs)
+	// A dry run writes nothing and an empty queue drains nothing — neither
+	// may acquire a network dependency for an id it never uses.
+	floors, err := openPRFloors(ctx, corpus, opts.openPRs && !opts.dryRun && len(files) > 0, opts.getenv)
 	if err != nil {
 		return fmt.Errorf("getting open PR floors: %w", err)
 	}

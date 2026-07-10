@@ -63,8 +63,24 @@ on `ingest`/`retro-intake`/`intake-records`/`intake-reports` and enabled in the
 three scheduled scripts' `BASE_ARGS`. The scan FAILS LOUD on API errors — silent
 degradation would recreate the invisible collision.
 
-Residual (accepted): two allocators racing in the same seconds-window can still
-collide (neither sees the other's not-yet-opened PR) — that is TECH_DEBT M3 /
-direction (b) central reservation, deliberately not built here (smallest first).
+Review hardening (same branch): env overrides are resolved FIRST
+(`TWICESHY_FORGEJO_API`/`REPO`/`TOKEN`), so the error guidance is a real escape
+hatch for ssh/absent origins; `nextid` and `learned` — the two allocation paths
+the first cut missed, `learned` being a WRITE path — take the same floors; dry
+runs and empty queues skip the scan (no network dependency for an id never
+used); redirects surface as 3xx instead of a stripped-auth 401; an ops test
+pins `-open-prs` to `-base` in the scheduled scripts so the pairing cannot
+drift silently.
+
+Residuals (accepted): two allocators racing in the same seconds-window can
+still collide (neither sees the other's not-yet-opened PR) — TECH_DEBT M3 /
+direction (b) central reservation, deliberately not built here (smallest
+first). Each `-open-prs` invocation rescans (per-ecosystem import loop ×3,
+validate's two intakes) — deterministic within a run but not shared across
+processes; consolidate only if the LAN API cost ever matters. The shell
+scripts' own origin-parse copies (sync-forgejo, stall-alarm, drain-merge)
+remain unconsolidated — #0149's territory, not this fix's.
 Guards: `internal/ingest` `TestOpenPRMaxID`, `TestForgejoAPIFromOrigin`,
-`TestNextIDWithBase_FloorWins`.
+`TestNextIDWithBase_FloorWins`; `cmd/twiceshy`
+`TestRunIngestOpenPRsAllocatesPastOpenPRMax`, `TestRunIngestDryRunSkipsOpenPRScan`;
+`internal/ops` `TestScheduledScriptsPairBaseWithOpenPRs`.

@@ -28,9 +28,11 @@ func (s *stringList) Set(v string) error {
 
 // runLearned captures one agent-authored lesson into the local corpus via the
 // existing ingest.Prepare pipeline (#0094).
-func runLearned(ctx context.Context, args []string, out io.Writer, _ func(string) string) error {
+func runLearned(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	fs := flag.NewFlagSet("learned", flag.ContinueOnError)
 	c := addCommonFlags(fs)
+	base := fs.String("base", "", "base git ref for merge-safe id allocation")
+	openPRs := fs.Bool("open-prs", false, "also allocate ids above records on open corpus PRs (Forgejo API, #0121)")
 	kind := fs.String("kind", "trap", "record kind (trap|fix|dead-end|convention|workflow)")
 	title := fs.String("title", "", "record title (required)")
 	summary := fs.String("summary", "", "symptom summary")
@@ -60,7 +62,14 @@ func runLearned(ctx context.Context, args []string, out io.Writer, _ func(string
 	}
 	defer func() { _ = ix.Close() }()
 
-	id, err := ingest.NextID(ctx, ix, c.corpus)
+	// learned writes a record straight to disk for the caller to PR, so it
+	// takes the same merge-safe high-water sources (-base, -open-prs) as the
+	// batch intakes — a bare NextID here reopens the #0121 collision.
+	floors, err := openPRFloors(ctx, c.corpus, *openPRs, getenv)
+	if err != nil {
+		return fmt.Errorf("getting open PR floors: %w", err)
+	}
+	id, err := ingest.NextIDWithBase(ctx, ix, c.corpus, *base, floors...)
 	if err != nil {
 		return err
 	}

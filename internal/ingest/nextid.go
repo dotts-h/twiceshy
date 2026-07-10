@@ -85,19 +85,28 @@ func maxIDAtRef(ctx context.Context, repo, ref string) (int, error) {
 	}
 	max := 0
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		path := filepath.ToSlash(strings.TrimSpace(line))
-		if path == "" {
-			continue
-		}
-		id := filepath.Base(path)
-		dash := strings.IndexByte(id, '-')
-		if dash < 0 {
-			continue
-		}
-		n, ok := record.Num("exp-" + id[:dash])
-		if ok && n > max {
+		if n, ok := recordIDFromPath(strings.TrimSpace(line)); ok && n > max {
 			max = n
 		}
 	}
 	return max, nil
+}
+
+// recordIDFromPath parses the record number from an experience-tree path
+// (experience/…/NNNN-slug.md). Shared by every allocation high-water source
+// (base-ref scan, open-PR scan) so the parses cannot drift. Deliberately
+// looser than record.MaxID's canonical grammar: on the allocation path an
+// over-match can only RAISE the floor — ids are skipped, never collided — and
+// an open PR may carry not-yet-reviewed shapes the strict grammar would miss.
+func recordIDFromPath(path string) (int, bool) {
+	p := filepath.ToSlash(path)
+	if !strings.HasPrefix(p, "experience/") {
+		return 0, false
+	}
+	base := filepath.Base(p)
+	dash := strings.IndexByte(base, '-')
+	if dash < 0 {
+		return 0, false
+	}
+	return record.Num("exp-" + base[:dash])
 }

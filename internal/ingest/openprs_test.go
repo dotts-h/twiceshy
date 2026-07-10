@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -90,15 +91,21 @@ func TestOpenPRMaxID(t *testing.T) {
 	})
 }
 
-// ForgejoAPIFromOrigin derives the repo API root and token from the corpus
-// clone's token-embedded http(s) origin (the deployment convention), replacing
-// the per-script sed parse that broke on userinfo URLs (#0149).
+// ForgejoAPIFromOrigin resolves env overrides FIRST and derives only the
+// missing pieces from the corpus clone's token-embedded http(s) origin (the
+// deployment convention), replacing the per-script sed parse that broke on
+// userinfo URLs (#0149). getenv is injected, so no subtest depends on the
+// ambient process environment.
 func TestForgejoAPIFromOrigin(t *testing.T) {
 	ctx := context.Background()
+	env := func(vars map[string]string) func(string) string {
+		return func(key string) string { return vars[key] }
+	}
+	noEnv := env(nil)
 
 	t.Run("derives api root and token from a token-embedded origin", func(t *testing.T) {
 		repo := originRepo(t, "http://claude:s3cret@192.0.2.10:3030/claude/twiceshy-corpus.git")
-		api, tok, err := ingest.ForgejoAPIFromOrigin(ctx, repo)
+		api, tok, err := ingest.ForgejoAPIFromOrigin(ctx, repo, noEnv)
 		if err != nil {
 			t.Fatalf("ForgejoAPIFromOrigin: %v", err)
 		}
@@ -110,11 +117,12 @@ func TestForgejoAPIFromOrigin(t *testing.T) {
 		}
 	})
 
-	t.Run("env overrides win", func(t *testing.T) {
+	t.Run("env overrides win over derived values", func(t *testing.T) {
 		repo := originRepo(t, "http://claude:s3cret@192.0.2.10:3030/claude/twiceshy-corpus.git")
-		t.Setenv("TWICESHY_FORGEJO_API", "http://proxy.internal:9/api/v1")
-		t.Setenv("TWICESHY_FORGEJO_TOKEN", "envtok")
-		api, tok, err := ingest.ForgejoAPIFromOrigin(ctx, repo)
+		api, tok, err := ingest.ForgejoAPIFromOrigin(ctx, repo, env(map[string]string{
+			"TWICESHY_FORGEJO_API":   "http://proxy.internal:9/api/v1",
+			"TWICESHY_FORGEJO_TOKEN": "envtok",
+		}))
 		if err != nil {
 			t.Fatalf("ForgejoAPIFromOrigin: %v", err)
 		}
@@ -126,18 +134,53 @@ func TestForgejoAPIFromOrigin(t *testing.T) {
 		}
 	})
 
-	t.Run("non-http origin errors without echoing the token", func(t *testing.T) {
+	t.Run("full env set is a real escape hatch: an ssh origin still works", func(t *testing.T) {
+		// The error guidance names these vars; env-first resolution is what
+		// makes that guidance true for clones whose origin cannot be parsed.
 		repo := originRepo(t, "ssh://git@192.0.2.10/claude/twiceshy-corpus.git")
-		if _, _, err := ingest.ForgejoAPIFromOrigin(ctx, repo); err == nil {
+		api, tok, err := ingest.ForgejoAPIFromOrigin(ctx, repo, env(map[string]string{
+			"TWICESHY_FORGEJO_API":   "http://192.0.2.10:3030/api/v1",
+			"TWICESHY_FORGEJO_REPO":  "claude/twiceshy-corpus",
+			"TWICESHY_FORGEJO_TOKEN": "envtok",
+		}))
+		if err != nil {
+			t.Fatalf("ForgejoAPIFromOrigin with full env: %v", err)
+		}
+		if want := "http://192.0.2.10:3030/api/v1/repos/claude/twiceshy-corpus"; api != want {
+			t.Errorf("api = %q, want %q", api, want)
+		}
+		if tok != "envtok" {
+			t.Errorf("token = %q, want envtok", tok)
+		}
+	})
+
+	t.Run("non-http origin without env errors and names the overrides", func(t *testing.T) {
+		repo := originRepo(t, "ssh://git@192.0.2.10/claude/twiceshy-corpus.git")
+		_, _, err := ingest.ForgejoAPIFromOrigin(ctx, repo, noEnv)
+		if err == nil {
 			t.Fatal("want an error for a non-http origin, got nil")
+		}
+		if !strings.Contains(err.Error(), "TWICESHY_FORGEJO_REPO") {
+			t.Errorf("error %q should name the env escape hatch", err)
 		}
 	})
 
 	t.Run("origin with no owner/repo path errors without echoing the token", func(t *testing.T) {
 		repo := originRepo(t, "http://claude:s3cret@192.0.2.10:3030/")
-		_, _, err := ingest.ForgejoAPIFromOrigin(ctx, repo)
+		_, _, err := ingest.ForgejoAPIFromOrigin(ctx, repo, noEnv)
 		if err == nil {
 			t.Fatal("want an error for an origin without owner/repo, got nil")
+		}
+		if strings.Contains(err.Error(), "s3cret") {
+			t.Errorf("error %q leaks the origin-embedded token", err)
+		}
+	})
+
+	t.Run("sub-path origin errors instead of deriving a wrong owner/repo pair", func(t *testing.T) {
+		repo := originRepo(t, "http://claude:s3cret@192.0.2.10:3030/scm/claude/twiceshy-corpus.git")
+		_, _, err := ingest.ForgejoAPIFromOrigin(ctx, repo, noEnv)
+		if err == nil {
+			t.Fatal("want an error for a sub-path origin, got nil")
 		}
 		if strings.Contains(err.Error(), "s3cret") {
 			t.Errorf("error %q leaks the origin-embedded token", err)
@@ -157,14 +200,7 @@ func newForgejoStub(t *testing.T, token string, prFiles map[int][]string) *httpt
 	for n := range prFiles {
 		prs = append(prs, n)
 	}
-	// Deterministic order for paging.
-	for i := 0; i < len(prs); i++ {
-		for j := i + 1; j < len(prs); j++ {
-			if prs[j] < prs[i] {
-				prs[i], prs[j] = prs[j], prs[i]
-			}
-		}
-	}
+	sort.Ints(prs) // deterministic order for paging
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "token "+token {
 			t.Errorf("request %s lacks the token header: Authorization = %q", r.URL, got)
