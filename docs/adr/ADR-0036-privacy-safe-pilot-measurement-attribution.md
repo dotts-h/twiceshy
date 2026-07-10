@@ -19,10 +19,13 @@ privacy promise even if a report happens not to print it.
    fail the report. Overlapping archive inputs are identity-deduplicated.
 2. An exposure receives `exposure_id = first-16-bytes(SHA-256(NUL-joined(
    "twiceshy-exposure-v1", ts, channel, trigger, salted-session-hash,
-   salted-query-hash, record-id)))`, hex encoded. No raw input enters the identity.
+   salted-query-hash, record-id, identical-decision-occurrence)))`, hex encoded.
+   Occurrence is the zero-based position among bit-identical events after multiset
+   archive deduplication. No raw input enters the identity.
 3. Outcome schema v2 adds optional `exposure_id`; it is checked against session and
    record and the judgement inherits that exposure's time/arm. Schema-v1 rows without
-   the field remain readable by deterministic FIFO matching within session+record.
+   the field remain readable by deterministic FIFO matching within session+record;
+   all explicit v2 ids are reserved before any legacy row is assigned.
    An unmatched or duplicate outcome fails the report instead of disappearing.
 4. JSON and CSV expose the same rates. Every binomial rate carries a 95% Wilson
    interval. Record summaries contain only exposure/outcome denominators; query-level
@@ -34,6 +37,9 @@ privacy promise even if a report happens not to print it.
 
 - Operators must retain and name every telemetry generation needed by a 14–28 day
   window and repeat `-telemetry` for each file.
+- Overlapping snapshots are combined as a multiset union: for each identical event,
+  retain the maximum multiplicity present in any one file. This removes copied
+  overlap without erasing legitimate same-second repeats recorded within a file.
 - A report stops on incomplete or unsafe inputs, making gaps visible but requiring
   operators to repair or explicitly recollect them.
 - Old outcome files remain deterministic; new collectors should write exposure ids to

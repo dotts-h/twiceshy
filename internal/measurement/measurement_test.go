@@ -84,6 +84,33 @@ func TestOutcomeUsesExposureIdentityAndExposureArm(t *testing.T) {
 	}
 }
 
+func TestIdenticalDecisionExposuresAreUniqueAndMixedOutcomesReserveV2(t *testing.T) {
+	session := "0123456789abcdef0123456789abcdef"
+	hit := telemetry.ServedHit{ID: "exp-0001"}
+	base := telemetry.Decision{Time: "2026-07-01T01:00:00Z", Channel: "push", Trigger: "error", Session: session, QueryHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Served: []telemetry.ServedHit{hit}, Count: 1}
+	treat := base
+	treat.Time = "2026-07-08T01:00:00Z"
+	// Two bit-identical baseline decisions are legitimate separate events.
+	decisions := []telemetry.Decision{base, base, treat}
+	used, no := true, false
+	outcomes := []measurement.Outcome{
+		// Legacy sorts first but must not claim the exposure reserved below by v2.
+		{Time: "2026-07-09T01:00:00Z", Session: session, RecordID: "exp-0001", Used: &no},
+		{Time: "2026-07-10T01:00:00Z", ExposureID: measurement.ExposureID(base, hit, 0), Session: session, RecordID: "exp-0001", Used: &used, Confirmed: true},
+		{Time: "2026-07-11T01:00:00Z", ExposureID: measurement.ExposureID(base, hit, 1), Session: session, RecordID: "exp-0001", Used: &used},
+	}
+	rep, err := measurement.Generate(measurement.Config{Baseline: measurement.Window{Start: mustTime(t, "2026-07-01T00:00:00Z"), End: mustTime(t, "2026-07-02T00:00:00Z")}, Treatment: measurement.Window{Start: mustTime(t, "2026-07-08T00:00:00Z"), End: mustTime(t, "2026-07-09T00:00:00Z")}, Cohorts: map[string]string{session: "team-a"}}, decisions, outcomes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Baseline.Metrics.Exposures != 2 || rep.Baseline.Metrics.Judged != 2 || rep.Treatment.Metrics.Judged != 1 {
+		t.Fatalf("collision/reservation failure: baseline=%+v treatment=%+v", rep.Baseline.Metrics, rep.Treatment.Metrics)
+	}
+	if measurement.ExposureID(base, hit, 0) == measurement.ExposureID(base, hit, 1) {
+		t.Fatal("collision identities are not unique")
+	}
+}
+
 func mustTime(t *testing.T, value string) time.Time {
 	t.Helper()
 	v, err := time.Parse(time.RFC3339, value)

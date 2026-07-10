@@ -103,9 +103,13 @@ type exposure struct{ ID, Arm, Team, Session, RecordID, Time string }
 
 // ExposureID is the stable privacy-safe identity for one served record exposure.
 // It contains no raw query/session data; inputs are already salted telemetry fields.
-func ExposureID(d telemetry.Decision, hit telemetry.ServedHit) string {
+func ExposureID(d telemetry.Decision, hit telemetry.ServedHit, occurrence ...int) string {
+	ordinal := 0
+	if len(occurrence) > 0 {
+		ordinal = occurrence[0]
+	}
 	h := sha256.New()
-	for _, part := range []string{"twiceshy-exposure-v1", d.Time, d.Channel, d.Trigger, d.Session, d.QueryHash, hit.ID} {
+	for _, part := range []string{"twiceshy-exposure-v1", d.Time, d.Channel, d.Trigger, d.Session, d.QueryHash, hit.ID, fmt.Sprint(ordinal)} {
 		_, _ = h.Write([]byte(part))
 		_, _ = h.Write([]byte{0})
 	}
@@ -125,6 +129,7 @@ func Generate(cfg Config, decisions []telemetry.Decision, outcomes []Outcome) (R
 	teams := map[string]*bucket{}
 	records := map[string]*bucket{}
 	exposures := map[string]exposure{}
+	decisionOccurrences := map[string]int{}
 	teamOf := func(session string) string {
 		if t := cfg.Cohorts[session]; t != "" {
 			return t
@@ -141,6 +146,9 @@ func Generate(cfg Config, decisions []telemetry.Decision, outcomes []Outcome) (R
 			continue
 		}
 		team := teamOf(d.Session)
+		decisionKey := decisionIdentity(d)
+		occurrence := decisionOccurrences[decisionKey]
+		decisionOccurrences[decisionKey]++
 		keys := []string{arm + "\x00" + team}
 		bs := []*bucket{arms[arm], getBucket(teams, keys[0])}
 		for _, b := range bs {
@@ -151,7 +159,7 @@ func Generate(cfg Config, decisions []telemetry.Decision, outcomes []Outcome) (R
 				continue
 			}
 			key := arm + "\x00" + team + "\x00" + hit.ID
-			exposureID := ExposureID(d, hit)
+			exposureID := ExposureID(d, hit, occurrence)
 			if _, duplicate := exposures[exposureID]; duplicate {
 				continue
 			}
@@ -169,6 +177,7 @@ func Generate(cfg Config, decisions []telemetry.Decision, outcomes []Outcome) (R
 	// deterministically migrated FIFO within session+record, always inheriting the
 	// exposure's arm/time rather than the later judgement timestamp.
 	usedExposure := map[string]bool{}
+	reservedExposure := map[string]bool{}
 	legacy := map[string][]exposure{}
 	for _, e := range exposures {
 		key := e.Session + "\x00" + e.RecordID
@@ -182,17 +191,27 @@ func Generate(cfg Config, decisions []telemetry.Decision, outcomes []Outcome) (R
 			return legacy[key][i].ID < legacy[key][j].ID
 		})
 	}
+	for _, o := range outcomes {
+		if o.ExposureID == "" {
+			continue
+		}
+		e := exposures[o.ExposureID]
+		if e.ID == "" || e.Session != o.Session || e.RecordID != o.RecordID {
+			return Report{}, fmt.Errorf("measurement: outcome references unknown or mismatched exposure %q", o.ExposureID)
+		}
+		if reservedExposure[o.ExposureID] {
+			return Report{}, fmt.Errorf("measurement: duplicate explicit outcome for exposure %s", o.ExposureID)
+		}
+		reservedExposure[o.ExposureID] = true
+	}
 	sort.SliceStable(outcomes, func(i, j int) bool { return outcomes[i].Time < outcomes[j].Time })
 	for _, o := range outcomes {
 		var e exposure
 		if o.ExposureID != "" {
 			e = exposures[o.ExposureID]
-			if e.ID == "" || e.Session != o.Session || e.RecordID != o.RecordID {
-				return Report{}, fmt.Errorf("measurement: outcome references unknown or mismatched exposure %q", o.ExposureID)
-			}
 		} else {
 			for _, candidate := range legacy[o.Session+"\x00"+o.RecordID] {
-				if !usedExposure[candidate.ID] {
+				if !usedExposure[candidate.ID] && !reservedExposure[candidate.ID] {
 					e = candidate
 					break
 				}

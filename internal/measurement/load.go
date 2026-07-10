@@ -72,6 +72,10 @@ func LoadOutcomes(path string) ([]Outcome, error) {
 		if err := dec.Decode(&o); err != nil {
 			return nil, fmt.Errorf("measurement: outcomes line %d: %w", line, err)
 		}
+		var trailing any
+		if err := dec.Decode(&trailing); err != io.EOF {
+			return nil, fmt.Errorf("measurement: outcomes line %d: trailing content is forbidden", line)
+		}
 		_, timeErr := time.Parse(time.RFC3339, o.Time)
 		confirmedWithoutUse := o.Confirmed && (o.Used == nil || !*o.Used)
 		if !validHash(o.Session) || timeErr != nil || !record.ValidID(o.RecordID) || (o.ExposureID != "" && !validHash(o.ExposureID)) ||
@@ -91,16 +95,34 @@ func LoadDecisions(paths []string) ([]telemetry.Decision, error) {
 		return nil, fmt.Errorf("measurement: at least one telemetry input is required")
 	}
 	var out []telemetry.Decision
-	seen := map[string]bool{}
+	maxCounts := map[string]int{}
+	prototypes := map[string]telemetry.Decision{}
 	for _, p := range paths {
 		f, err := os.Open(p)
 		if err != nil {
 			return nil, fmt.Errorf("measurement: open telemetry %s: %w", p, err)
 		}
-		err = scanDecisions(f, p, &out, seen)
+		var fileDecisions []telemetry.Decision
+		err = scanDecisions(f, p, &fileDecisions)
 		_ = f.Close()
 		if err != nil {
 			return nil, fmt.Errorf("measurement: read decisions: %w", err)
+		}
+		counts := map[string]int{}
+		for _, d := range fileDecisions {
+			id := decisionIdentity(d)
+			counts[id]++
+			prototypes[id] = d
+		}
+		for id, n := range counts {
+			if n > maxCounts[id] {
+				maxCounts[id] = n
+			}
+		}
+	}
+	for id, n := range maxCounts {
+		for range n {
+			out = append(out, prototypes[id])
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -111,7 +133,7 @@ func LoadDecisions(paths []string) ([]telemetry.Decision, error) {
 	})
 	return out, nil
 }
-func scanDecisions(r io.Reader, path string, out *[]telemetry.Decision, seen map[string]bool) error {
+func scanDecisions(r io.Reader, path string, out *[]telemetry.Decision) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	line := 0
@@ -133,14 +155,14 @@ func scanDecisions(r io.Reader, path string, out *[]telemetry.Decision, seen map
 		if err := dec.Decode(&d); err != nil {
 			return fmt.Errorf("%s line %d: invalid telemetry: %w", path, line, err)
 		}
+		var trailing any
+		if err := dec.Decode(&trailing); err != io.EOF {
+			return fmt.Errorf("%s line %d: trailing telemetry content is forbidden", path, line)
+		}
 		if err := validateDecision(d); err != nil {
 			return fmt.Errorf("%s line %d: %w", path, line, err)
 		}
-		id := decisionIdentity(d)
-		if !seen[id] {
-			seen[id] = true
-			*out = append(*out, d)
-		}
+		*out = append(*out, d)
 	}
 	if err := sc.Err(); err != nil {
 		return err

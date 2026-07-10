@@ -38,6 +38,32 @@ func TestLoadInputsAreStrictAndPrivacySafe(t *testing.T) {
 	if _, err := measurement.LoadOutcomes(outcomes); err == nil {
 		t.Fatal("unknown raw evidence field must be rejected")
 	}
+	trailing := `{"ts":"2026-07-08T04:00:00Z","session_hash":"0123456789abcdef0123456789abcdef","record_id":"exp-0001","used":true} {"used":false}` + "\n"
+	if err := os.WriteFile(outcomes, []byte(trailing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := measurement.LoadOutcomes(outcomes); err == nil {
+		t.Fatal("trailing JSON must be rejected")
+	}
+}
+
+func TestLoadDecisionsMultisetDedupPreservesLegitimateRepeats(t *testing.T) {
+	dir := t.TempDir()
+	line := `{"ts":"2026-07-01T00:00:00Z","channel":"push","query_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","session":"0123456789abcdef0123456789abcdef","count":0,"trigger":"error"}` + "\n"
+	a, b := filepath.Join(dir, "snapshot.jsonl"), filepath.Join(dir, "overlap.jsonl")
+	if err := os.WriteFile(a, []byte(line+line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(b, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := measurement.LoadDecisions([]string{a, b})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("multiset union erased legitimate repeat or counted overlap: got %d want 2", len(got))
+	}
 }
 
 func TestLoadDecisionsFailsClosedAndSupportsExplicitArchives(t *testing.T) {

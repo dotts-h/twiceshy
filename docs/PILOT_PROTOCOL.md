@@ -19,7 +19,8 @@ rubric live in the [design-partner playbook](DESIGN_PARTNER_PLAYBOOK.md).
    any `query_text` field, unknown field, malformed line, missing file, or invalid
    timestamp rather than producing a partial result. Keep the same
    deployment salt for both windows so repeated salted query and session hashes
-   remain comparable. The report reads the active JSONL and its `.1` rotation.
+   remain comparable. Pass the active JSONL and every required rotation/archive as
+   separate, explicit `-telemetry` arguments; no generation is discovered implicitly.
 3. Create `cohorts.csv` containing only opaque team labels and already-salted
    session hashes:
 
