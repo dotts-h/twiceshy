@@ -15,6 +15,9 @@ rubric live in the [design-partner playbook](DESIGN_PARTNER_PLAYBOOK.md).
    same privacy-safe decision shape for error events (`served: []`) without calling
    twiceshy or adding context to the agent. Record deployments or workflow changes
    that could confound the comparison.
+   Pre-register the telemetry input relationship too: use the default `disjoint`
+   mode for ordinary non-overlapping rotations; use `overlap-snapshot` only when
+   files are known snapshots containing copied overlap.
 2. Enable gate-decision telemetry with raw query capture **off**. The report rejects
    any `query_text` field, unknown field, malformed line, missing file, or invalid
    timestamp rather than producing a partial result. Keep the same
@@ -55,6 +58,7 @@ rubric live in the [design-partner playbook](DESIGN_PARTNER_PLAYBOOK.md).
    twiceshy pilot-report \
      -telemetry /var/lib/twiceshy/gate-decisions.2026-07-01.jsonl \
      -telemetry /var/lib/twiceshy/gate-decisions.2026-07-15.jsonl \
+     -telemetry-mode disjoint \
      -cohorts cohorts.csv -outcomes outcomes.jsonl \
      -baseline-start 2026-07-01T00:00:00Z -baseline-end 2026-07-15T00:00:00Z \
      -treatment-start 2026-07-15T00:00:00Z -treatment-end 2026-08-12T00:00:00Z \
@@ -81,3 +85,10 @@ high exposure, narrow intervals, and incorrect reports. Report telemetry drops,
 outcome coverage, and operational confounders with every pilot result. A recommended
 commercial readiness gate is multiple teams showing lower repeated-error proxy with
 no material increase in incorrect rate—not a record-count milestone.
+
+`disjoint` concatenates every event, including bit-identical same-second events in
+different files. `overlap-snapshot` instead takes the maximum per-file multiplicity
+for an identical event, removing copied snapshot overlap while preserving repeats
+present within a file. Choosing the wrong mode can over- or under-count; the report
+rejects duplicate paths and unknown modes, but the operator must document why the
+selected relationship is true.

@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -90,14 +91,44 @@ func LoadOutcomes(path string) ([]Outcome, error) {
 	return out, nil
 }
 
-func LoadDecisions(paths []string) ([]telemetry.Decision, error) {
+type TelemetryInputMode string
+
+const (
+	TelemetryDisjoint         TelemetryInputMode = "disjoint"
+	TelemetryOverlapSnapshots TelemetryInputMode = "overlap-snapshot"
+)
+
+func LoadDecisions(paths []string, requested ...TelemetryInputMode) ([]telemetry.Decision, error) {
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("measurement: at least one telemetry input is required")
+	}
+	if len(requested) > 1 {
+		return nil, fmt.Errorf("measurement: exactly one telemetry input mode may be selected")
+	}
+	mode := TelemetryDisjoint
+	if len(requested) == 1 {
+		mode = requested[0]
+	}
+	if mode != TelemetryDisjoint && mode != TelemetryOverlapSnapshots {
+		return nil, fmt.Errorf("measurement: unknown telemetry input mode %q", mode)
 	}
 	var out []telemetry.Decision
 	maxCounts := map[string]int{}
 	prototypes := map[string]telemetry.Decision{}
+	seenPaths := map[string]bool{}
 	for _, p := range paths {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			return nil, fmt.Errorf("measurement: resolve telemetry %s: %w", p, err)
+		}
+		resolved, err := filepath.EvalSymlinks(abs)
+		if err != nil {
+			return nil, fmt.Errorf("measurement: resolve telemetry %s: %w", p, err)
+		}
+		if seenPaths[resolved] {
+			return nil, fmt.Errorf("measurement: duplicate telemetry path %s", p)
+		}
+		seenPaths[resolved] = true
 		f, err := os.Open(p)
 		if err != nil {
 			return nil, fmt.Errorf("measurement: open telemetry %s: %w", p, err)
@@ -107,6 +138,10 @@ func LoadDecisions(paths []string) ([]telemetry.Decision, error) {
 		_ = f.Close()
 		if err != nil {
 			return nil, fmt.Errorf("measurement: read decisions: %w", err)
+		}
+		if mode == TelemetryDisjoint {
+			out = append(out, fileDecisions...)
+			continue
 		}
 		counts := map[string]int{}
 		for _, d := range fileDecisions {
@@ -120,9 +155,11 @@ func LoadDecisions(paths []string) ([]telemetry.Decision, error) {
 			}
 		}
 	}
-	for id, n := range maxCounts {
-		for range n {
-			out = append(out, prototypes[id])
+	if mode == TelemetryOverlapSnapshots {
+		for id, n := range maxCounts {
+			for range n {
+				out = append(out, prototypes[id])
+			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {

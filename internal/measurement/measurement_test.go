@@ -111,6 +111,23 @@ func TestIdenticalDecisionExposuresAreUniqueAndMixedOutcomesReserveV2(t *testing
 	}
 }
 
+func TestExposureOccurrenceUsesBaseTupleNotDecisionMetadata(t *testing.T) {
+	session := "0123456789abcdef0123456789abcdef"
+	hit1, hit2 := telemetry.ServedHit{ID: "exp-0001", Score: 1}, telemetry.ServedHit{ID: "exp-0001", Score: 2}
+	d1 := telemetry.Decision{Time: "2026-07-08T01:00:00Z", Channel: "push", Trigger: "error", Session: session, QueryHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Tokens: []string{"one"}, Served: []telemetry.ServedHit{hit1}, Count: 1}
+	d2 := d1
+	d2.Tokens, d2.Served = []string{"different-metadata"}, []telemetry.ServedHit{hit2}
+	used := true
+	outs := []measurement.Outcome{{Time: "2026-07-09T00:00:00Z", ExposureID: measurement.ExposureID(d1, hit1, 0), Session: session, RecordID: "exp-0001", Used: &used}, {Time: "2026-07-09T00:01:00Z", ExposureID: measurement.ExposureID(d2, hit2, 1), Session: session, RecordID: "exp-0001", Used: &used}}
+	rep, err := measurement.Generate(measurement.Config{Baseline: measurement.Window{Start: mustTime(t, "2026-07-01T00:00:00Z"), End: mustTime(t, "2026-07-02T00:00:00Z")}, Treatment: measurement.Window{Start: mustTime(t, "2026-07-08T00:00:00Z"), End: mustTime(t, "2026-07-09T00:00:00Z")}, Cohorts: map[string]string{session: "team-a"}}, []telemetry.Decision{d1, d2}, outs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Treatment.Metrics.Exposures != 2 || rep.Treatment.Metrics.Judged != 2 {
+		t.Fatalf("metadata variants collided: %+v", rep.Treatment.Metrics)
+	}
+}
+
 func mustTime(t *testing.T, value string) time.Time {
 	t.Helper()
 	v, err := time.Parse(time.RFC3339, value)

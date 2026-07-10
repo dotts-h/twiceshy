@@ -47,7 +47,7 @@ func TestLoadInputsAreStrictAndPrivacySafe(t *testing.T) {
 	}
 }
 
-func TestLoadDecisionsMultisetDedupPreservesLegitimateRepeats(t *testing.T) {
+func TestLoadDecisionsModesPreserveDisjointAndDedupSnapshots(t *testing.T) {
 	dir := t.TempDir()
 	line := `{"ts":"2026-07-01T00:00:00Z","channel":"push","query_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","session":"0123456789abcdef0123456789abcdef","count":0,"trigger":"error"}` + "\n"
 	a, b := filepath.Join(dir, "snapshot.jsonl"), filepath.Join(dir, "overlap.jsonl")
@@ -61,8 +61,15 @@ func TestLoadDecisionsMultisetDedupPreservesLegitimateRepeats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("multiset union erased legitimate repeat or counted overlap: got %d want 2", len(got))
+	if len(got) != 3 {
+		t.Fatalf("default disjoint mode erased identical events: got %d want 3", len(got))
+	}
+	got, err = measurement.LoadDecisions([]string{a, b}, measurement.TelemetryOverlapSnapshots)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("overlap-snapshot mode = %d, %v; want 2", len(got), err)
+	}
+	if _, err := measurement.LoadDecisions([]string{a, a}); err == nil {
+		t.Fatal("duplicate telemetry paths are ambiguous and must be rejected")
 	}
 }
 

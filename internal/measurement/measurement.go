@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/dotts-h/twiceshy/internal/record"
@@ -115,6 +116,9 @@ func ExposureID(d telemetry.Decision, hit telemetry.ServedHit, occurrence ...int
 	}
 	return hex.EncodeToString(h.Sum(nil)[:16])
 }
+func exposureBase(d telemetry.Decision, hit telemetry.ServedHit) string {
+	return strings.Join([]string{d.Time, d.Channel, d.Trigger, d.Session, d.QueryHash, hit.ID}, "\x00")
+}
 func decisionIdentity(d telemetry.Decision) string {
 	b, _ := json.Marshal(d)
 	sum := sha256.Sum256(b)
@@ -129,7 +133,7 @@ func Generate(cfg Config, decisions []telemetry.Decision, outcomes []Outcome) (R
 	teams := map[string]*bucket{}
 	records := map[string]*bucket{}
 	exposures := map[string]exposure{}
-	decisionOccurrences := map[string]int{}
+	exposureOccurrences := map[string]int{}
 	teamOf := func(session string) string {
 		if t := cfg.Cohorts[session]; t != "" {
 			return t
@@ -146,9 +150,6 @@ func Generate(cfg Config, decisions []telemetry.Decision, outcomes []Outcome) (R
 			continue
 		}
 		team := teamOf(d.Session)
-		decisionKey := decisionIdentity(d)
-		occurrence := decisionOccurrences[decisionKey]
-		decisionOccurrences[decisionKey]++
 		keys := []string{arm + "\x00" + team}
 		bs := []*bucket{arms[arm], getBucket(teams, keys[0])}
 		for _, b := range bs {
@@ -159,6 +160,9 @@ func Generate(cfg Config, decisions []telemetry.Decision, outcomes []Outcome) (R
 				continue
 			}
 			key := arm + "\x00" + team + "\x00" + hit.ID
+			base := exposureBase(d, hit)
+			occurrence := exposureOccurrences[base]
+			exposureOccurrences[base]++
 			exposureID := ExposureID(d, hit, occurrence)
 			if _, duplicate := exposures[exposureID]; duplicate {
 				continue
