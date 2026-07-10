@@ -132,3 +132,14 @@ The architecture behind these terms is locked in
 - **Trap-avoidance eval** — the project's regression suite for the store
   itself: walk an agent toward each recorded trap, memory on/off, and score
   avoidance plus steps/tokens. No published suite measures this.
+- **Pilot arm** — one pre-registered, half-open UTC measurement window: `baseline`
+  observes privacy-safe error decisions without injection; `treatment` observes the
+  same cohort with injection enabled. Arms never overlap.
+- **Exposure** — one record actually served by one gate decision. Its stable
+  `exposure_id` is derived only from the decision timestamp, salted hashes, channel,
+  trigger, and record id; outcome judgements inherit the exposure's arm.
+- **Outcome judgement** — a privacy-safe `used` / `confirmed` / `incorrect` label
+  attributed to a proved exposure. It carries no transcript, evidence, or raw query.
+- **Repeated-error proxy** — a later `trigger:error` decision with the same salted
+  query hash in the same salted session and pilot arm. It is a recurrence proxy, not
+  proof that two raw errors were identical.

@@ -15,7 +15,9 @@ rubric live in the [design-partner playbook](DESIGN_PARTNER_PLAYBOOK.md).
    same privacy-safe decision shape for error events (`served: []`) without calling
    twiceshy or adding context to the agent. Record deployments or workflow changes
    that could confound the comparison.
-2. Enable gate-decision telemetry with raw query capture **off**. Keep the same
+2. Enable gate-decision telemetry with raw query capture **off**. The report rejects
+   any `query_text` field, unknown field, malformed line, missing file, or invalid
+   timestamp rather than producing a partial result. Keep the same
    deployment salt for both windows so repeated salted query and session hashes
    remain comparable. The report reads the active JSONL and its `.1` rotation.
 3. Create `cohorts.csv` containing only opaque team labels and already-salted
@@ -33,9 +35,13 @@ rubric live in the [design-partner playbook](DESIGN_PARTNER_PLAYBOOK.md).
    served exposure to `outcomes.jsonl`:
 
    ```json
-   {"ts":"2026-07-08T12:00:00Z","session_hash":"0123456789abcdef0123456789abcdef","record_id":"exp-0149","used":true,"confirmed":true,"incorrect":false}
+   {"ts":"2026-07-08T12:00:00Z","exposure_id":"89abcdef0123456789abcdef01234567","session_hash":"0123456789abcdef0123456789abcdef","record_id":"exp-0149","used":true,"confirmed":true,"incorrect":false}
    ```
 
+   `ts` is the judgement time. `exposure_id` is the v2 stable identity defined by
+   [ADR-0036](adr/ADR-0036-privacy-safe-pilot-measurement-attribution.md); the
+   judgement is assigned to that exposure's arm, even when reviewed later. Legacy
+   rows without it remain supported by deterministic session+record FIFO matching.
    `used` means the agent applied the lesson; `confirmed` is an explicit positive
    outcome; `incorrect` means the advice was wrong or harmful in context. Omit
    `used` when the transcript cannot be judged. Do not store evidence or transcript
@@ -46,7 +52,8 @@ rubric live in the [design-partner playbook](DESIGN_PARTNER_PLAYBOOK.md).
 
    ```sh
    twiceshy pilot-report \
-     -telemetry /var/lib/twiceshy/gate-decisions.jsonl \
+     -telemetry /var/lib/twiceshy/gate-decisions.2026-07-01.jsonl \
+     -telemetry /var/lib/twiceshy/gate-decisions.2026-07-15.jsonl \
      -cohorts cohorts.csv -outcomes outcomes.jsonl \
      -baseline-start 2026-07-01T00:00:00Z -baseline-end 2026-07-15T00:00:00Z \
      -treatment-start 2026-07-15T00:00:00Z -treatment-end 2026-08-12T00:00:00Z \

@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -72,7 +74,7 @@ func LoadOutcomes(path string) ([]Outcome, error) {
 		}
 		_, timeErr := time.Parse(time.RFC3339, o.Time)
 		confirmedWithoutUse := o.Confirmed && (o.Used == nil || !*o.Used)
-		if !validHash(o.Session) || timeErr != nil || !record.ValidID(o.RecordID) ||
+		if !validHash(o.Session) || timeErr != nil || !record.ValidID(o.RecordID) || (o.ExposureID != "" && !validHash(o.ExposureID)) ||
 			(o.Used == nil && !o.Confirmed && !o.Incorrect) || o.Confirmed && o.Incorrect || confirmedWithoutUse {
 			return nil, fmt.Errorf("measurement: invalid outcome line %d", line)
 		}
@@ -84,33 +86,97 @@ func LoadOutcomes(path string) ([]Outcome, error) {
 	return out, nil
 }
 
-func LoadDecisions(path string) ([]telemetry.Decision, error) {
+func LoadDecisions(paths []string) ([]telemetry.Decision, error) {
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("measurement: at least one telemetry input is required")
+	}
 	var out []telemetry.Decision
-	for _, p := range []string{path + ".1", path} {
+	seen := map[string]bool{}
+	for _, p := range paths {
 		f, err := os.Open(p)
-		if os.IsNotExist(err) {
-			continue
-		}
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("measurement: open telemetry %s: %w", p, err)
 		}
-		err = scanDecisions(f, &out)
+		err = scanDecisions(f, p, &out, seen)
 		_ = f.Close()
 		if err != nil {
 			return nil, fmt.Errorf("measurement: read decisions: %w", err)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Time != out[j].Time {
+			return out[i].Time < out[j].Time
+		}
+		return decisionIdentity(out[i]) < decisionIdentity(out[j])
+	})
 	return out, nil
 }
-func scanDecisions(r io.Reader, out *[]telemetry.Decision) error {
+func scanDecisions(r io.Reader, path string, out *[]telemetry.Decision, seen map[string]bool) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
+	line := 0
 	for sc.Scan() {
+		line++
+		if len(strings.TrimSpace(sc.Text())) == 0 {
+			return fmt.Errorf("%s line %d: empty telemetry line", path, line)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(sc.Bytes(), &fields); err != nil {
+			return fmt.Errorf("%s line %d: malformed telemetry: %w", path, line, err)
+		}
+		if _, ok := fields["query_text"]; ok {
+			return fmt.Errorf("%s line %d: query_text is forbidden in measurement input", path, line)
+		}
 		var d telemetry.Decision
-		if json.Unmarshal(sc.Bytes(), &d) == nil {
-			d.QueryText = ""
+		dec := json.NewDecoder(strings.NewReader(sc.Text()))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&d); err != nil {
+			return fmt.Errorf("%s line %d: invalid telemetry: %w", path, line, err)
+		}
+		if err := validateDecision(d); err != nil {
+			return fmt.Errorf("%s line %d: %w", path, line, err)
+		}
+		id := decisionIdentity(d)
+		if !seen[id] {
+			seen[id] = true
 			*out = append(*out, d)
 		}
 	}
-	return sc.Err()
+	if err := sc.Err(); err != nil {
+		return err
+	}
+	if line == 0 {
+		return fmt.Errorf("%s: telemetry input is empty", path)
+	}
+	return nil
+}
+
+func validateDecision(d telemetry.Decision) error {
+	if _, err := time.Parse(time.RFC3339, d.Time); err != nil {
+		return fmt.Errorf("invalid timestamp: %w", err)
+	}
+	if !validHash(d.QueryHash) {
+		return fmt.Errorf("invalid query_hash")
+	}
+	if d.Session != "" && !validHash(d.Session) {
+		return fmt.Errorf("invalid session hash")
+	}
+	if d.Channel != "push" && d.Channel != "search" {
+		return fmt.Errorf("invalid channel %q", d.Channel)
+	}
+	if d.Channel == "push" && (d.Trigger != "prompt" && d.Trigger != "error") {
+		return fmt.Errorf("invalid push trigger %q", d.Trigger)
+	}
+	if d.Channel == "search" && d.Trigger != "" {
+		return fmt.Errorf("search decision carries trigger")
+	}
+	if d.Count != len(d.Served) {
+		return fmt.Errorf("count does not match served")
+	}
+	for _, h := range d.Served {
+		if !record.ValidID(h.ID) || math.IsNaN(h.Score) || math.IsInf(h.Score, 0) {
+			return fmt.Errorf("invalid served hit")
+		}
+	}
+	return nil
 }

@@ -5,6 +5,9 @@
 package measurement
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -25,12 +28,13 @@ type Config struct {
 	Cohorts   map[string]string
 }
 type Outcome struct {
-	Time      string `json:"ts"`
-	Session   string `json:"session_hash"`
-	RecordID  string `json:"record_id"`
-	Used      *bool  `json:"used,omitempty"`
-	Confirmed bool   `json:"confirmed,omitempty"`
-	Incorrect bool   `json:"incorrect,omitempty"`
+	Time       string `json:"ts"`
+	ExposureID string `json:"exposure_id,omitempty"`
+	Session    string `json:"session_hash"`
+	RecordID   string `json:"record_id"`
+	Used       *bool  `json:"used,omitempty"`
+	Confirmed  bool   `json:"confirmed,omitempty"`
+	Incorrect  bool   `json:"incorrect,omitempty"`
 }
 type Rate struct {
 	Successes int     `json:"successes"`
@@ -67,10 +71,21 @@ type TeamSummary struct {
 	Metrics Metrics `json:"metrics"`
 }
 type RecordSummary struct {
-	Arm      string  `json:"arm"`
-	Team     string  `json:"team"`
-	RecordID string  `json:"record_id"`
-	Metrics  Metrics `json:"metrics"`
+	Arm      string        `json:"arm"`
+	Team     string        `json:"team"`
+	RecordID string        `json:"record_id"`
+	Metrics  RecordMetrics `json:"metrics"`
+}
+type RecordMetrics struct {
+	Exposures       int  `json:"exposures"`
+	Judged          int  `json:"judged"`
+	Used            int  `json:"used"`
+	Confirmed       int  `json:"confirmed"`
+	Incorrect       int  `json:"incorrect"`
+	OutcomeCoverage Rate `json:"outcome_coverage"`
+	UsedRate        Rate `json:"used_rate"`
+	HelpfulRate     Rate `json:"helpful_rate"`
+	IncorrectRate   Rate `json:"incorrect_rate"`
 }
 type Report struct {
 	Baseline  ArmSummary      `json:"baseline"`
@@ -84,6 +99,23 @@ type bucket struct {
 	errors   map[string]int
 	exposure map[string]int
 }
+type exposure struct{ ID, Arm, Team, Session, RecordID, Time string }
+
+// ExposureID is the stable privacy-safe identity for one served record exposure.
+// It contains no raw query/session data; inputs are already salted telemetry fields.
+func ExposureID(d telemetry.Decision, hit telemetry.ServedHit) string {
+	h := sha256.New()
+	for _, part := range []string{"twiceshy-exposure-v1", d.Time, d.Channel, d.Trigger, d.Session, d.QueryHash, hit.ID} {
+		_, _ = h.Write([]byte(part))
+		_, _ = h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil)[:16])
+}
+func decisionIdentity(d telemetry.Decision) string {
+	b, _ := json.Marshal(d)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:16])
+}
 
 func Generate(cfg Config, decisions []telemetry.Decision, outcomes []Outcome) (Report, error) {
 	if err := validateWindows(cfg); err != nil {
@@ -92,6 +124,7 @@ func Generate(cfg Config, decisions []telemetry.Decision, outcomes []Outcome) (R
 	arms := map[string]*bucket{"baseline": {errors: map[string]int{}, exposure: map[string]int{}}, "treatment": {errors: map[string]int{}, exposure: map[string]int{}}}
 	teams := map[string]*bucket{}
 	records := map[string]*bucket{}
+	exposures := map[string]exposure{}
 	teamOf := func(session string) string {
 		if t := cfg.Cohorts[session]; t != "" {
 			return t
@@ -118,6 +151,11 @@ func Generate(cfg Config, decisions []telemetry.Decision, outcomes []Outcome) (R
 				continue
 			}
 			key := arm + "\x00" + team + "\x00" + hit.ID
+			exposureID := ExposureID(d, hit)
+			if _, duplicate := exposures[exposureID]; duplicate {
+				continue
+			}
+			exposures[exposureID] = exposure{ID: exposureID, Arm: arm, Team: team, Session: d.Session, RecordID: hit.ID, Time: d.Time}
 			b := getBucket(records, key)
 			b.metrics.Exposures++
 			b.metrics.ExposedDecisions++
@@ -127,26 +165,47 @@ func Generate(cfg Config, decisions []telemetry.Decision, outcomes []Outcome) (R
 			b.exposure[d.Session+"\x00"+hit.ID]++
 		}
 	}
-	// Outcomes are attributable only up to the number of actual served exposures.
-	usedExposure := map[string]int{}
+	// V2 outcomes name a stable exposure id. Legacy outcomes omit it and are
+	// deterministically migrated FIFO within session+record, always inheriting the
+	// exposure's arm/time rather than the later judgement timestamp.
+	usedExposure := map[string]bool{}
+	legacy := map[string][]exposure{}
+	for _, e := range exposures {
+		key := e.Session + "\x00" + e.RecordID
+		legacy[key] = append(legacy[key], e)
+	}
+	for key := range legacy {
+		sort.Slice(legacy[key], func(i, j int) bool {
+			if legacy[key][i].Time != legacy[key][j].Time {
+				return legacy[key][i].Time < legacy[key][j].Time
+			}
+			return legacy[key][i].ID < legacy[key][j].ID
+		})
+	}
 	sort.SliceStable(outcomes, func(i, j int) bool { return outcomes[i].Time < outcomes[j].Time })
 	for _, o := range outcomes {
-		t, err := time.Parse(time.RFC3339, o.Time)
-		if err != nil || !record.ValidID(o.RecordID) {
-			continue
+		var e exposure
+		if o.ExposureID != "" {
+			e = exposures[o.ExposureID]
+			if e.ID == "" || e.Session != o.Session || e.RecordID != o.RecordID {
+				return Report{}, fmt.Errorf("measurement: outcome references unknown or mismatched exposure %q", o.ExposureID)
+			}
+		} else {
+			for _, candidate := range legacy[o.Session+"\x00"+o.RecordID] {
+				if !usedExposure[candidate.ID] {
+					e = candidate
+					break
+				}
+			}
+			if e.ID == "" {
+				return Report{}, fmt.Errorf("measurement: legacy outcome has no unclaimed exposure for %s", o.RecordID)
+			}
 		}
-		arm := armAt(cfg, t)
-		if arm == "" {
-			continue
+		if usedExposure[e.ID] {
+			return Report{}, fmt.Errorf("measurement: duplicate outcome for exposure %s", e.ID)
 		}
-		team := teamOf(o.Session)
-		expKey := o.Session + "\x00" + o.RecordID
-		capKey := arm + "\x00" + expKey
-		if arms[arm].exposure[expKey] <= usedExposure[capKey] {
-			continue
-		}
-		usedExposure[capKey]++
-		for _, b := range []*bucket{arms[arm], getBucket(teams, arm+"\x00"+team), getBucket(records, arm+"\x00"+team+"\x00"+o.RecordID)} {
+		usedExposure[e.ID] = true
+		for _, b := range []*bucket{arms[e.Arm], getBucket(teams, e.Arm+"\x00"+e.Team), getBucket(records, e.Arm+"\x00"+e.Team+"\x00"+o.RecordID)} {
 			addOutcome(b, o)
 		}
 	}
@@ -160,7 +219,7 @@ func Generate(cfg Config, decisions []telemetry.Decision, outcomes []Outcome) (R
 	}
 	for key, b := range records {
 		parts := splitKey(key)
-		rep.Records = append(rep.Records, RecordSummary{Arm: parts[0], Team: parts[1], RecordID: parts[2], Metrics: finish(b)})
+		rep.Records = append(rep.Records, RecordSummary{Arm: parts[0], Team: parts[1], RecordID: parts[2], Metrics: finishRecord(b)})
 	}
 	sort.Slice(rep.Teams, func(i, j int) bool {
 		if rep.Teams[i].Team != rep.Teams[j].Team {
@@ -247,6 +306,10 @@ func finish(b *bucket) Metrics {
 	m.IncorrectRate = wilson(m.Incorrect, m.Judged)
 	m.RepeatedErrorRate = wilson(m.RepeatedErrors, m.ErrorDecisions)
 	return m
+}
+func finishRecord(b *bucket) RecordMetrics {
+	m := b.metrics
+	return RecordMetrics{Exposures: m.Exposures, Judged: m.Judged, Used: m.Used, Confirmed: m.Confirmed, Incorrect: m.Incorrect, OutcomeCoverage: wilson(m.Judged, m.Exposures), UsedRate: wilson(m.Used, m.Judged), HelpfulRate: wilson(m.Confirmed, m.Exposures), IncorrectRate: wilson(m.Incorrect, m.Judged)}
 }
 func wilson(success, total int) Rate {
 	r := Rate{Successes: success, Total: total}

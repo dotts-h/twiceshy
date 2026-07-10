@@ -13,12 +13,12 @@ import (
 func TestGenerateBaselineTreatmentAndConfidenceSummaries(t *testing.T) {
 	session := "0123456789abcdef0123456789abcdef"
 	decisions := []telemetry.Decision{
-		{Time: "2026-07-01T01:00:00Z", Channel: "push", Trigger: "error", Session: session, QueryHash: "q1"},
-		{Time: "2026-07-01T02:00:00Z", Channel: "push", Trigger: "error", Session: session, QueryHash: "q1"},
-		{Time: "2026-07-01T03:00:00Z", Channel: "push", Trigger: "error", Session: session, QueryHash: "q1"},
-		{Time: "2026-07-08T01:00:00Z", Channel: "push", Trigger: "error", Session: session, QueryHash: "q2", Served: []telemetry.ServedHit{{ID: "exp-0001"}}, Count: 1},
-		{Time: "2026-07-08T02:00:00Z", Channel: "push", Trigger: "error", Session: session, QueryHash: "q2", Served: []telemetry.ServedHit{{ID: "exp-0001"}}, Count: 1},
-		{Time: "2026-07-08T03:00:00Z", Channel: "push", Trigger: "error", Session: session, QueryHash: "q3"},
+		{Time: "2026-07-01T01:00:00Z", Channel: "push", Trigger: "error", Session: session, QueryHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		{Time: "2026-07-01T02:00:00Z", Channel: "push", Trigger: "error", Session: session, QueryHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		{Time: "2026-07-01T03:00:00Z", Channel: "push", Trigger: "error", Session: session, QueryHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		{Time: "2026-07-08T01:00:00Z", Channel: "push", Trigger: "error", Session: session, QueryHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Served: []telemetry.ServedHit{{ID: "exp-0001"}}, Count: 1},
+		{Time: "2026-07-08T02:00:00Z", Channel: "push", Trigger: "error", Session: session, QueryHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Served: []telemetry.ServedHit{{ID: "exp-0001"}}, Count: 1},
+		{Time: "2026-07-08T03:00:00Z", Channel: "push", Trigger: "error", Session: session, QueryHash: "cccccccccccccccccccccccccccccccc"},
 	}
 	used, no := true, false
 	outcomes := []measurement.Outcome{
@@ -62,6 +62,25 @@ func TestGenerateRejectsOverlappingWindows(t *testing.T) {
 	}, nil, nil)
 	if err == nil {
 		t.Fatal("overlapping windows must fail")
+	}
+}
+
+func TestOutcomeUsesExposureIdentityAndExposureArm(t *testing.T) {
+	session := "0123456789abcdef0123456789abcdef"
+	d := telemetry.Decision{Time: "2026-07-01T01:00:00Z", Channel: "push", Trigger: "error", Session: session, QueryHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Served: []telemetry.ServedHit{{ID: "exp-0001"}}, Count: 1}
+	used := true
+	out := measurement.Outcome{Time: "2026-07-09T01:00:00Z", ExposureID: measurement.ExposureID(d, d.Served[0]), Session: session, RecordID: "exp-0001", Used: &used, Confirmed: true}
+	rep, err := measurement.Generate(measurement.Config{
+		Baseline: measurement.Window{Start: mustTime(t, "2026-07-01T00:00:00Z"), End: mustTime(t, "2026-07-02T00:00:00Z")}, Treatment: measurement.Window{Start: mustTime(t, "2026-07-08T00:00:00Z"), End: mustTime(t, "2026-07-10T00:00:00Z")}, Cohorts: map[string]string{session: "team-a"},
+	}, []telemetry.Decision{d}, []measurement.Outcome{out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Baseline.Metrics.Judged != 1 || rep.Treatment.Metrics.Judged != 0 {
+		t.Fatalf("wrong arm: baseline=%+v treatment=%+v", rep.Baseline.Metrics, rep.Treatment.Metrics)
+	}
+	if len(rep.Records) != 1 || rep.Records[0].Metrics.OutcomeCoverage.Total != 1 {
+		t.Fatalf("record denominator=%+v", rep.Records)
 	}
 }
 

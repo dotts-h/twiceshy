@@ -38,3 +38,4 @@ accepted ADR's decision — supersede it (`Status: superseded-by-NNNN`).
 | [0028](ADR-0028-push-eligibility-and-corroborating-specificity.md) | Push eligibility (kind + non-importer origin) and per-record two-token corroboration restore push precision — refines ADR-0015's df gate | Accepted |
 | [0029](ADR-0029-model-hard-trap-prospector.md) | Model-hard trap prospector — measure per-record value by running the base model without the card | Accepted |
 | [0035](ADR-0035-feature-gated-team-plan-foundation.md) | Feature-gated organization, workspace, plan entitlements, and derived quota policy | Proposed |
+| [0036](ADR-0036-privacy-safe-pilot-measurement-attribution.md) | Pilot measurement is fail-closed and attributed to stable exposures | Accepted |

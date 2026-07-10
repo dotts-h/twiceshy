@@ -24,10 +24,12 @@ func TestPilotReportJSONAndCSV(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	must(telemetry, `{"ts":"2026-07-08T01:00:00Z","channel":"push","query_hash":"q","session":"`+session+`","served":[{"id":"exp-0001","score":1}],"count":1,"trigger":"error","query_text":"must-not-leak"}`+"\n")
+	must(telemetry, `{"ts":"2026-07-08T01:00:00Z","channel":"push","query_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","session":"`+session+`","served":[{"id":"exp-0001","score":1}],"count":1,"trigger":"error"}`+"\n")
 	must(cohorts, "team,session_hash\nteam-a,"+session+"\n")
 	must(outcomes, `{"ts":"2026-07-08T02:00:00Z","session_hash":"`+session+`","record_id":"exp-0001","used":true,"confirmed":true}`+"\n")
-	args := []string{"-telemetry", telemetry, "-cohorts", cohorts, "-outcomes", outcomes, "-baseline-start", "2026-07-01T00:00:00Z", "-baseline-end", "2026-07-02T00:00:00Z", "-treatment-start", "2026-07-08T00:00:00Z", "-treatment-end", "2026-07-09T00:00:00Z"}
+	archive := filepath.Join(d, "archive.jsonl")
+	must(archive, `{"ts":"2026-07-01T01:00:00Z","channel":"push","query_hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","session":"`+session+`","count":0,"trigger":"error"}`+"\n")
+	args := []string{"-telemetry", archive, "-telemetry", telemetry, "-cohorts", cohorts, "-outcomes", outcomes, "-baseline-start", "2026-07-01T00:00:00Z", "-baseline-end", "2026-07-02T00:00:00Z", "-treatment-start", "2026-07-08T00:00:00Z", "-treatment-end", "2026-07-09T00:00:00Z"}
 	var out bytes.Buffer
 	if err := runPilotReport(append(args, "-format", "json"), &out); err != nil {
 		t.Fatal(err)
@@ -38,9 +40,6 @@ func TestPilotReportJSONAndCSV(t *testing.T) {
 	}
 	if rep.Treatment.Metrics.Used != 1 {
 		t.Fatalf("report=%+v", rep)
-	}
-	if strings.Contains(out.String(), "must-not-leak") {
-		t.Fatal("raw query leaked")
 	}
 	first := out.String()
 	out.Reset()

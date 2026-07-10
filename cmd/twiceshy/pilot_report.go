@@ -12,9 +12,21 @@ import (
 	"github.com/dotts-h/twiceshy/internal/measurement"
 )
 
+type telemetryInputs []string
+
+func (v *telemetryInputs) String() string { return fmt.Sprint([]string(*v)) }
+func (v *telemetryInputs) Set(value string) error {
+	if value == "" {
+		return errors.New("empty telemetry path")
+	}
+	*v = append(*v, value)
+	return nil
+}
+
 func runPilotReport(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("pilot-report", flag.ContinueOnError)
-	tele := fs.String("telemetry", "", "gate-decision JSONL path (also reads .1 rotation)")
+	var tele telemetryInputs
+	fs.Var(&tele, "telemetry", "gate-decision JSONL path; repeat for every explicit archive generation")
 	coh := fs.String("cohorts", "", "CSV team,session_hash cohort map")
 	outs := fs.String("outcomes", "", "strict privacy-safe outcome JSONL")
 	bs := fs.String("baseline-start", "", "baseline start RFC3339 (inclusive)")
@@ -25,7 +37,7 @@ func runPilotReport(args []string, out io.Writer) error {
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	if *tele == "" || *coh == "" || *outs == "" {
+	if len(tele) == 0 || *coh == "" || *outs == "" {
 		return errors.New("pilot-report requires -telemetry, -cohorts, and -outcomes")
 	}
 	parse := func(name, value string) (time.Time, error) {
@@ -51,7 +63,7 @@ func runPilotReport(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	decisions, err := measurement.LoadDecisions(*tele)
+	decisions, err := measurement.LoadDecisions(tele)
 	if err != nil {
 		return err
 	}
