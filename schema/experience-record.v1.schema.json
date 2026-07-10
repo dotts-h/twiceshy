@@ -280,6 +280,19 @@
           "type": "string",
           "pattern": "^https?://[^\\s]+$"
         },
+        "source_attribution": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "creator": { "type": "string" },
+            "title": { "type": "string" },
+            "license_url": { "type": "string", "pattern": "^https?://[^\\s]+$" },
+            "changes": { "type": "string" },
+            "copyright_notice": { "type": "string" },
+            "notice": { "type": "string" },
+            "license_text": { "type": "string" }
+          }
+        },
         "security_flags": {
           "type": "array",
           "items": { "type": "string" }

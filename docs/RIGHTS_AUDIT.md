@@ -24,6 +24,14 @@ investigate provenance and submit any truthful metadata correction through a
 normal corpus PR. The command never proposes `none (project-authored)` and never
 rewrites a record.
 
+Licensed third-party material is unresolved until `provenance.source_attribution`
+contains the exact evidence required by its declared license. MIT requires the
+copyright notice and license text; Apache-2.0 requires copyright, upstream NOTICE
+material, and license text; CC-BY requires creator, work title, license link,
+change description, and license text. Empty fields fail closed. These mechanical
+checks are conservative engineering controls, not a legal opinion; counsel must
+approve the final policy and pack terms before distribution.
+
 Use the CI posture after the baseline is understood:
 
 ```sh
@@ -48,17 +56,20 @@ rm -rf /tmp/twiceshy-commercial-pack
 twiceshy pack \
   -corpus /path/to/twiceshy-corpus \
   -out /tmp/twiceshy-commercial-pack \
+  -license /path/to/approved-pack-LICENSE \
   -commercial
 
 twiceshy rights-audit \
   -corpus /path/to/twiceshy-corpus \
   -manifest /tmp/twiceshy-commercial-pack/MANIFEST.json \
   -notices /tmp/twiceshy-commercial-pack/ATTRIBUTION.md \
+  -pack-license /tmp/twiceshy-commercial-pack/LICENSE \
   -json
 ```
 
-Manifest selection or notice drift fails the command. Both files are required
-together.
+Manifest selection, bundled license/notice material, or pack-level LICENSE drift
+fails the command. All three files are required together. The manifest binds the
+pack terms by SHA-256.
 
 ## Live-corpus smoke check
 

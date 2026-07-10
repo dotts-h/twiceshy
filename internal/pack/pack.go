@@ -13,6 +13,7 @@ package pack
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -39,16 +40,17 @@ type Eligibility struct {
 // Stable eligibility reason codes. Audit/report consumers key on these rather
 // than parsing human prose.
 const (
-	ReasonMissingEvidence     = "missing_evidence"
-	ReasonFactsOnly           = "facts_only"
-	ReasonProjectAuthored     = "project_authored"
-	ReasonAuthoredInternal    = "authored_internal"
-	ReasonLicensedNotice      = "licensed_notice"
-	ReasonCCBYNotice          = "cc_by_notice"
-	ReasonRestrictedCC        = "restricted_cc"
-	ReasonCopyleft            = "copyleft"
-	ReasonUnrecognizedLicense = "unrecognized_license"
-	ReasonMissingSourceURL    = "missing_source_url"
+	ReasonMissingEvidence       = "missing_evidence"
+	ReasonFactsOnly             = "facts_only"
+	ReasonProjectAuthored       = "project_authored"
+	ReasonAuthoredInternal      = "authored_internal"
+	ReasonLicensedNotice        = "licensed_notice"
+	ReasonCCBYNotice            = "cc_by_notice"
+	ReasonRestrictedCC          = "restricted_cc"
+	ReasonCopyleft              = "copyleft"
+	ReasonUnrecognizedLicense   = "unrecognized_license"
+	ReasonMissingSourceURL      = "missing_source_url"
+	ReasonMissingNoticeEvidence = "missing_notice_evidence"
 )
 
 // permissiveLicenses impose no copyleft. A record carrying one of these IDs is
@@ -126,17 +128,60 @@ func ClassifyRecord(rec *record.Record) Eligibility {
 		e.Commercial = false
 		e.Code = ReasonMissingSourceURL
 		e.Reason = "source URL required for license/attribution notice"
+		return e
+	}
+	if e.Commercial && e.NeedsAttribution && !completeSourceAttribution(rec) {
+		e.Commercial = false
+		e.Code = ReasonMissingNoticeEvidence
+		e.Reason = "complete source attribution, notice, and license text evidence required"
 	}
 	return e
+}
+
+func completeSourceAttribution(rec *record.Record) bool {
+	a := rec.Provenance.SourceAttribution
+	if a == nil || strings.TrimSpace(a.LicenseText) == "" {
+		return false
+	}
+	license := strings.ToLower(strings.TrimSpace(rec.Provenance.SourceLicense))
+	if reCCBYAttribution.MatchString(license) {
+		return allPresent(a.Creator, a.Title, a.LicenseURL, a.Changes)
+	}
+	switch license {
+	case "mit":
+		return allPresent(a.CopyrightNotice)
+	case "apache-2.0":
+		return allPresent(a.CopyrightNotice, a.Notice)
+	default:
+		// Other permissive licenses stay supported only with the conservative
+		// superset: exact copyright, notice, and license material.
+		return allPresent(a.CopyrightNotice, a.Notice)
+	}
+}
+
+func allPresent(values ...string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // AttributionEntry records a source/license notice a pack must carry. For some
 // licenses this is attribution; for permissive code licenses it ensures the
 // source and applicable license/notice obligations are not silently dropped.
 type AttributionEntry struct {
-	ID            string `json:"id"`
-	SourceLicense string `json:"source_license"`
-	SourceURL     string `json:"source_url"`
+	ID              string `json:"id"`
+	SourceLicense   string `json:"source_license"`
+	SourceURL       string `json:"source_url"`
+	Creator         string `json:"creator,omitempty"`
+	Title           string `json:"title,omitempty"`
+	LicenseURL      string `json:"license_url,omitempty"`
+	Changes         string `json:"changes,omitempty"`
+	CopyrightNotice string `json:"copyright_notice,omitempty"`
+	Notice          string `json:"notice,omitempty"`
+	LicenseText     string `json:"license_text"`
 }
 
 // Excluded records why a record was dropped from a pack.
@@ -148,10 +193,11 @@ type Excluded struct {
 // Manifest is the plan for a pack: which record ids are in, which are out (with
 // reasons), and the attribution the pack must carry.
 type Manifest struct {
-	Commercial  bool               `json:"commercial"`
-	Included    []string           `json:"included"`
-	Excluded    []Excluded         `json:"excluded"`
-	Attribution []AttributionEntry `json:"attribution"`
+	Commercial        bool               `json:"commercial"`
+	PackLicenseSHA256 string             `json:"pack_license_sha256,omitempty"`
+	Included          []string           `json:"included"`
+	Excluded          []Excluded         `json:"excluded"`
+	Attribution       []AttributionEntry `json:"attribution"`
 }
 
 // BuildManifest selects records for a pack. Packs ship `validated` records only
@@ -173,11 +219,13 @@ func BuildManifest(recs []*record.Record, commercial, includeQuarantined bool) M
 		}
 		m.Included = append(m.Included, r.ID)
 		if e.NeedsAttribution {
-			m.Attribution = append(m.Attribution, AttributionEntry{
-				ID:            r.ID,
-				SourceLicense: r.Provenance.SourceLicense,
-				SourceURL:     r.Provenance.SourceURL,
-			})
+			a := r.Provenance.SourceAttribution
+			entry := AttributionEntry{ID: r.ID, SourceLicense: r.Provenance.SourceLicense, SourceURL: r.Provenance.SourceURL}
+			if a != nil {
+				entry.Creator, entry.Title, entry.LicenseURL, entry.Changes = a.Creator, a.Title, a.LicenseURL, a.Changes
+				entry.CopyrightNotice, entry.Notice, entry.LicenseText = a.CopyrightNotice, a.Notice, a.LicenseText
+			}
+			m.Attribution = append(m.Attribution, entry)
 		}
 	}
 	sort.Strings(m.Included)
@@ -198,7 +246,17 @@ func NoticeDocument(m Manifest) []byte {
 	}
 	b.WriteString("This pack includes records from the following licensed sources. Preserve the applicable attribution, copyright, license, and NOTICE terms identified by each source and license:\n\n")
 	for _, a := range m.Attribution {
-		_, _ = fmt.Fprintf(&b, "- `%s` — %s — %s\n", a.ID, a.SourceLicense, a.SourceURL)
+		_, _ = fmt.Fprintf(&b, "## %s\n\n- Source: %s\n- License: %s\n", a.ID, a.SourceURL, a.SourceLicense)
+		if a.Creator != "" {
+			_, _ = fmt.Fprintf(&b, "- Creator: %s\n- Work title: %s\n- License link: %s\n- Changes: %s\n", a.Creator, a.Title, a.LicenseURL, a.Changes)
+		}
+		if a.CopyrightNotice != "" {
+			_, _ = fmt.Fprintf(&b, "- Copyright notice: %s\n", a.CopyrightNotice)
+		}
+		if a.Notice != "" {
+			_, _ = fmt.Fprintf(&b, "\n### Upstream NOTICE\n\n%s\n", a.Notice)
+		}
+		_, _ = fmt.Fprintf(&b, "\n### License text\n\n%s\n\n", a.LicenseText)
 	}
 	return []byte(b.String())
 }
@@ -206,9 +264,14 @@ func NoticeDocument(m Manifest) []byte {
 // ValidateCommercialArtifacts verifies that a built commercial MANIFEST.json
 // and notice document exactly match the current corpus and pack policy. It is
 // deterministic and returns every drift finding in a stable order.
-func ValidateCommercialArtifacts(recs []*record.Record, got Manifest, notices []byte) []string {
+func ValidateCommercialArtifacts(recs []*record.Record, got Manifest, notices, packLicense []byte) []string {
 	want := BuildManifest(recs, true, false)
 	var errs []string
+	if len(bytes.TrimSpace(packLicense)) == 0 {
+		errs = append(errs, "pack-level LICENSE terms are missing or empty")
+	} else {
+		want.PackLicenseSHA256 = LicenseDigest(packLicense)
+	}
 	gotJSON, gotErr := json.Marshal(got)
 	wantJSON, wantErr := json.Marshal(want)
 	if gotErr != nil || wantErr != nil || !bytes.Equal(gotJSON, wantJSON) {
@@ -218,4 +281,10 @@ func ValidateCommercialArtifacts(recs []*record.Record, got Manifest, notices []
 		errs = append(errs, "source/license notice document does not match the current commercial manifest")
 	}
 	return errs
+}
+
+// LicenseDigest binds MANIFEST.json to the exact pack-level LICENSE terms.
+func LicenseDigest(terms []byte) string {
+	sum := sha256.Sum256(terms)
+	return fmt.Sprintf("sha256:%x", sum)
 }

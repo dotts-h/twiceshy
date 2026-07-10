@@ -99,6 +99,9 @@ func TestRightsAuditValidatesCommercialPackArtifacts(t *testing.T) {
 	dir := t.TempDir()
 	manifestPath := filepath.Join(dir, "MANIFEST.json")
 	noticesPath := filepath.Join(dir, "ATTRIBUTION.md")
+	packLicensePath := filepath.Join(dir, "LICENSE")
+	packLicense := []byte("Fixture commercial pack terms\n")
+	manifest.PackLicenseSHA256 = pack.LicenseDigest(packLicense)
 	manifestJSON, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		t.Fatal(err)
@@ -109,8 +112,11 @@ func TestRightsAuditValidatesCommercialPackArtifacts(t *testing.T) {
 	if err := os.WriteFile(noticesPath, pack.NoticeDocument(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(packLicensePath, packLicense, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	var out bytes.Buffer
-	args := []string{"-corpus", testcorpus.Root(), "-json", "-manifest", manifestPath, "-notices", noticesPath}
+	args := []string{"-corpus", testcorpus.Root(), "-json", "-manifest", manifestPath, "-notices", noticesPath, "-pack-license", packLicensePath}
 	if err := runRightsAudit(args, &out); err != nil {
 		t.Fatalf("canonical pack artifacts: %v", err)
 	}
@@ -128,5 +134,25 @@ func TestRightsAuditValidatesCommercialPackArtifacts(t *testing.T) {
 	out.Reset()
 	if err := runRightsAudit(args, &out); err == nil {
 		t.Fatal("drifted notice document must fail validation")
+	}
+}
+
+func TestRightsAuditRejectsManifestTrailingData(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "MANIFEST.json")
+	noticesPath := filepath.Join(dir, "ATTRIBUTION.md")
+	licensePath := filepath.Join(dir, "LICENSE")
+	if err := os.WriteFile(manifestPath, []byte(`{"commercial":true} trailing`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(noticesPath, []byte("# notices\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(licensePath, []byte("pack terms\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := runRightsAudit([]string{"-corpus", testcorpus.Root(), "-manifest", manifestPath, "-notices", noticesPath, "-pack-license", licensePath}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("manifest trailing bytes must be rejected")
 	}
 }

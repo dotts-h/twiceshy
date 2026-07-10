@@ -29,6 +29,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1518,6 +1519,7 @@ func runPack(args []string, out io.Writer) error {
 	corpus := fs.String("corpus", ".", "corpus root (the directory containing experience/)")
 	outDir := fs.String("out", "", "output directory for the built pack")
 	commercial := fs.Bool("commercial", false, "build a commercial pack: exclude copyleft/contract-encumbered records")
+	licensePath := fs.String("license", "", "pack-level LICENSE terms to bundle (required for -commercial)")
 	includeQ := fs.Bool("include-quarantined", false, "include not-yet-validated records (inspection only)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
@@ -1525,12 +1527,29 @@ func runPack(args []string, out io.Writer) error {
 	if *outDir == "" {
 		return errors.New("pack requires -out <dir>")
 	}
+	var packLicense []byte
+	if *commercial {
+		if *licensePath == "" {
+			return errors.New("commercial pack requires -license <file> with pack-level terms")
+		}
+		data, err := os.ReadFile(*licensePath)
+		if err != nil {
+			return fmt.Errorf("reading pack-level LICENSE: %w", err)
+		}
+		packLicense = data
+		if len(bytes.TrimSpace(packLicense)) == 0 {
+			return errors.New("commercial pack LICENSE terms must not be empty")
+		}
+	}
 
 	recs, err := record.LoadCorpus(*corpus)
 	if err != nil {
 		return fmt.Errorf("loading corpus: %w", err)
 	}
 	m := pack.BuildManifest(recs, *commercial, *includeQ)
+	if *commercial {
+		m.PackLicenseSHA256 = pack.LicenseDigest(packLicense)
+	}
 
 	byID := make(map[string]*record.Record, len(recs))
 	for _, r := range recs {
@@ -1566,6 +1585,11 @@ func runPack(args []string, out io.Writer) error {
 	}
 	if err := os.WriteFile(filepath.Join(*outDir, "ATTRIBUTION.md"), pack.NoticeDocument(m), 0o644); err != nil {
 		return err
+	}
+	if *commercial {
+		if err := os.WriteFile(filepath.Join(*outDir, "LICENSE"), packLicense, 0o644); err != nil {
+			return err
+		}
 	}
 
 	kind := "open"

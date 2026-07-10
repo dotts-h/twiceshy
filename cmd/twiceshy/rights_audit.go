@@ -25,11 +25,18 @@ func runRightsAudit(args []string, out io.Writer) error {
 	failUnknown := fs.Bool("fail-on-unknown", false, "exit non-zero when rights evidence is missing, incomplete, or unrecognized")
 	manifestPath := fs.String("manifest", "", "optional commercial pack MANIFEST.json to validate")
 	noticesPath := fs.String("notices", "", "optional commercial pack ATTRIBUTION.md/source-license notice document to validate")
+	packLicensePath := fs.String("pack-license", "", "optional commercial pack LICENSE terms to validate")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	if (*manifestPath == "") != (*noticesPath == "") {
-		return errors.New("rights-audit requires -manifest and -notices together")
+	artifactArgs := 0
+	for _, value := range []string{*manifestPath, *noticesPath, *packLicensePath} {
+		if value != "" {
+			artifactArgs++
+		}
+	}
+	if artifactArgs != 0 && artifactArgs != 3 {
+		return errors.New("rights-audit requires -manifest, -notices, and -pack-license together")
 	}
 
 	recs, err := record.LoadCorpus(*corpus)
@@ -38,7 +45,7 @@ func runRightsAudit(args []string, out io.Writer) error {
 	}
 	rep := rightsaudit.Build(*corpus, recs)
 	if *manifestPath != "" {
-		validation, err := validateRightsArtifacts(recs, *manifestPath, *noticesPath)
+		validation, err := validateRightsArtifacts(recs, *manifestPath, *noticesPath, *packLicensePath)
 		if err != nil {
 			return err
 		}
@@ -66,7 +73,7 @@ func runRightsAudit(args []string, out io.Writer) error {
 	return nil
 }
 
-func validateRightsArtifacts(recs []*record.Record, manifestPath, noticesPath string) (rightsaudit.ArtifactValidation, error) {
+func validateRightsArtifacts(recs []*record.Record, manifestPath, noticesPath, packLicensePath string) (rightsaudit.ArtifactValidation, error) {
 	manifestData, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: reading manifest: %w", err)
@@ -77,11 +84,21 @@ func validateRightsArtifacts(recs []*record.Record, manifestPath, noticesPath st
 	if err := dec.Decode(&manifest); err != nil {
 		return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: parsing manifest: %w", err)
 	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("unexpected second JSON value")
+		}
+		return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: manifest has trailing data: %w", err)
+	}
 	notices, err := os.ReadFile(noticesPath)
 	if err != nil {
 		return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: reading notices: %w", err)
 	}
-	errs := pack.ValidateCommercialArtifacts(recs, manifest, notices)
+	packLicense, err := os.ReadFile(packLicensePath)
+	if err != nil {
+		return rightsaudit.ArtifactValidation{}, fmt.Errorf("rights-audit: reading pack license: %w", err)
+	}
+	errs := pack.ValidateCommercialArtifacts(recs, manifest, notices, packLicense)
 	return rightsaudit.ArtifactValidation{Requested: true, Valid: len(errs) == 0, Errors: errs}, nil
 }
 

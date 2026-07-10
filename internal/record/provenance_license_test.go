@@ -178,3 +178,28 @@ func TestProvenance_SourceFieldsSatisfyJSONSchema(t *testing.T) {
 		t.Errorf("record with source_license/source_url must satisfy the schema: %v\n--- marshaled ---\n%s", err, out)
 	}
 }
+
+func TestProvenance_SourceAttributionRoundTripsAndSatisfiesSchema(t *testing.T) {
+	r := importerDraft()
+	r.Provenance.SourceLicense = "CC-BY-4.0"
+	r.Provenance.SourceURL = "https://example.test/work"
+	r.Provenance.SourceAttribution = &record.SourceAttribution{
+		Creator: "Example Creator", Title: "Example Work",
+		LicenseURL: "https://creativecommons.org/licenses/by/4.0/",
+		Changes:    "Adapted into a concise record.", LicenseText: "Canonical legal code.",
+	}
+	out, err := record.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := record.Parse(r.Path, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Provenance.SourceAttribution == nil || got.Provenance.SourceAttribution.Creator != "Example Creator" {
+		t.Fatalf("round trip lost source attribution: %+v", got.Provenance.SourceAttribution)
+	}
+	if err := loadRecordSchema(t).Validate(frontmatterValue(t, out)); err != nil {
+		t.Fatalf("source attribution must satisfy JSON Schema: %v", err)
+	}
+}

@@ -18,6 +18,7 @@ func TestBuildClassifiesAndQueuesOnlyUnresolvedEvidence(t *testing.T) {
 		auditRecord("exp-0002", "MIT", ""),
 		auditRecord("exp-0005", "GPL-3.0-only", "https://example.test/gpl"),
 	}
+	recs[3].Provenance.SourceAttribution = &record.SourceAttribution{CopyrightNotice: "Copyright Example", LicenseText: "MIT text"}
 
 	got := rightsaudit.Build("/corpus", recs)
 	if got.SchemaVersion != 1 || got.TotalRecords != 5 || got.CommercialEligible != 1 || got.UnresolvedEvidence != 3 {

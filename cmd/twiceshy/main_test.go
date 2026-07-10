@@ -72,6 +72,12 @@ func packFixture(id, status, license, url string) *record.Record {
 		SourceLicense: license,
 		SourceURL:     url,
 	}
+	switch strings.ToLower(license) {
+	case "mit":
+		prov.SourceAttribution = &record.SourceAttribution{CopyrightNotice: "Copyright 2026 Fixture Authors", LicenseText: "Permission is hereby granted..."}
+	case "cc-by-4.0":
+		prov.SourceAttribution = &record.SourceAttribution{Creator: "Fixture Creator", Title: "Fixture Work", LicenseURL: "https://creativecommons.org/licenses/by/4.0/", Changes: "Condensed into a test record.", LicenseText: "Creative Commons Attribution 4.0 legal code"}
+	}
 	if status == "validated" {
 		v := "2026-06-18"
 		prov.ValidatedAt = &v // a validated record must record validated_at
@@ -138,9 +144,16 @@ func TestRunPackCommercialExcludesAndAttributes(t *testing.T) {
 	writeFixture(t, dir, packFixture("0105", "validated", record.SourceLicenseProjectAuthored, ""))
 
 	outDir := filepath.Join(t.TempDir(), "pack")
+	packLicense := filepath.Join(t.TempDir(), "PACK-LICENSE.txt")
+	if err := os.WriteFile(packLicense, []byte("Fixture commercial pack terms\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	var out bytes.Buffer
-	if err := run(context.Background(), []string{"pack", "-corpus", dir, "-out", outDir, "-commercial"}, &out, noEnv); err != nil {
+	if err := run(context.Background(), []string{"pack", "-corpus", dir, "-out", outDir, "-commercial", "-license", packLicense}, &out, noEnv); err != nil {
 		t.Fatalf("pack: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(outDir, "LICENSE")); err != nil || string(got) != "Fixture commercial pack terms\n" {
+		t.Fatalf("commercial pack LICENSE = %q, %v", got, err)
 	}
 
 	manifest, err := os.ReadFile(filepath.Join(outDir, "MANIFEST.json"))
@@ -170,6 +183,15 @@ func TestRunPackCommercialExcludesAndAttributes(t *testing.T) {
 		if !strings.Contains(string(attr), want) {
 			t.Errorf("ATTRIBUTION.md must describe copied-source license/notice entries (missing %q):\n%s", want, attr)
 		}
+	}
+}
+
+func TestRunPackCommercialRequiresPackLicenseTerms(t *testing.T) {
+	dir := tempCorpus(t)
+	writeFixture(t, dir, packFixture("0101", "validated", record.SourceLicenseProjectAuthored, ""))
+	err := run(context.Background(), []string{"pack", "-corpus", dir, "-out", filepath.Join(t.TempDir(), "pack"), "-commercial"}, &bytes.Buffer{}, noEnv)
+	if err == nil {
+		t.Fatal("commercial pack without pack-level LICENSE terms must fail closed")
 	}
 }
 

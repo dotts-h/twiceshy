@@ -3,6 +3,7 @@
 package pack_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/dotts-h/twiceshy/internal/pack"
@@ -76,30 +77,109 @@ func TestClassifyReasonCodesAreStableAndRecordAware(t *testing.T) {
 	}
 	licensed.Provenance.SourceURL = "https://example.test/upstream/commit/abc"
 	got = pack.ClassifyRecord(licensed)
+	if got.Commercial || got.Code != pack.ReasonMissingNoticeEvidence {
+		t.Fatalf("licensed record without complete notice evidence = %+v", got)
+	}
+	licensed.Provenance.SourceAttribution = &record.SourceAttribution{
+		CopyrightNotice: "Copyright 2026 Example Authors",
+		LicenseText:     "Permission is hereby granted...",
+	}
+	got = pack.ClassifyRecord(licensed)
 	if !got.Commercial || got.Code != pack.ReasonLicensedNotice {
-		t.Fatalf("licensed record with notice evidence = %+v", got)
+		t.Fatalf("licensed record with complete notice evidence = %+v", got)
 	}
 }
 
 func TestValidateCommercialArtifactsDetectsManifestAndNoticeDrift(t *testing.T) {
 	recs := []*record.Record{
-		rec("exp-0001", "validated", "MIT", "https://example.test/upstream/commit/abc"),
+		withMITNotice(rec("exp-0001", "validated", "MIT", "https://example.test/upstream/commit/abc")),
 		rec("exp-0002", "validated", record.SourceLicenseProjectAuthored, ""),
 	}
 	want := pack.BuildManifest(recs, true, false)
 	notices := pack.NoticeDocument(want)
-	if errs := pack.ValidateCommercialArtifacts(recs, want, notices); len(errs) != 0 {
+	packLicense := []byte("Commercial pack terms\n")
+	want.PackLicenseSHA256 = pack.LicenseDigest(packLicense)
+	if errs := pack.ValidateCommercialArtifacts(recs, want, notices, packLicense); len(errs) != 0 {
 		t.Fatalf("canonical artifacts rejected: %v", errs)
 	}
 
 	badManifest := want
 	badManifest.Attribution = nil
-	if errs := pack.ValidateCommercialArtifacts(recs, badManifest, notices); len(errs) == 0 {
+	if errs := pack.ValidateCommercialArtifacts(recs, badManifest, notices, packLicense); len(errs) == 0 {
 		t.Fatal("missing manifest notice entry must be rejected")
 	}
-	if errs := pack.ValidateCommercialArtifacts(recs, want, []byte("# incomplete\n")); len(errs) == 0 {
+	if errs := pack.ValidateCommercialArtifacts(recs, want, []byte("# incomplete\n"), packLicense); len(errs) == 0 {
 		t.Fatal("incomplete notice document must be rejected")
 	}
+	if errs := pack.ValidateCommercialArtifacts(recs, want, notices, nil); len(errs) == 0 {
+		t.Fatal("missing pack-level LICENSE terms must be rejected")
+	}
+}
+
+func TestClassifyRecordCCBYRequiresCompleteAttributionDetails(t *testing.T) {
+	r := rec("exp-0001", "validated", "CC-BY-4.0", "https://example.test/work")
+	r.Provenance.SourceAttribution = &record.SourceAttribution{
+		Creator: "Example Creator", Title: "Example Work",
+		LicenseURL:  "https://creativecommons.org/licenses/by/4.0/",
+		LicenseText: "Creative Commons Attribution 4.0 International legal code",
+	}
+	if got := pack.ClassifyRecord(r); got.Commercial || got.Code != pack.ReasonMissingNoticeEvidence {
+		t.Fatalf("missing change details must fail closed: %+v", got)
+	}
+	r.Provenance.SourceAttribution.Changes = "Condensed into an experience record; no source prose copied."
+	if got := pack.ClassifyRecord(r); !got.Commercial || got.Code != pack.ReasonCCBYNotice {
+		t.Fatalf("complete CC-BY evidence rejected: %+v", got)
+	}
+}
+
+func TestClassifyRecordApacheRequiresCopyrightNoticeAndLicenseText(t *testing.T) {
+	r := rec("exp-0001", "validated", "Apache-2.0", "https://example.test/work")
+	r.Provenance.SourceAttribution = &record.SourceAttribution{
+		CopyrightNotice: "Copyright 2026 Example", LicenseText: "Apache License Version 2.0",
+	}
+	if got := pack.ClassifyRecord(r); got.Commercial || got.Code != pack.ReasonMissingNoticeEvidence {
+		t.Fatalf("Apache record missing upstream NOTICE evidence must fail closed: %+v", got)
+	}
+	r.Provenance.SourceAttribution.Notice = "Example upstream NOTICE material"
+	if got := pack.ClassifyRecord(r); !got.Commercial || got.Code != pack.ReasonLicensedNotice {
+		t.Fatalf("complete Apache evidence rejected: %+v", got)
+	}
+}
+
+func TestNoticeDocumentBundlesLicenseAndAttributionMaterial(t *testing.T) {
+	recs := []*record.Record{
+		withMITNotice(rec("exp-0001", "validated", "MIT", "https://example.test/mit")),
+		withCCBYNotice(rec("exp-0002", "validated", "CC-BY-4.0", "https://example.test/cc")),
+	}
+	doc := string(pack.NoticeDocument(pack.BuildManifest(recs, true, false)))
+	for _, want := range []string{
+		"Copyright 2026 Example Authors", "Permission is hereby granted...",
+		"Creator: Example Creator", "Work title: Example Work",
+		"License link: https://creativecommons.org/licenses/by/4.0/",
+		"Changes: Condensed into an experience record.",
+		"Creative Commons Attribution 4.0 legal code",
+	} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("notice document missing %q:\n%s", want, doc)
+		}
+	}
+}
+
+func withMITNotice(r *record.Record) *record.Record {
+	r.Provenance.SourceAttribution = &record.SourceAttribution{
+		CopyrightNotice: "Copyright 2026 Example Authors",
+		LicenseText:     "Permission is hereby granted...",
+	}
+	return r
+}
+
+func withCCBYNotice(r *record.Record) *record.Record {
+	r.Provenance.SourceAttribution = &record.SourceAttribution{
+		Creator: "Example Creator", Title: "Example Work",
+		LicenseURL: "https://creativecommons.org/licenses/by/4.0/",
+		Changes:    "Condensed into an experience record.", LicenseText: "Creative Commons Attribution 4.0 legal code",
+	}
+	return r
 }
 
 func rec(id, status, license, url string) *record.Record {
@@ -115,8 +195,8 @@ func rec(id, status, license, url string) *record.Record {
 
 func TestBuildManifest_CommercialExcludesCopyleftAndAttributesCCBY(t *testing.T) {
 	recs := []*record.Record{
-		rec("exp-0001", "validated", "MIT", "https://example.com/upstream"),
-		rec("exp-0002", "validated", "CC-BY-4.0", "https://github.com/advisories/GHSA-x"),
+		withMITNotice(rec("exp-0001", "validated", "MIT", "https://example.com/upstream")),
+		withCCBYNotice(rec("exp-0002", "validated", "CC-BY-4.0", "https://github.com/advisories/GHSA-x")),
 		rec("exp-0003", "validated", "CC-BY-SA-4.0", "https://example/sa"),
 		rec("exp-0004", "validated", record.SourceLicenseProjectAuthored, ""),
 		rec("exp-0005", "quarantined", "MIT", ""),
