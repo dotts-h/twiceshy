@@ -1,7 +1,7 @@
 ---
 id: 0148
 title: Validate driver: preserve the journaled promote batch across an out-of-band SIGTERM (reboot/deploy) so partial work survives the next run's git reset --hard
-status: open
+status: closed
 severity: medium
 group: 0034
 depends_on: [0123]
@@ -10,7 +10,7 @@ links:
   adr:
   prs: []
   issues: []
-  regression:
+  regression: scripts/scheduled-validate.test.sh
 assets: []
 ---
 
@@ -67,3 +67,12 @@ data-safety-critical `abort()`/reset path in the production loop):
 
 Related: #0123 (parent), #0054 (run-journal resume cursor — the recovery source),
 #0084 (hold cooldown), #0122 (promotions-liveness alarm).
+
+## Close-out (2026-07-10)
+
+The driver now preserves validation-owned `experience/` and `runs/` changes on
+SIGTERM as a scoped commit and pushed recovery PR marked for manual review. A
+startup guard recovers dirty/ahead `validate/*` branches before destructive
+reset/clean hygiene, while dry-runs refuse external writes and ordinary aborts
+retain their prior cleanup behavior. The hermetic regression covers both paths
+against local bare remotes.

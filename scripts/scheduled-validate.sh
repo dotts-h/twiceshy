@@ -98,6 +98,104 @@ esac
 
 cd "$REPO"
 git fetch origin -q
+tok="$(git config --get remote.origin.url | sed -E 's#.*//[^:]+:([^@]+)@.*#\1#')"
+
+# Open the durable human-review boundary for an interrupted batch. Recovery PRs
+# carry ANOMALY so merge_due never auto-merges partial promote/adapt work.
+open_recovery_pr() {
+	local recovery_branch="$1" recovery_runid="$2" reason="$3" body pr
+	body="⚠️ **ANOMALY — interrupted validation batch.** ${reason}. Recovered already-persisted validation artifacts from \`${recovery_runid}\`; review manually. This PR will NOT auto-merge."
+	pr="$(jq -nc --arg t "validate(${recovery_runid}): recover interrupted batch" --arg b "$body" --arg h "$recovery_branch" \
+		'{title:$t,body:$b,head:$h,base:"main"}' |
+		curl -fsS -X POST "$API/pulls" -H "Authorization: token $tok" -H "Content-Type: application/json" -d @- |
+		jq -r '.number')"
+	printf '%s\n' "$pr"
+}
+
+# Stage only validation-owned paths. In particular, never let either recovery or
+# the normal batch commit turn arbitrary checkout files into validation changes.
+stage_validation_artifacts() {
+	git add -A -- experience/
+	# runs/ may not exist yet when TERM lands during intake, before the driver
+	# creates it. Still stage tracked deletions when the path existed in HEAD.
+	if [ -d runs ] || [ -n "$(git ls-files -- runs/)" ]; then
+		git add -A -- runs/
+	fi
+}
+
+commit_validation_artifacts() {
+	local recovery_runid="$1" reason="$2"
+	stage_validation_artifacts
+	git diff --cached --quiet && return 0
+	git commit -q \
+		-m "validate(${recovery_runid}): recover interrupted batch" \
+		-m "${reason}. Partial autonomous validation artifacts preserved for manual review (issue 0148)." \
+		-m "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+}
+
+# Turn a partial in-flight batch into a commit + pushed recovery PR. Used by the
+# TERM trap; startup recovery below covers SIGKILL/reboot/OOM where no trap runs.
+preserve_partial_run() {
+	local reason="$1" code="${2:-143}" recovery_branch recovery_runid ahead pr
+	trap - TERM
+	recovery_branch="$(git branch --show-current)"
+	case "$recovery_branch" in
+	validate/*) ;;
+	*) echo "validate: interrupted outside a validate branch — no batch to preserve" >&2; exit "$code" ;;
+	esac
+	recovery_runid="${recovery_branch#validate/}"
+	commit_validation_artifacts "$recovery_runid" "$reason"
+	ahead="$(git rev-list --count origin/main..HEAD)"
+	if [ "$ahead" -eq 0 ]; then
+		echo "validate: interrupted before validation artifacts were persisted (${recovery_runid})" >&2
+		exit "$code"
+	fi
+	if [ "$DRYRUN" = "1" ]; then
+		echo "validate: ${reason}; partial batch committed locally on ${recovery_branch} (dry-run: not pushed)" >&2
+		exit "$code"
+	fi
+	git push -q -u origin "$recovery_branch"
+	pr="$(open_recovery_pr "$recovery_branch" "$recovery_runid" "$reason")"
+	notify "twiceshy validate: recovered interrupted batch ${recovery_branch} as PR #${pr}; held for manual review"
+	echo "validate: recovered interrupted batch ${recovery_branch} as PR #${pr}; held for manual review" >&2
+	exit "$code"
+}
+
+# Before the destructive reset/clean hygiene, recover a validate branch left by
+# an out-of-band kill. If only unrelated changes exist, fail closed: do not reset
+# them and do not smuggle them into the batch.
+recover_interrupted_startup() {
+	local recovery_branch recovery_runid scoped unrelated ahead pr
+	recovery_branch="$(git branch --show-current)"
+	case "$recovery_branch" in validate/*) ;; *) return 0 ;; esac
+	recovery_runid="${recovery_branch#validate/}"
+	scoped="$(git status --porcelain -- experience/ runs/)"
+	unrelated="$(git status --porcelain -- . ':(exclude)experience/**' ':(exclude)runs/**')"
+	ahead="$(git rev-list --count origin/main..HEAD)"
+	if [ -z "$scoped" ] && [ "$ahead" -eq 0 ]; then
+		if [ -n "$unrelated" ]; then
+			echo "validate: interrupted branch ${recovery_branch} has unrelated changes; refusing reset" >&2
+			exit 1
+		fi
+		git checkout main -q
+		git branch -D "$recovery_branch" -q
+		return 0
+	fi
+	if [ "$DRYRUN" = "1" ]; then
+		echo "validate: interrupted batch ${recovery_branch} found; dry-run refuses recovery push and reset" >&2
+		exit 1
+	fi
+	commit_validation_artifacts "$recovery_runid" "Recovered at startup after out-of-band termination"
+	git push -q -u origin "$recovery_branch"
+	pr="$(open_recovery_pr "$recovery_branch" "$recovery_runid" "Recovered at startup after out-of-band termination")"
+	notify "twiceshy validate: recovered interrupted batch ${recovery_branch} as PR #${pr}; held for manual review"
+	echo "validate: recovered interrupted batch ${recovery_branch} as PR #${pr}; held for manual review"
+	# This invocation's work is recovery. A later timer tick starts a fresh batch.
+	exit 0
+}
+
+recover_interrupted_startup
+
 git checkout main -q
 git reset --hard origin/main -q
 git fetch origin main -q || true
@@ -107,9 +205,8 @@ if git rev-parse --verify -q origin/main >/dev/null; then
 fi
 # Sweep untracked stragglers from a prior crashed run (a missing pathspec is a
 # no-op, not an error) so the next batch never commits a stale manifest/record.
+# The startup guard above is what makes this destructive hygiene safe.
 git clean -fdq -- experience/ runs/
-
-tok="$(git config --get remote.origin.url | sed -E 's#.*//[^:]+:([^@]+)@.*#\1#')"
 
 # --- Phase 2: merge any prior validate batch whose soak has elapsed -----------
 # A PR still OPEN past the soak (not vetoed-by-close) and green is merged. The
@@ -162,11 +259,13 @@ fi
 runid="run-$(date -u +%Y%m%dT%H%M%SZ)"
 branch="validate/${runid}"
 git checkout -b "$branch" -q
+trap 'preserve_partial_run "SIGTERM interrupted validation" 143' TERM
 
 export TWICESHY_JUDGE_URL="$JUDGE_URL"
 [ -n "${TWICESHY_ALERT_URL:-}" ] && export TWICESHY_ALERT_URL
 
 abort() {
+	trap - TERM
 	echo "$1" >&2
 	notify "twiceshy validate: $1"
 	git checkout main -q
@@ -212,14 +311,17 @@ esac
 rm -f "$REPO/runs/${runid}-promote.err" "$REPO/runs/${runid}-adapt.err"
 
 # Batch the whole night into ONE commit (status, not diff — new files are untracked).
-status="$(git status --porcelain)"
+# Only driver-owned paths belong in the batch; unrelated checkout files are never
+# silently swept into an autonomous validation PR.
+status="$(git status --porcelain -- experience/ runs/)"
 if [ -z "$status" ]; then
+	trap - TERM
 	echo "validate: nothing changed this run (${runid})"
 	git checkout main -q
 	git branch -D "$branch" -q
 	exit 0
 fi
-git add -A
+stage_validation_artifacts
 git commit -q \
 	-m "validate(${runid}): nightly promote/adapt batch" \
 	-m "Autonomous validation run (issue 0043, ADR-0013 §2). One commit = the rollback boundary; this PR is the held queue — CLOSE it to veto the batch. anomaly=${anomaly}." \
@@ -227,6 +329,7 @@ git commit -q \
 sha="$(git rev-parse HEAD)"
 
 if [ "$DRYRUN" = "1" ]; then
+	trap - TERM
 	echo "[dry-run] would push ${branch} and open a veto-window PR (anomaly=${anomaly}, sha=${sha})"
 	git checkout main -q
 	git branch -D "$branch" -q # leave no local branch behind on repeated dry-runs
@@ -244,6 +347,7 @@ pr="$(jq -nc --arg t "validate(${runid}): nightly promote/adapt batch" --arg b "
 	curl -fsS -X POST "$API/pulls" -H "Authorization: token $tok" -H "Content-Type: application/json" -d @- |
 	jq -r '.number')"
 
+trap - TERM
 git checkout main -q
 notify "twiceshy validate: opened PR #${pr} (${runid}); soak ${SOAK}s, close to veto$([ "$anomaly" = 1 ] && echo ' — ANOMALY, held for review')"
 echo "done: ${runid}, PR #${pr}, anomaly=${anomaly}"

@@ -1,7 +1,7 @@
 ---
 id: 0149
 title: sync-forgejo.sh derives the API base with userinfo credentials left in — crashes on token-embedded origin URLs
-status: open
+status: closed
 severity: medium
 group: 
 depends_on: []
@@ -10,7 +10,7 @@ links:
   adr:
   prs: []
   issues: []
-  regression:
+  regression: scripts/sync-forgejo.test.sh
 assets: []
 ---
 
