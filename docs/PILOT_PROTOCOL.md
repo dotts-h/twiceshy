@@ -4,6 +4,9 @@ This protocol measures whether twiceshy changes engineering-agent outcomes in a
 partner team. It is an operational evaluation, not billing telemetry and not a
 claim that an observational comparison proves causality.
 
+Recruitment, consent preparation, onboarding, outreach drafts, and the final decision
+rubric live in the [design-partner playbook](DESIGN_PARTNER_PLAYBOOK.md).
+
 ## Pilot design
 
 1. Agree a baseline window with injection disabled (recommended: 14 days), then a
