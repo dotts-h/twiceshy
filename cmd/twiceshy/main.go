@@ -14,6 +14,7 @@
 //	twiceshy doctor <name> -corpus <dir>              run a doctor (staleness | revalidate)
 //	twiceshy eval   -corpus <dir> -db <file>          report retrieval recall@k / MRR
 //	twiceshy corpus-quality -corpus <dir>              report corpus quality + rights coverage
+//	twiceshy pilot-report -telemetry <jsonl> ...       compare design-partner pilot windows
 //	twiceshy usage-flush -corpus <dir> -db <file>  materialize usage counters into provenance.usage
 //	twiceshy corpus-merge-check -corpus <dir> -base <ref> -head <ref>
 //	twiceshy corpus-pr-paths -corpus <dir> -base <ref> -head <ref>
@@ -198,7 +199,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|learned|draft|promote|repromote|adapt|intake-reports|intake-records|intake-issues|retro-intake|screen|report|pack|doctor|eval|corpus-quality|usage-flush|gold-add|judge-eval|prospect|corpus-merge-check|corpus-pr-paths|nextid|token> [flags]")
+		return errors.New("usage: twiceshy <index|serve|healthcheck|ingest|learned|draft|promote|repromote|adapt|intake-reports|intake-records|intake-issues|retro-intake|screen|report|pack|doctor|eval|corpus-quality|pilot-report|usage-flush|gold-add|judge-eval|prospect|corpus-merge-check|corpus-pr-paths|nextid|token> [flags]")
 	}
 	switch args[0] {
 	case "index":
@@ -239,6 +240,8 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return runEval(ctx, args[1:], out, getenv)
 	case "corpus-quality":
 		return runCorpusQuality(args[1:], out)
+	case "pilot-report":
+		return runPilotReport(args[1:], out)
 	case "usage-flush":
 		return runUsageFlush(ctx, args[1:], out)
 	case "gold-add":
@@ -264,7 +267,7 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	case "token":
 		return runToken(ctx, args[1:], out, getenv)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, learned, draft, promote, repromote, adapt, intake-reports, intake-records, intake-issues, retro-intake, screen, report, pack, doctor, eval, corpus-quality, usage-flush, gold-add, judge-eval, prospect, self-audit, similarity, author, corpus-merge-check, corpus-pr-paths, nextid, token, or idf-build)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want index, serve, healthcheck, ingest, learned, draft, promote, repromote, adapt, intake-reports, intake-records, intake-issues, retro-intake, screen, report, pack, doctor, eval, corpus-quality, pilot-report, usage-flush, gold-add, judge-eval, prospect, self-audit, similarity, author, corpus-merge-check, corpus-pr-paths, nextid, token, or idf-build)", args[0])
 	}
 }
 
