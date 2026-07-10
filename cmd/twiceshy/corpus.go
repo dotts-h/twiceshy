@@ -47,14 +47,19 @@ func parseMergeParams(name string, args []string) (mergecheck.MergeParams, error
 	return p, nil
 }
 
-func runNextID(ctx context.Context, args []string, out io.Writer) error {
+func runNextID(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	fs := flag.NewFlagSet("nextid", flag.ContinueOnError)
 	corpus := fs.String("corpus", ".", "corpus root")
 	base := fs.String("base", "", "base git ref")
+	openPRs := fs.Bool("open-prs", false, "also allocate ids above records on open corpus PRs (Forgejo API, #0121)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	id, err := nextIDForCorpus(ctx, *corpus, *base)
+	floors, err := openPRFloors(ctx, *corpus, *openPRs, getenv)
+	if err != nil {
+		return fmt.Errorf("getting open PR floors: %w", err)
+	}
+	id, err := nextIDForCorpus(ctx, *corpus, *base, floors...)
 	if err != nil {
 		return err
 	}

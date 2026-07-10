@@ -33,7 +33,7 @@ func TestIntakeReports_MaterializesQueueIntoCorpus(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runIntakeReports([]string{"-corpus", corpus, "-queue", queue}, &buf); err != nil {
+	if err := runIntakeReports([]string{"-corpus", corpus, "-queue", queue}, &buf, noEnv); err != nil {
 		t.Fatalf("runIntakeReports: %v", err)
 	}
 
@@ -77,7 +77,7 @@ func TestIntakeReports_BaseAllocatesPastBaseMax(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runIntakeReports([]string{"-corpus", corpus, "-queue", queue, "-base", base}, &buf); err != nil {
+	if err := runIntakeReports([]string{"-corpus", corpus, "-queue", queue, "-base", base}, &buf, noEnv); err != nil {
 		t.Fatalf("runIntakeReports: %v", err)
 	}
 
@@ -103,7 +103,7 @@ func recordIDs(recs []*record.Record) []string {
 
 func TestIntakeReports_RequiresQueueFlag(t *testing.T) {
 	var buf bytes.Buffer
-	err := runIntakeReports([]string{"-corpus", "."}, &buf)
+	err := runIntakeReports([]string{"-corpus", "."}, &buf, noEnv)
 	if err == nil || !strings.Contains(err.Error(), "-queue") {
 		t.Fatalf("intake-reports without -queue must fail clearly; got %v", err)
 	}
@@ -129,7 +129,7 @@ func TestIntakeReports_SkipsMalformedEntry(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runIntakeReports([]string{"-corpus", corpus, "-queue", queue}, &buf); err != nil {
+	if err := runIntakeReports([]string{"-corpus", corpus, "-queue", queue}, &buf, noEnv); err != nil {
 		t.Fatalf("runIntakeReports: %v", err)
 	}
 	recs, _ := record.LoadCorpus(corpus)

@@ -24,11 +24,12 @@ import (
 // against the live corpus, so draft files spooled before this drain never collide.
 // Malformed spool entries are skipped and removed, and write failures abort to keep
 // the draft spooled for retry.
-func runIntakeRecords(args []string, out io.Writer) error {
+func runIntakeRecords(args []string, out io.Writer, getenv func(string) string) error {
 	fs := flag.NewFlagSet("intake-records", flag.ContinueOnError)
 	corpus := fs.String("corpus", ".", "corpus root (the directory containing experience/)")
 	queue := fs.String("queue", "", "record queue directory written by `serve -record-queue` (required)")
 	base := fs.String("base", "", "base git ref for merge-safe id allocation")
+	openPRs := fs.Bool("open-prs", false, "also allocate ids above records on open corpus PRs (Forgejo API, #0121)")
 	repo := fs.String("repo", "", "corpus repository identifier for app-scoped fingerprints")
 	if err := parseFlags(fs, args); err != nil {
 		return err
@@ -68,7 +69,13 @@ func runIntakeRecords(args []string, out io.Writer) error {
 		return fmt.Errorf("building index: %w", err)
 	}
 
-	id, err := ingest.NextIDWithBase(context.Background(), ix, *corpus, *base)
+	// Idle ticks (empty queue) skip the scan — no network dependency for an
+	// id the drain never uses.
+	floors, err := openPRFloors(context.Background(), *corpus, *openPRs && len(files) > 0, getenv)
+	if err != nil {
+		return fmt.Errorf("getting open PR floors: %w", err)
+	}
+	id, err := ingest.NextIDWithBase(context.Background(), ix, *corpus, *base, floors...)
 	if err != nil {
 		return fmt.Errorf("allocating next id: %w", err)
 	}

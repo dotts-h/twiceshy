@@ -69,7 +69,7 @@ func TestReport_IntakeMaterializesDispute(t *testing.T) {
 	if err := runReport([]string{"-id", "exp-0043", "-queue", queue, "-evidence", "promotion was wrong"}, &buf); err != nil {
 		t.Fatalf("runReport: %v", err)
 	}
-	if err := runIntakeReports([]string{"-corpus", corpus, "-queue", queue}, &buf); err != nil {
+	if err := runIntakeReports([]string{"-corpus", corpus, "-queue", queue}, &buf, noEnv); err != nil {
 		t.Fatalf("runIntakeReports: %v", err)
 	}
 

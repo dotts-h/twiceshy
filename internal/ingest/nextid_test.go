@@ -94,6 +94,35 @@ func TestNextID_UsesBaseRefMaxWhenLocalIsStale(t *testing.T) {
 	}
 }
 
+// A floor is one more high-water mark: an id known allocated elsewhere but
+// visible in neither the index, the local tree, nor the base ref — the open-PR
+// scan (#0121). Allocation lands strictly above every floor.
+func TestNextIDWithBase_FloorWins(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeDisk(t, root, "experience/2026/2768-local-max.md")
+
+	t.Run("a floor above every other source wins", func(t *testing.T) {
+		got, err := ingest.NextIDWithBase(ctx, openIx(t), root, "", 3846)
+		if err != nil {
+			t.Fatalf("NextIDWithBase: %v", err)
+		}
+		if got != "exp-3847" {
+			t.Errorf("got %q, want exp-3847 (one past the open-PR floor)", got)
+		}
+	})
+
+	t.Run("a stale floor below the tree does not drag allocation down", func(t *testing.T) {
+		got, err := ingest.NextIDWithBase(ctx, openIx(t), root, "", 10)
+		if err != nil {
+			t.Fatalf("NextIDWithBase: %v", err)
+		}
+		if got != "exp-2769" {
+			t.Errorf("got %q, want exp-2769 (disk max still wins over a lower floor)", got)
+		}
+	})
+}
+
 func writeDisk(t *testing.T, root, rel string) {
 	t.Helper()
 	p := filepath.Join(root, filepath.FromSlash(rel))

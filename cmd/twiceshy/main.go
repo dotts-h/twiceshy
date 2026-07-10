@@ -209,7 +209,7 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	case "pack":
 		return runPack(args[1:], out)
 	case "ingest":
-		return runIngest(ctx, args[1:], out)
+		return runIngest(ctx, args[1:], out, getenv)
 	case "learned":
 		return runLearned(ctx, args[1:], out, getenv)
 	case "draft":
@@ -221,9 +221,9 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	case "adapt":
 		return runAdapt(ctx, args[1:], out, getenv)
 	case "intake-reports":
-		return runIntakeReports(args[1:], out)
+		return runIntakeReports(args[1:], out, getenv)
 	case "intake-records":
-		return runIntakeRecords(args[1:], out)
+		return runIntakeRecords(args[1:], out, getenv)
 	case "intake-issues":
 		return runIntakeIssues(args[1:], out)
 	case "retro-intake":
@@ -255,7 +255,7 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	case "corpus-pr-paths":
 		return runCorpusPRPaths(ctx, args[1:], out)
 	case "nextid":
-		return runNextID(ctx, args[1:], out)
+		return runNextID(ctx, args[1:], out, getenv)
 	case "idf-build":
 		return runIdfBuild(args[1:], out)
 	case "token":
@@ -589,7 +589,7 @@ func importSource(name, ecosystem string) (ingest.Source, error) {
 // Records are deduped against the corpus (via ingest.Prepare) and within the
 // batch, then written to disk for a human to open as a PR — git is the trust
 // boundary, so nothing is born validated and nothing reaches the push channel.
-func runIngest(ctx context.Context, args []string, out io.Writer) error {
+func runIngest(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	// The source is the first positional; flags follow it. Go's flag package
 	// stops at the first non-flag arg, so pull the source off the front before
 	// parsing (otherwise `ingest go -corpus X` would leave -corpus unparsed).
@@ -603,6 +603,7 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 	author := fs.String("author", "twiceshy-importer", "provenance author recorded on imported records")
 	ecosystem := fs.String("ecosystem", "", "OSV ecosystem for osv-live (e.g. npm, PyPI, Go); empty = Go")
 	base := fs.String("base", "", "base git ref for merge-safe id allocation")
+	openPRs := fs.Bool("open-prs", false, "also allocate ids above records on open corpus PRs (Forgejo API, #0121)")
 	if err := parseFlags(fs, args[1:]); err != nil {
 		return err
 	}
@@ -622,7 +623,14 @@ func runIngest(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 
-	id, err := ingest.NextIDWithBase(ctx, ix, c.corpus, *base)
+	// The scan is skipped when nothing will be written — a dry run or an empty
+	// draft set must not acquire a network dependency (or burn API calls) for
+	// an id it never uses.
+	floors, err := openPRFloors(ctx, c.corpus, *openPRs && !*dryRun && len(drafts) > 0, getenv)
+	if err != nil {
+		return err
+	}
+	id, err := ingest.NextIDWithBase(ctx, ix, c.corpus, *base, floors...)
 	if err != nil {
 		return err
 	}
@@ -1321,7 +1329,7 @@ func reportEvidence(report *record.Record) string {
 	return report.Body
 }
 
-func nextIDForCorpus(ctx context.Context, corpus, base string) (string, error) {
+func nextIDForCorpus(ctx context.Context, corpus, base string, floors ...int) (string, error) {
 	tmp, err := os.CreateTemp("", "twiceshy-nextid-*.db")
 	if err != nil {
 		return "", err
@@ -1334,7 +1342,34 @@ func nextIDForCorpus(ctx context.Context, corpus, base string) (string, error) {
 		return "", err
 	}
 	defer func() { _ = ix.Close() }()
-	return ingest.NextIDWithBase(ctx, ix, corpus, base)
+	return ingest.NextIDWithBase(ctx, ix, corpus, base, floors...)
+}
+
+func openPRFloors(ctx context.Context, corpusRoot string, openPRs bool, getenv func(string) string) ([]int, error) {
+	if !openPRs {
+		return nil, nil
+	}
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	api, token, err := ingest.ForgejoAPIFromOrigin(ctx, corpusRoot, getenv)
+	if err != nil {
+		return nil, err
+	}
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		// A redirect would strip the Authorization header cross-host and
+		// resurface as a misleading 401; an API root that redirects is a
+		// misconfig — surface the 3xx itself via the non-2xx check instead.
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	maxID, err := ingest.OpenPRMaxID(ctx, client, api, token)
+	if err != nil {
+		return nil, err
+	}
+	return []int{maxID}, nil
 }
 
 // runIntakeReports drains the report queue (ADR-0013 §E1, #0042): each queued
@@ -1344,11 +1379,12 @@ func nextIDForCorpus(ctx context.Context, corpus, base string) (string, error) {
 // queued before this drain never collide. A malformed queue entry is logged and
 // removed (it cannot wedge the nightly drain); a write failure aborts so the
 // entry is retried next run.
-func runIntakeReports(args []string, out io.Writer) error {
+func runIntakeReports(args []string, out io.Writer, getenv func(string) string) error {
 	fs := flag.NewFlagSet("intake-reports", flag.ContinueOnError)
 	corpus := fs.String("corpus", ".", "corpus root (the directory containing experience/)")
 	queue := fs.String("queue", "", "report queue directory written by `serve -report-queue` (required)")
 	base := fs.String("base", "", "base git ref for merge-safe id allocation")
+	openPRs := fs.Bool("open-prs", false, "also allocate ids above records on open corpus PRs (Forgejo API, #0121)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -1364,7 +1400,13 @@ func runIntakeReports(args []string, out io.Writer) error {
 		return fmt.Errorf("listing report queue: %w", err)
 	}
 
-	id, err := nextIDForCorpus(context.Background(), *corpus, *base)
+	// Idle ticks (empty queue) skip the scan — no network dependency for an
+	// id the drain never uses.
+	floors, err := openPRFloors(context.Background(), *corpus, *openPRs && len(files) > 0, getenv)
+	if err != nil {
+		return fmt.Errorf("getting open PR floors: %w", err)
+	}
+	id, err := nextIDForCorpus(context.Background(), *corpus, *base, floors...)
 	if err != nil {
 		return fmt.Errorf("allocating next id: %w", err)
 	}

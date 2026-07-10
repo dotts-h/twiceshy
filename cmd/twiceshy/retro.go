@@ -38,6 +38,7 @@ func runRetroIntake(ctx context.Context, args []string, out io.Writer, getenv fu
 	maxTraps := fs.Int("max-traps", 0, "max candidates accepted per transcript (0 = default)")
 	dryRun := fs.Bool("dry-run", false, "analyze and report, but write nothing and dequeue nothing")
 	base := fs.String("base", "", "base git ref for merge-safe id allocation")
+	openPRs := fs.Bool("open-prs", false, "also allocate ids above records on open corpus PRs (Forgejo API, #0121)")
 	telemetryLog := fs.String("telemetry-log", getenv("TWICESHY_TELEMETRY_LOG"), "decision log for served-vs-used helpfulness join (empty = disabled)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
@@ -87,10 +88,12 @@ func runRetroIntake(ctx context.Context, args []string, out io.Writer, getenv fu
 
 	alerter := notify.New(getenv("TWICESHY_ALERT_URL"), getenv("NTFY_TOKEN"), slog.Default())
 	return drainRetro(ctx, analyzer, ix, c.repo, c.corpus, *queue, retroOpts{
-		limit:  *limit,
-		dryRun: *dryRun,
-		now:    time.Now().UTC().Format("2006-01-02"),
-		base:   *base,
+		limit:   *limit,
+		dryRun:  *dryRun,
+		now:     time.Now().UTC().Format("2006-01-02"),
+		base:    *base,
+		openPRs: *openPRs,
+		getenv:  getenv,
 	}, join, alerter, out)
 }
 
@@ -125,10 +128,12 @@ type helpfulJoin struct {
 
 // retroOpts bounds one drain.
 type retroOpts struct {
-	limit  int
-	dryRun bool
-	now    string // YYYY-MM-DD stamped on created records
-	base   string // optional base ref for merge-safe id allocation
+	limit   int
+	dryRun  bool
+	now     string // YYYY-MM-DD stamped on created records
+	base    string // optional base ref for merge-safe id allocation
+	openPRs bool   // also allocate ids above records on open corpus PRs
+	getenv  func(string) string
 }
 
 const (
@@ -154,7 +159,13 @@ func drainRetro(ctx context.Context, analyzer retro.Analyzer, ix *index.Index, r
 		return fmt.Errorf("listing retro queue: %w", err)
 	}
 
-	id, err := nextIDForCorpus(ctx, corpus, opts.base)
+	// A dry run writes nothing and an empty queue drains nothing — neither
+	// may acquire a network dependency for an id it never uses.
+	floors, err := openPRFloors(ctx, corpus, opts.openPRs && !opts.dryRun && len(files) > 0, opts.getenv)
+	if err != nil {
+		return fmt.Errorf("getting open PR floors: %w", err)
+	}
+	id, err := nextIDForCorpus(ctx, corpus, opts.base, floors...)
 	if err != nil {
 		return fmt.Errorf("allocating next id: %w", err)
 	}

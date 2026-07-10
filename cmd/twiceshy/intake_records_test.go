@@ -51,7 +51,7 @@ func TestIntakeRecords_MaterializesQueueIntoCorpus(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runIntakeRecords([]string{"-corpus", corpus, "-queue", queue}, &buf); err != nil {
+	if err := runIntakeRecords([]string{"-corpus", corpus, "-queue", queue}, &buf, noEnv); err != nil {
 		t.Fatalf("runIntakeRecords: %v", err)
 	}
 
@@ -129,7 +129,7 @@ func TestIntakeRecords_DropsKnownDuplicateEntry(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runIntakeRecords([]string{"-corpus", corpus, "-queue", queue}, &buf); err != nil {
+	if err := runIntakeRecords([]string{"-corpus", corpus, "-queue", queue}, &buf, noEnv); err != nil {
 		t.Fatalf("runIntakeRecords: %v", err)
 	}
 
@@ -148,7 +148,7 @@ func TestIntakeRecords_DropsKnownDuplicateEntry(t *testing.T) {
 
 func TestIntakeRecords_RequiresQueueFlag(t *testing.T) {
 	var buf bytes.Buffer
-	err := runIntakeRecords([]string{"-corpus", "."}, &buf)
+	err := runIntakeRecords([]string{"-corpus", "."}, &buf, noEnv)
 	if err == nil || !strings.Contains(err.Error(), "-queue") {
 		t.Fatalf("intake-records without -queue must fail clearly; got %v", err)
 	}
@@ -169,7 +169,7 @@ func TestIntakeRecords_SkipsMalformedEntry(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runIntakeRecords([]string{"-corpus", corpus, "-queue", queue}, &buf); err != nil {
+	if err := runIntakeRecords([]string{"-corpus", corpus, "-queue", queue}, &buf, noEnv); err != nil {
 		t.Fatalf("runIntakeRecords: %v", err)
 	}
 

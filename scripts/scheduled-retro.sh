@@ -66,7 +66,7 @@ git fetch origin -q && git checkout main -q && git reset --hard origin/main -q &
 git fetch origin main -q || true
 BASE_ARGS=()
 if git rev-parse --verify -q origin/main >/dev/null; then
-  BASE_ARGS=(-base origin/main)
+  BASE_ARGS=(-base origin/main -open-prs)
 fi
 
 dbtmp="$(mktemp -u).retro.db"

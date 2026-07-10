@@ -42,6 +42,33 @@ func TestNtfyAuthorization(t *testing.T) {
 	}
 }
 
+// Every scheduled script that opts into merge-safe allocation must ALSO scan
+// open PRs: -base alone reproduces the #0121 collision, and nothing but this
+// guard pins the pairing when a script is edited or a new one copies BASE_ARGS.
+func TestScheduledScriptsPairBaseWithOpenPRs(t *testing.T) {
+	for _, script := range []string{"scheduled-import.sh", "scheduled-retro.sh", "scheduled-validate.sh"} {
+		t.Run(script, func(t *testing.T) {
+			src, err := os.ReadFile(filepath.Join("..", "..", "scripts", script))
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for i, line := range strings.Split(string(src), "\n") {
+				if !strings.Contains(line, "-base origin/main") {
+					continue
+				}
+				found = true
+				if !strings.Contains(line, "-open-prs") {
+					t.Errorf("%s:%d sets -base without -open-prs: %s", script, i+1, strings.TrimSpace(line))
+				}
+			}
+			if !found {
+				t.Errorf("%s no longer sets -base origin/main — update this guard alongside the allocation flags", script)
+			}
+		})
+	}
+}
+
 func TestCorpusStallAlarmReportsOpenRedPR(t *testing.T) {
 	h := newShellHarness(t)
 	alertURL := "http://ntfy.invalid/stall"

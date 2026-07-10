@@ -28,6 +28,8 @@
 
 | logging-buffer race (#0092) | `TestStructuredLoggingEmitsSafeFields` flaked under the full `-race` suite (passed alone, intermittently red in `go test -race ./...`) | `withRequestLog` logs its access-log line AFTER the inner handler returns, in the HTTP server's own per-request goroutine — sequenced after the response is already sent. A TCP write-then-read gives no Go memory-model happens-before edge, so the test's direct, unsynchronized `buf.String()` read right after the client call returned was racing that goroutine, regardless of how reliably "in order" the bytes arrive in practice. Fix: wrap the buffer in a mutex-guarded `syncBuffer` instead of asserting on access ordering — no timing change, assertions unmodified | `internal/server` · `TestStructuredLoggingEmitsSafeFields` (`-race -count=300` clean) · dogfood exp-3405 |
 
+| id-collision (#0121) | parallel-open corpus PRs allocated colliding exp-NNNN ranges (549/625 records in the 0105 drain) — each PR green against the main it saw, dup-id CI red only once a sibling merged | merge-safe allocation high-watered against `-base origin/main` only; drafts on OPEN, unmerged PRs were invisible to the allocator. Fix: `OpenPRMaxID` scans open PRs' changed files via the Forgejo API (pagination terminates only on an EMPTY page — a short page is not last when the server caps `limit` below the request) and feeds `NextIDWithBase` a floor; fail-loud on API errors, token never echoed. Residual same-seconds race = TECH_DEBT M3 (central reservation) | `internal/ingest` · `TestOpenPRMaxID`, `TestForgejoAPIFromOrigin`, `TestNextIDWithBase_FloorWins` |
+
 ## Dead-ends (tried and rejected)
 
 | what we tried | why it can't work |
